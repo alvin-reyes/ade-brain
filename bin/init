@@ -125,8 +125,11 @@ sed -i '' -e "s#^project_name = .*#project_name = \"$NAME\"#" -e "s#^output_fold
 if [ ! -d "$H/.git" ]; then git -C "$H" init -q && git -C "$H" branch -M main 2>/dev/null; fi
 git -C "$H" config core.hooksPath .githooks
 for f in $FOLDERS; do HUB="$H" "$H/bin/new" "$f" >/dev/null || exit 1; done
-# the first repo is checked out by the first folder: deep work (bin/work) goes there
-if [ -n "$FIRST_REPO_ROW" ]; then f1="${FOLDERS%% *}"; printf '%s\n' "$FIRST_REPO_ROW" >> "$H/$f1/ACCESS.md"; fi
+# the first folder checks out the repos: deep work (bin/work <folder> [repo]) goes there; rows go inside its Code table
+if [ -n "$REPO_ROWS" ]; then
+  f1="${FOLDERS%% *}"; A="$H/$f1/ACCESS.md"
+  ROWS="$REPO_ROWS" awk '{print} /^## Code/{c=1} c && /^\|---/{printf "%s", ENVIRON["ROWS"]; c=0}' "$A" > "$A.tmp" && mv "$A.tmp" "$A"
+fi
 HUB="$H" "$H/bin/journal" hub "Hub initialized from ai-agent-hub-template: $TITLE for $CLIENT (owner $OWNER); folders: $FOLDERS" 
 echo "initialized $NAME ($TITLE for $CLIENT) at $H"
 echo "next: cd $H && bin/setup && bin/brain index && bin/doctor, then start $CLAUDE_CMD there"
