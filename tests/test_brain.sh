@@ -44,6 +44,11 @@ AGENT_OLLAMA_URL="$U" AGENT_BRAIN_PATHS="$X" bin/brain index >/dev/null
 AGENT_OLLAMA_URL="$U" bin/brain search "renewal servicing" | head -1 | grep -q "STATE.md" || fail "edit indexed"
 rm "$X/portal.md"; AGENT_OLLAMA_URL="$U" AGENT_BRAIN_PATHS="$X" bin/brain index >/dev/null
 bin/brain search "discovery" | grep -q "portal.md" && fail "deleted file still indexed"
+# 3b. a memory file's front matter titles its first section (name: description)
+printf -- '---\nname: sms-feedback\ndescription: content team on SMS lead alerts\nmetadata:\n  type: project\n---\n\nThey find the alerts noisy.\n' > memory/sms-feedback.md
+AGENT_OLLAMA_URL="$U" bin/brain index >/dev/null
+out=$(AGENT_OLLAMA_URL="$U" bin/brain search "sms feedback noisy"); echo "$out" | head -1 | grep -q "memory/sms-feedback.md:1  sms-feedback: content team on SMS lead alerts" || fail "front matter is the heading: [$out]"
+echo "$out" | head -2 | tail -1 | grep -q "metadata" && fail "front matter left in the snippet"
 # 4. skipped trees and bad input
 mkdir -p .claude/skills/x repos/y; echo "# zebra skill" > .claude/skills/x/SKILL.md; echo "# zebra repo" > repos/y/a.md
 AGENT_OLLAMA_URL="$U" bin/brain index >/dev/null; bin/brain search zebra | grep -q . && fail "skills or repos indexed"

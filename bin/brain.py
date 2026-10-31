@@ -92,7 +92,18 @@ def chunks_of(text):
             body = body[cut:].strip()
         out.append((start, head, body))
 
-    for i, line in enumerate(text.splitlines(), 1):
+    lines = text.splitlines()
+    # YAML front matter (memory files): its name and description title the first section; the block itself is dropped
+    first = 0
+    if lines and lines[0].strip() == "---" and "---" in [l.strip() for l in lines[1:]]:
+        end = [l.strip() for l in lines[1:]].index("---") + 1
+        fm = dict(re.match(r"(\w+):\s*(.*)", l).groups() for l in lines[1:end] if re.match(r"\w+:\s*\S", l))
+        name, desc = fm.get("name", "").strip('"'), fm.get("description", "").strip('"')
+        head = f"{name}: {desc}" if name and desc else name or desc
+        first = end + 1
+    for i, line in enumerate(lines, 1):
+        if i <= first:
+            continue
         if re.match(r"#{1,6}\s", line):
             flush()
             head, start, buf = line.lstrip("#").strip(), i, []
