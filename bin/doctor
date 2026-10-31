@@ -7,6 +7,9 @@ for t in claude gh git ssh node python3 curl gitleaks ${HUB_TOOLS:-}; do
   if command -v "$t" >/dev/null; then v=$("$t" --version 2>&1 | head -1); [ "$t" = ssh ] && v=$(ssh -V 2>&1); line OK "$t" "$(echo "$v" | cut -c1-60)"
   else line MISSING "$t" "not installed"; fi
 done
+line OK "claude install" "$(claude_cmd) ($(claude_home))"
+m="$(claude_home)/projects/$(encode_path "$H")/memory"
+if [ -L "$m" ] && [ "$(readlink "$m")" = "$H/memory" ]; then line OK "hub memory link" "$m"; else line MISSING "hub memory link" "run bin/setup (links into $(claude_home))"; fi
 k="$(remote_key)"; [ -z "$k" ] || { [ -f "$k" ] && line OK "remote ssh key" "$k" || line MISSING "remote ssh key" "$k (ask the owner; never copy it into the hub)"; }
 [ "${DOCTOR_OFFLINE:-}" = 1 ] && exit 0
 command -v gh >/dev/null && { gh auth status >/dev/null 2>&1 && line OK "github login" "$(gh api user --jq .login 2>/dev/null)" || line MISSING "github login" "gh auth login"; }

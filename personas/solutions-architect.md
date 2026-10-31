@@ -1,6 +1,7 @@
 ---
 title: Solutions Architect
 folders: projects/architecture projects/proposals projects/client
+model: opus
 briefing_focus: Report proposals awaiting a decision and their dates.
 ---
 

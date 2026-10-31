@@ -1,6 +1,7 @@
 ---
 title: Frontend Engineer
 folders: projects/web projects/design-system projects/client
+model: sonnet
 briefing_focus: Report visual or accessibility regressions and slow pages.
 ---
 

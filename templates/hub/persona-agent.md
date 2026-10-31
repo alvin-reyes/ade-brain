@@ -1,5 +1,6 @@
 ---
 name: {{SLUG}}
+model: {{MODEL}}
 description: The {{TITLE}} for {{CLIENT}}. Use for any {{CLIENT}} task that spans folders or needs judgement: planning, trade-offs, proposals, client emails, reviews, deploy decisions.
 ---
 

@@ -1,6 +1,7 @@
 ---
 title: QA / Test Engineer
 folders: projects/app projects/test-plans ops/environments
+model: sonnet
 briefing_focus: Report failing suites, flaky tests and releases waiting on sign-off.
 ---
 

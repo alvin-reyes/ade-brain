@@ -22,6 +22,10 @@ done
 [[ "$CL" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "work: bad claude command '$CL'" >&2; exit 2; }
 [ -z "$MODEL" ] || [[ "$MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
 case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
+# hub.conf defaults (HUB_MODEL, HUB_EFFORT, HUB_AGENT_MODEL); the command line wins
+[ -n "$MODEL" ] || MODEL="${HUB_MODEL:-}"; [ -n "$EFFORT" ] || EFFORT="${HUB_EFFORT:-}"
+[ -z "$MODEL" ] || [[ "$MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
+case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
 F="${POS[0]:-}"; WANT="${POS[1]:-}"
 [ -n "$F" ] && [ -d "$H/$F" ] && [ -f "$H/$F/ACCESS.md" ] || { echo "$USAGE" >&2; exit 2; }
 A="$H/$F/ACCESS.md"
@@ -46,6 +50,8 @@ fi
 # the folder's specialist agents (front matter + body) go to the session as --agents JSON
 agents=""
 if ls "$H/$F/.claude/agents/"*.md >/dev/null 2>&1; then
+  # the hub's agent model goes first, so any --agent-model on the command line overrides it
+  [ -n "${HUB_AGENT_MODEL:-}" ] && [[ "$HUB_AGENT_MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] && ASET="model  $HUB_AGENT_MODEL"$'\n'"$ASET"
   agents=$(WORK_ASET="$ASET" python3 - "$H/$F/.claude/agents/"*.md <<'PY'
 import json, sys, os
 out = {}

@@ -1,6 +1,7 @@
 ---
 title: Data Engineer
 folders: projects/pipelines projects/warehouse projects/reporting ops/data-quality
+model: sonnet
 briefing_focus: Report stale tables, failed runs and data-quality alerts.
 ---
 

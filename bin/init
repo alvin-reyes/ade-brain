@@ -3,23 +3,25 @@
 #   bin/init --persona <slug> --client "<name>" --owner "<name>" [--name <hub-name>] [--dest <dir>]
 #            [--folders "projects/a ops/b"] [--repo owner/name[=~/checkout]]... [--code-owner <gh org>]
 #            [--remote user@host[:port]] [--remote-key <path>] [--remote-dir <dir>] [--staging-url <url>]
-#            [--secret <name>]... [--briefing HH:MM] [--claude <cmd>]
+#            [--secret <name>]... [--briefing HH:MM] [--claude <cmd>] [--claude-config-dir <dir>]
+#            [--model M] [--effort low|medium|high|xhigh|max] [--agent-model M] [--briefing-model M]
 #   bin/init --list   the personas
 # --dest copies the template to a new directory first (it must not exist); without it, initializes in place.
 # Never overwrites an initialized hub (one with hub.conf). Writes no secrets: only names and locations.
 set -u; T="$(cd "$(dirname "$0")/.." && pwd)"
-usage() { sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 fm() { awk -v k="$2" -F': ' '/^---$/{n++; next} n==1 && $1==k {sub(/^[^:]*: /,""); print; exit}' "$1"; }
 if [ "${1:-}" = --list ]; then for p in "$T"/personas/*.md; do printf '%-28s %s\n' "$(basename "$p" .md)" "$(fm "$p" title)"; done; exit 0; fi
 PERSONA=""; CLIENT=""; OWNER=""; NAME=""; DEST=""; FOLDERS=""; REPOS=(); CODE_OWNER=""; REMOTE=""; RKEY=""; RDIR=""
-STAGING=""; SECRETS=(); BRIEF="08:00"; CLAUDE_CMD="claude"
+STAGING=""; SECRETS=(); BRIEF="08:00"; CLAUDE_CMD="claude"; CFG=""; MODEL=""; EFFORT=""; AMODEL="sonnet"; BMODEL="haiku"
 while [ $# -gt 0 ]; do
   [ $# -ge 2 ] || usage
   case "$1" in
     --persona) PERSONA="$2";; --client) CLIENT="$2";; --owner) OWNER="$2";; --name) NAME="$2";; --dest) DEST="$2";;
     --folders) FOLDERS="$2";; --repo) REPOS+=("$2");; --code-owner) CODE_OWNER="$2";; --remote) REMOTE="$2";;
     --remote-key) RKEY="$2";; --remote-dir) RDIR="$2";; --staging-url) STAGING="$2";; --secret) SECRETS+=("$2");;
-    --briefing) BRIEF="$2";; --claude) CLAUDE_CMD="$2";; *) usage;;
+    --briefing) BRIEF="$2";; --claude) CLAUDE_CMD="$2";; --claude-config-dir) CFG="$2";; --model) MODEL="$2";;
+    --effort) EFFORT="$2";; --agent-model) AMODEL="$2";; --briefing-model) BMODEL="$2";; *) usage;;
   esac; shift 2
 done
 [ -n "$PERSONA" ] && [ -n "$CLIENT" ] && [ -n "$OWNER" ] || usage
@@ -30,7 +32,18 @@ slugify() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+
 [[ "$BRIEF" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || { echo "init: --briefing must be HH:MM" >&2; exit 2; }
 [[ "$CLAUDE_CMD" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "init: bad --claude command" >&2; exit 2; }
 for s in ${SECRETS[@]+"${SECRETS[@]}"}; do [[ "$s" =~ ^[a-z0-9-]+$ ]] || { echo "init: secret names are a-z 0-9 - (names only, never values)" >&2; exit 2; }; done
-TITLE="$(fm "$P" title)"; [ -n "$FOLDERS" ] || FOLDERS="$(fm "$P" folders)"; FOCUS="$(fm "$P" briefing_focus)"
+TITLE="$(fm "$P" title)"; [ -n "$MODEL" ] || MODEL="$(fm "$P" model)"; [ -n "$FOLDERS" ] || FOLDERS="$(fm "$P" folders)"; FOCUS="$(fm "$P" briefing_focus)"
+for m in "$MODEL" "$AMODEL" "$BMODEL"; do [ -z "$m" ] || [[ "$m" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "init: bad model name '$m'" >&2; exit 2; }; done
+case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "init: --effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
+# the install's config dir: --claude-config-dir, else the CLAUDE_CONFIG_DIR its wrapper exports, else ~/.claude
+if [ -z "$CFG" ]; then
+  w="$(command -v "$CLAUDE_CMD" 2>/dev/null)"
+  if [ -n "$w" ] && [ -f "$w" ] && [ "$(wc -c < "$w")" -lt 65536 ]; then
+    CFG="$(sed -n "s/^[[:space:]]*export[[:space:]][[:space:]]*CLAUDE_CONFIG_DIR=[\"']\{0,1\}\([^\"']*\).*/\1/p" "$w" | head -1)"
+    CFG="${CFG//\$\{HOME\}/$HOME}"; CFG="${CFG//\$HOME/$HOME}"; CFG="${CFG/#\~/$HOME}"
+  fi
+  [ -n "$CFG" ] || CFG="$HOME/.claude"
+fi
 for f in $FOLDERS; do [[ "$f" =~ ^(projects|ops)/[a-z0-9-]+$ ]] || { echo "init: bad folder '$f'" >&2; exit 2; }; done
 H="$T"
 if [ -n "$DEST" ]; then
@@ -42,12 +55,12 @@ fi
 # the persona text, with client and owner filled in
 PERSONA_TEXT="$(awk '/^---$/{n++; next} n>=2' "$P" | sed -e "s#{{CLIENT}}#$CLIENT#g" -e "s#{{OWNER}}#$OWNER#g")"
 render() {  # template output: fill placeholders (multi-line values via python, so no sed escaping problems)
-  NAME="$NAME" TITLE="$TITLE" CLIENT="$CLIENT" OWNER="$OWNER" PERSONA="$PERSONA_TEXT" SLUG="$PERSONA" \
+  NAME="$NAME" TITLE="$TITLE" CLIENT="$CLIENT" OWNER="$OWNER" PERSONA="$PERSONA_TEXT" SLUG="$PERSONA" MODEL="${MODEL:-inherit}" \
   REPO_ROWS="$REPO_ROWS" REMOTE_TXT="$REMOTE_TXT" STAGING_TXT="${STAGING:-none}" SECRETS_TXT="$SECRETS_TXT" FOLDER_LIST="$FOLDER_LIST" \
   python3 - "$1" "$2" <<'PY'
 import os, sys
 s = open(sys.argv[1]).read()
-for k, e in [("NAME","NAME"),("TITLE","TITLE"),("CLIENT","CLIENT"),("OWNER","OWNER"),("PERSONA","PERSONA"),("SLUG","SLUG"),
+for k, e in [("NAME","NAME"),("TITLE","TITLE"),("CLIENT","CLIENT"),("OWNER","OWNER"),("PERSONA","PERSONA"),("SLUG","SLUG"),("MODEL","MODEL"),
              ("REPO_ROWS","REPO_ROWS"),("REMOTE","REMOTE_TXT"),("STAGING","STAGING_TXT"),("SECRETS","SECRETS_TXT"),("FOLDER_LIST","FOLDER_LIST")]:
     s = s.replace("{{%s}}" % k, os.environ[e])
 open(sys.argv[2], "w").write(s)
@@ -77,6 +90,11 @@ HUB_PERSONA_TITLE=$(q "$TITLE")
 HUB_CLIENT=$(q "$CLIENT")
 HUB_OWNER=$(q "$OWNER")
 HUB_CLAUDE=$(q "$CLAUDE_CMD")
+HUB_CLAUDE_CONFIG_DIR=$(q "$CFG")
+HUB_MODEL=$(q "$MODEL")
+HUB_EFFORT=$(q "$EFFORT")
+HUB_AGENT_MODEL=$(q "$AMODEL")
+HUB_BRIEFING_MODEL=$(q "$BMODEL")
 HUB_CODE_OWNER=$(q "$CODE_OWNER")
 HUB_REPOS=$(q "${REPO_NAMES# }")
 HUB_REMOTE_HOST=$(q "$RHOST")

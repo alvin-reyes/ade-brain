@@ -6,7 +6,7 @@ NAME="${F#*/}"; AGENT="$(agent_name "$F")"
 put() {  # template destination
   local dst="$H/$2"; if [ -e "$dst" ]; then echo "kept $2"; return; fi
   mkdir -p "$(dirname "$dst")"
-  sed -e "s#{{FOLDER}}#$F#g" -e "s#{{NAME}}#$NAME#g" -e "s#{{AGENT}}#$AGENT#g" -e "s#{{HUB}}#$H#g" -e "s#{{TITLE}}#$(persona_title)#g" -e "s#{{HUBNAME}}#$(hub_name)#g" "$H/templates/$1" > "$dst"; echo "made $2"
+  sed -e "s#{{FOLDER}}#$F#g" -e "s#{{NAME}}#$NAME#g" -e "s#{{AGENT}}#$AGENT#g" -e "s#{{HUB}}#$H#g" -e "s#{{TITLE}}#$(persona_title)#g" -e "s#{{AGENT_MODEL}}#${HUB_AGENT_MODEL:-sonnet}#g" -e "s#{{HUBNAME}}#$(hub_name)#g" "$H/templates/$1" > "$dst"; echo "made $2"
 }
 put CLAUDE.md "$F/CLAUDE.md"; put ACCESS.md "$F/ACCESS.md"; put STATE.md "$F/STATE.md"
 put MEMORY.md "$F/memory/MEMORY.md"; put folder-settings.json "$F/.claude/settings.json"; put agent.md ".claude/agents/$AGENT.md"

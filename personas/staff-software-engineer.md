@@ -1,6 +1,7 @@
 ---
 title: Staff Software Engineer
 folders: projects/app projects/proposals projects/client ops/environments
+model: opus
 briefing_focus: Flag design decisions that are waiting too long.
 ---
 

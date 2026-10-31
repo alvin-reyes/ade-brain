@@ -34,28 +34,47 @@ Or locally, without GitHub: `bin/init ... --dest ~/Project/acme-sre` copies the 
 | `--staging-url` | checked by `bin/doctor` |
 | `--secret <name>` | secret **names** `bin/doctor` checks for in the Keychain (never values) |
 | `--briefing HH:MM` | weekday morning-briefing time, this Mac's local time |
-| `--claude <cmd>` | the Claude Code command to run (`claude`, or a wrapper such as `claude-personal`) |
+| `--claude <cmd>` | the Claude install to run: `claude`, or a wrapper such as `claude-personal` that sets its own `CLAUDE_CONFIG_DIR` |
+| `--claude-config-dir <dir>` | that install's config dir (default: read from the wrapper, else `~/.claude`); memory and skills are linked there |
+| `--model M`, `--effort E` | the default model and effort for sessions (`bin/work`) and the persona agent (default: the persona's) |
+| `--agent-model M` | the folder agents' model (default `sonnet`) |
+| `--briefing-model M` | the morning briefing's model (default `haiku`) |
 
 ## Personas
 
-| Slug | Role | Default folders |
-|---|---|---|
-| `data-engineer` | Data Engineer | projects/pipelines, projects/warehouse, projects/reporting, ops/data-quality |
-| `devops-sre` | DevOps / Site Reliability Engineer | ops/environments, ops/ci-cd, ops/monitoring, ops/security |
-| `engineering-manager` | Engineering Manager | projects/team, projects/delivery, projects/client |
-| `fractional-cto` | Fractional CTO | projects/strategy, projects/proposals, projects/vendors, projects/client |
-| `frontend-engineer` | Frontend Engineer | projects/web, projects/design-system, projects/client |
-| `ml-ai-engineer` | ML / AI Engineer | projects/models, projects/agents, projects/evals, projects/proposals |
-| `mobile-engineer` | Mobile Engineer | projects/ios, projects/android, projects/releases |
-| `qa-test-engineer` | QA / Test Engineer | projects/app, projects/test-plans, ops/environments |
-| `security-engineer` | Security Engineer | ops/security, ops/access, projects/app, projects/reviews |
-| `solutions-architect` | Solutions Architect | projects/architecture, projects/proposals, projects/client |
-| `staff-software-engineer` | Staff Software Engineer | projects/app, projects/proposals, projects/client, ops/environments |
-| `tech-lead` | Tech Lead | projects/app, projects/planning, projects/client |
-| `technical-product-manager` | Technical Product Manager | projects/roadmap, projects/specs, projects/client |
+| Slug | Role | Default folders | Model |
+|---|---|---|---|
+| `data-engineer` | Data Engineer | projects/pipelines, projects/warehouse, projects/reporting, ops/data-quality | sonnet |
+| `devops-sre` | DevOps / Site Reliability Engineer | ops/environments, ops/ci-cd, ops/monitoring, ops/security | sonnet |
+| `engineering-manager` | Engineering Manager | projects/team, projects/delivery, projects/client | sonnet |
+| `fractional-cto` | Fractional CTO | projects/strategy, projects/proposals, projects/vendors, projects/client | opus |
+| `frontend-engineer` | Frontend Engineer | projects/web, projects/design-system, projects/client | sonnet |
+| `ml-ai-engineer` | ML / AI Engineer | projects/models, projects/agents, projects/evals, projects/proposals | opus |
+| `mobile-engineer` | Mobile Engineer | projects/ios, projects/android, projects/releases | sonnet |
+| `qa-test-engineer` | QA / Test Engineer | projects/app, projects/test-plans, ops/environments | sonnet |
+| `security-engineer` | Security Engineer | ops/security, ops/access, projects/app, projects/reviews | opus |
+| `solutions-architect` | Solutions Architect | projects/architecture, projects/proposals, projects/client | opus |
+| `staff-software-engineer` | Staff Software Engineer | projects/app, projects/proposals, projects/client, ops/environments | opus |
+| `tech-lead` | Tech Lead | projects/app, projects/planning, projects/client | sonnet |
+| `technical-product-manager` | Technical Product Manager | projects/roadmap, projects/specs, projects/client | sonnet |
 
-Add a persona: copy one in `personas/`, keep the front matter (`title`, `folders`, `briefing_focus`) and the
+Add a persona: copy one in `personas/`, keep the front matter (`title`, `folders`, `model`, `briefing_focus`) and the
 `{{CLIENT}}`/`{{OWNER}}` placeholders, and write its habits.
+
+## Models and Claude installs
+
+Every hub pins one Claude install (`HUB_CLAUDE`) and its config dir (`HUB_CLAUDE_CONFIG_DIR`), so `bin/setup` links
+memory and skills into the right place wherever you run it, and `bin/doctor` says when the link is missing. Defaults in
+`hub.conf`, all overridable per run:
+
+| Setting | Used by | Override |
+|---|---|---|
+| `HUB_MODEL`, `HUB_EFFORT` | deep-work sessions, the persona agent | `bin/work --model M --effort E` |
+| `HUB_AGENT_MODEL` | folder agents (`.claude/agents/*.md`) | `bin/work --agent-model [name=]M`, or edit the agent file |
+| `HUB_BRIEFING_MODEL` | `bin/briefing` | `AGENT_BRIEFING_MODEL=M bin/briefing` |
+| `HUB_CLAUDE` | every session the hub starts | `bin/work --claude CMD`, `AGENT_CLAUDE=CMD` |
+
+Other providers (OpenRouter, Ollama, a second account) work through a wrapper command passed as `--claude`.
 
 ## What a hub has
 

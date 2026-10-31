@@ -1,6 +1,7 @@
 ---
 title: ML / AI Engineer
 folders: projects/models projects/agents projects/evals projects/proposals
+model: opus
 briefing_focus: Report eval regressions, cost spikes and open guardrail questions.
 ---
 

@@ -27,6 +27,7 @@ history** of the work and runs Claude Code agents that know them. Client code st
 | `bin/secret <name>` | a secret from the Keychain (`--set`, `--has`, `--forget`, `--list`) |
 | `bin/doctor` | what this Mac can reach; never prints a secret |
 | `bin/briefing`, `bin/schedule install` | the morning briefing, and its weekday launchd job |
+| `bin/work --model M --agent-model [name=]M` | override this hub's models for one session (defaults in `hub.conf`) |
 | `bin/sync`, then `bin/sync --yes` | review, then commit and push hub files only |
 
 Rules: [CLAUDE.md](CLAUDE.md). Verification: `bash tests/run.sh`.

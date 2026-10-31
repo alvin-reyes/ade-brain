@@ -1,6 +1,7 @@
 ---
 title: Tech Lead
 folders: projects/app projects/planning projects/client
+model: sonnet
 briefing_focus: List stories that are blocked or have no owner.
 ---
 

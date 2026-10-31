@@ -1,6 +1,7 @@
 ---
 title: Engineering Manager
 folders: projects/team projects/delivery projects/client
+model: sonnet
 briefing_focus: Report slipping commitments and decisions needed from leadership.
 ---
 

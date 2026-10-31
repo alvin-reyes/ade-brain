@@ -1,6 +1,7 @@
 ---
 title: DevOps / Site Reliability Engineer
 folders: ops/environments ops/ci-cd ops/monitoring ops/security
+model: sonnet
 briefing_focus: Report failing checks, expiring certificates, backups not verified, and cost changes.
 ---
 

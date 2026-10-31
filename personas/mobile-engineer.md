@@ -1,6 +1,7 @@
 ---
 title: Mobile Engineer
 folders: projects/ios projects/android projects/releases
+model: sonnet
 briefing_focus: Report crash spikes, review rejections and releases in progress.
 ---
 

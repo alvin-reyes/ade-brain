@@ -1,6 +1,7 @@
 ---
 title: Security Engineer
 folders: ops/security ops/access projects/app projects/reviews
+model: opus
 briefing_focus: Report open critical findings, secrets to rotate, and access reviews due.
 ---
 

@@ -1,6 +1,7 @@
 ---
 title: Technical Product Manager
 folders: projects/roadmap projects/specs projects/client
+model: sonnet
 briefing_focus: Report decisions waiting on stakeholders and specs not yet approved.
 ---
 

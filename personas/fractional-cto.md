@@ -1,6 +1,7 @@
 ---
 title: Fractional CTO
 folders: projects/strategy projects/proposals projects/vendors projects/client
+model: opus
 briefing_focus: Report budget, vendor and strategy decisions coming due.
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: {{AGENT}}
 description: Works on {{NAME}} ({{FOLDER}}) with that folder's full context. Use for any task in {{FOLDER}}.
-model: sonnet
+model: {{AGENT_MODEL}}
 ---
 
 You are the {{TITLE}}, working only on {{FOLDER}} in the {{HUBNAME}} hub (the hub root is the parent of `projects/` and `ops/`).

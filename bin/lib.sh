@@ -1,7 +1,9 @@
 #!/bin/bash
 # Shared helpers for bin/ scripts. HUB and CLAUDE_HOME may be overridden (tests).
 hub_root() { if [ -n "${HUB:-}" ]; then echo "$HUB"; else (cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd); fi; }
-claude_home() { echo "${CLAUDE_HOME:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"; }
+# the Claude config dir this hub's install uses (memory and skills are linked there): CLAUDE_HOME (tests), else
+# HUB_CLAUDE_CONFIG_DIR from hub.conf, else the shell's CLAUDE_CONFIG_DIR, else ~/.claude
+claude_home() { echo "${CLAUDE_HOME:-${HUB_CLAUDE_CONFIG_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}}"; }
 # the Claude install hub sessions run as: AGENT_CLAUDE, else HUB_CLAUDE from hub.conf, else claude
 claude_cmd() { echo "${AGENT_CLAUDE:-${HUB_CLAUDE:-claude}}"; }
 encode_path() { printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g'; }
