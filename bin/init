@@ -1,0 +1,109 @@
+#!/bin/bash
+# bin/init: turn this template into a hub for one persona and client.
+#   bin/init --persona <slug> --client "<name>" --owner "<name>" [--name <hub-name>] [--dest <dir>]
+#            [--folders "projects/a ops/b"] [--repo owner/name[=~/checkout]]... [--code-owner <gh org>]
+#            [--remote user@host[:port]] [--remote-key <path>] [--remote-dir <dir>] [--staging-url <url>]
+#            [--secret <name>]... [--briefing HH:MM] [--claude <cmd>]
+#   bin/init --list   the personas
+# --dest copies the template to a new directory first (it must not exist); without it, initializes in place.
+# Never overwrites an initialized hub (one with hub.conf). Writes no secrets: only names and locations.
+set -u; T="$(cd "$(dirname "$0")/.." && pwd)"
+usage() { sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+fm() { awk -v k="$2" -F': ' '/^---$/{n++; next} n==1 && $1==k {sub(/^[^:]*: /,""); print; exit}' "$1"; }
+if [ "${1:-}" = --list ]; then for p in "$T"/personas/*.md; do printf '%-28s %s\n' "$(basename "$p" .md)" "$(fm "$p" title)"; done; exit 0; fi
+PERSONA=""; CLIENT=""; OWNER=""; NAME=""; DEST=""; FOLDERS=""; REPOS=(); CODE_OWNER=""; REMOTE=""; RKEY=""; RDIR=""
+STAGING=""; SECRETS=(); BRIEF="08:00"; CLAUDE_CMD="claude"
+while [ $# -gt 0 ]; do
+  [ $# -ge 2 ] || usage
+  case "$1" in
+    --persona) PERSONA="$2";; --client) CLIENT="$2";; --owner) OWNER="$2";; --name) NAME="$2";; --dest) DEST="$2";;
+    --folders) FOLDERS="$2";; --repo) REPOS+=("$2");; --code-owner) CODE_OWNER="$2";; --remote) REMOTE="$2";;
+    --remote-key) RKEY="$2";; --remote-dir) RDIR="$2";; --staging-url) STAGING="$2";; --secret) SECRETS+=("$2");;
+    --briefing) BRIEF="$2";; --claude) CLAUDE_CMD="$2";; *) usage;;
+  esac; shift 2
+done
+[ -n "$PERSONA" ] && [ -n "$CLIENT" ] && [ -n "$OWNER" ] || usage
+P="$T/personas/$PERSONA.md"; [ -f "$P" ] || { echo "init: no persona '$PERSONA' (bin/init --list)" >&2; exit 2; }
+slugify() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g'; }
+[ -n "$NAME" ] || NAME="$(slugify "$CLIENT")-$PERSONA"
+[[ "$NAME" =~ ^[a-z0-9][a-z0-9-]*$ ]] || { echo "init: --name must be a-z 0-9 -" >&2; exit 2; }
+[[ "$BRIEF" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || { echo "init: --briefing must be HH:MM" >&2; exit 2; }
+[[ "$CLAUDE_CMD" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "init: bad --claude command" >&2; exit 2; }
+for s in ${SECRETS[@]+"${SECRETS[@]}"}; do [[ "$s" =~ ^[a-z0-9-]+$ ]] || { echo "init: secret names are a-z 0-9 - (names only, never values)" >&2; exit 2; }; done
+TITLE="$(fm "$P" title)"; [ -n "$FOLDERS" ] || FOLDERS="$(fm "$P" folders)"; FOCUS="$(fm "$P" briefing_focus)"
+for f in $FOLDERS; do [[ "$f" =~ ^(projects|ops)/[a-z0-9-]+$ ]] || { echo "init: bad folder '$f'" >&2; exit 2; }; done
+H="$T"
+if [ -n "$DEST" ]; then
+  [ -e "$DEST" ] && { echo "init: $DEST already exists" >&2; exit 2; }
+  mkdir -p "$DEST" && H="$(cd "$DEST" && pwd)"
+  (cd "$T" && tar cf - --exclude ./.git --exclude ./hub.conf --exclude ./repos --exclude ./_bmad-output .) | (cd "$H" && tar xf -)
+fi
+[ -f "$H/hub.conf" ] && { echo "init: $H is already initialized (hub.conf exists)" >&2; exit 2; }
+# the persona text, with client and owner filled in
+PERSONA_TEXT="$(awk '/^---$/{n++; next} n>=2' "$P" | sed -e "s#{{CLIENT}}#$CLIENT#g" -e "s#{{OWNER}}#$OWNER#g")"
+render() {  # template output: fill placeholders (multi-line values via python, so no sed escaping problems)
+  NAME="$NAME" TITLE="$TITLE" CLIENT="$CLIENT" OWNER="$OWNER" PERSONA="$PERSONA_TEXT" SLUG="$PERSONA" \
+  REPO_ROWS="$REPO_ROWS" REMOTE_TXT="$REMOTE_TXT" STAGING_TXT="${STAGING:-none}" SECRETS_TXT="$SECRETS_TXT" FOLDER_LIST="$FOLDER_LIST" \
+  python3 - "$1" "$2" <<'PY'
+import os, sys
+s = open(sys.argv[1]).read()
+for k, e in [("NAME","NAME"),("TITLE","TITLE"),("CLIENT","CLIENT"),("OWNER","OWNER"),("PERSONA","PERSONA"),("SLUG","SLUG"),
+             ("REPO_ROWS","REPO_ROWS"),("REMOTE","REMOTE_TXT"),("STAGING","STAGING_TXT"),("SECRETS","SECRETS_TXT"),("FOLDER_LIST","FOLDER_LIST")]:
+    s = s.replace("{{%s}}" % k, os.environ[e])
+open(sys.argv[2], "w").write(s)
+PY
+}
+RHOST=""; RUSER=""; RPORT=22
+if [ -n "$REMOTE" ]; then
+  [[ "$REMOTE" =~ ^(([A-Za-z0-9._-]+)@)?([A-Za-z0-9.-]+)(:([0-9]+))?$ ]] || { echo "init: --remote must be user@host[:port]" >&2; exit 2; }
+  RUSER="${BASH_REMATCH[2]}"; RHOST="${BASH_REMATCH[3]}"; RPORT="${BASH_REMATCH[5]:-22}"
+fi
+REMOTE_TXT="none configured"; [ -n "$RHOST" ] && REMOTE_TXT="${RUSER:+$RUSER@}$RHOST port $RPORT${RKEY:+, key \`$RKEY\`}${RDIR:+, dir \`$RDIR\`}"
+SECRETS_TXT="${SECRETS[*]+${SECRETS[*]}}"; [ -n "$SECRETS_TXT" ] || SECRETS_TXT="none yet"
+REPO_ROWS=""; REPO_NAMES=""; FIRST_REPO_ROW=""
+for r in ${REPOS[@]+"${REPOS[@]}"}; do
+  slug="${r%%=*}"; co=""; [ "$slug" != "$r" ] && co="${r#*=}"
+  [[ "$slug" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]] || { echo "init: --repo must be owner/name[=checkout]" >&2; exit 2; }
+  row="| $slug | $co | main | $OWNER | (fill in) |"; REPO_ROWS="$REPO_ROWS$row"$'\n'; REPO_NAMES="$REPO_NAMES $slug"
+  [ -n "$FIRST_REPO_ROW" ] || FIRST_REPO_ROW="$row"
+done
+FOLDER_LIST=""; for f in $FOLDERS; do FOLDER_LIST="$FOLDER_LIST- \`$f\`"$'\n'; done
+q() { printf '%q' "$1"; }
+cat > "$H/hub.conf" <<CONF
+# hub.conf: who this agent is and what it can reach (written by bin/init). Names and locations only, never secrets.
+HUB_NAME=$(q "$NAME")
+HUB_PERSONA=$(q "$PERSONA")
+HUB_PERSONA_TITLE=$(q "$TITLE")
+HUB_CLIENT=$(q "$CLIENT")
+HUB_OWNER=$(q "$OWNER")
+HUB_CLAUDE=$(q "$CLAUDE_CMD")
+HUB_CODE_OWNER=$(q "$CODE_OWNER")
+HUB_REPOS=$(q "${REPO_NAMES# }")
+HUB_REMOTE_HOST=$(q "$RHOST")
+HUB_REMOTE_USER=$(q "$RUSER")
+HUB_REMOTE_PORT=$(q "$RPORT")
+HUB_REMOTE_KEY=$(q "$RKEY")
+HUB_REMOTE_DIR=$(q "$RDIR")
+HUB_STAGING_URL=$(q "$STAGING")
+HUB_SECRETS=$(q "${SECRETS[*]+${SECRETS[*]}}")
+HUB_KEYCHAIN_SERVICE=$(q "$NAME")
+HUB_BRIEFING_HOUR=$(q "$((10#${BRIEF%%:*}))")
+HUB_BRIEFING_MINUTE=$(q "$((10#${BRIEF##*:}))")
+HUB_BRIEFING_FOCUS=$(q "$FOCUS")
+HUB_TOOLS=""
+CONF
+render "$T/templates/hub/CLAUDE.md" "$H/CLAUDE.md"
+render "$T/templates/hub/ACCESS.md" "$H/ACCESS.md"
+render "$T/templates/hub/README.md" "$H/README.md"
+mkdir -p "$H/.claude/agents" "$H/journal" "$H/memory" "$H/projects" "$H/ops"
+render "$T/templates/hub/persona-agent.md" "$H/.claude/agents/$PERSONA.md"
+sed -i '' -e "s#^project_name = .*#project_name = \"$NAME\"#" -e "s#^output_folder = .*#output_folder = \"$H/_bmad-output\"#" "$H/_bmad/config.toml" 2>/dev/null
+[ -f "$H/memory/MEMORY.md" ] || printf '# Memory index (hub root: cross-folder facts)\n\n' > "$H/memory/MEMORY.md"
+if [ ! -d "$H/.git" ]; then git -C "$H" init -q && git -C "$H" branch -M main 2>/dev/null; fi
+git -C "$H" config core.hooksPath .githooks
+for f in $FOLDERS; do HUB="$H" "$H/bin/new" "$f" >/dev/null || exit 1; done
+# the first repo is checked out by the first folder: deep work (bin/work) goes there
+if [ -n "$FIRST_REPO_ROW" ]; then f1="${FOLDERS%% *}"; printf '%s\n' "$FIRST_REPO_ROW" >> "$H/$f1/ACCESS.md"; fi
+HUB="$H" "$H/bin/journal" hub "Hub initialized from ai-agent-hub-template: $TITLE for $CLIENT (owner $OWNER); folders: $FOLDERS" 
+echo "initialized $NAME ($TITLE for $CLIENT) at $H"
+echo "next: cd $H && bin/setup && bin/doctor, then start $CLAUDE_CMD there"

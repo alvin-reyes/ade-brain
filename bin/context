@@ -1,0 +1,30 @@
+#!/bin/bash
+# bin/context [folder]: the main agent's summary of every folder, or one folder's state and journal.
+. "$(dirname "$0")/lib.sh"; H="$(hub_root)"
+entries() {  # [folder filter] -> journal entries, oldest first, from the newest 3 journal files
+  local files; files=$(ls "$H"/journal/20*.md 2>/dev/null | tail -3)
+  [ -n "$files" ] || return 0
+  awk -v f="${1:-}" '/^## /{if(e!="" && (f=="" || index(h,f))) print e; h=$0; e=$0; next} {if(e!="") e=e "\n" $0}
+    END{if(e!="" && (f=="" || index(h,f))) print e}' $files
+}
+lastn() { awk -v k="$1" '/^## /{n++} {a[n]=a[n] $0 "\n"} END{for(i=(n>k?n-k+1:1);i<=n;i++) printf "%s", a[i]}'; }
+section() { awk -v s="## $2" '$0==s{p=1;n=0;next} /^## /{p=0} p&&NF{if(n<4)print "  " substr($0,1,160); n++}' "$1"; }   # capped: tokens
+rules() {  # the hub root CLAUDE.md's rule sections: a session in a checkout outside the hub does not load it itself
+  local c="$H/CLAUDE.md"; grep -q '^## Shared rules' "$c" 2>/dev/null || c="$H/templates/hub/CLAUDE.md"   # an uninitialized template
+  awk '/^## /{p=($0 ~ /^## (Shared rules|Git boundaries|Token budget)/)} p' "$c" 2>/dev/null
+}
+if [ -n "${1:-}" ]; then
+  [ "${2:-}" = "--rules" ] && { rules; echo; }
+  echo "# Context: $1"; if [ -f "$H/$1/STATE.md" ]; then cat "$H/$1/STATE.md"; else echo "(no STATE.md)"; fi
+  echo; echo "## Recent journal ($1)"; entries "$1" | lastn 5
+  exit 0
+fi
+echo "# $(hub_name): every folder ($(utc_today))"
+for f in $(folders); do
+  echo; flag=""; [ -n "$(stale_repos "$f")" ] && flag=" (state may be stale: repo commits after STATE.md)"
+  echo "### $f$flag"; S="$H/$f/STATE.md"
+  if [ ! -f "$S" ]; then echo "  (no STATE.md)"; continue; fi
+  for s in "Live" "Open" "Waiting on" "Next session starts with"; do out=$(section "$S" "$s"); [ -n "$out" ] && { echo " $s:"; echo "$out"; }; done
+done
+echo; echo "## Recent journal"; entries | lastn 8 | cut -c1-200
+exit 0

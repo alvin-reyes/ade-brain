@@ -1,0 +1,17 @@
+#!/bin/bash
+# bin/doctor: what this Mac can reach (tools, GitHub, the code repos, the remote box, staging, stored secrets).
+# Never prints a secret; always exits 0.
+. "$(dirname "$0")/lib.sh"; H="$(hub_root)"
+line() { printf '%-8s %-22s %s\n' "$1" "$2" "$3"; }
+for t in claude gh git ssh node python3 curl gitleaks ${HUB_TOOLS:-}; do
+  if command -v "$t" >/dev/null; then v=$("$t" --version 2>&1 | head -1); [ "$t" = ssh ] && v=$(ssh -V 2>&1); line OK "$t" "$(echo "$v" | cut -c1-60)"
+  else line MISSING "$t" "not installed"; fi
+done
+k="$(remote_key)"; [ -z "$k" ] || { [ -f "$k" ] && line OK "remote ssh key" "$k" || line MISSING "remote ssh key" "$k (ask the owner; never copy it into the hub)"; }
+[ "${DOCTOR_OFFLINE:-}" = 1 ] && exit 0
+command -v gh >/dev/null && { gh auth status >/dev/null 2>&1 && line OK "github login" "$(gh api user --jq .login 2>/dev/null)" || line MISSING "github login" "gh auth login"; }
+for r in ${HUB_REPOS:-}; do gh api "repos/$r" >/dev/null 2>&1 && line OK "repo $r" "readable" || line MISSING "repo $r" "ask for access"; done
+[ -n "$(remote_host)" ] && { "$H/bin/remote" true >/dev/null 2>&1 && line OK "remote ssh" "$(remote_target)" || line MISSING "remote ssh" "key not loaded or host unreachable: $(remote_target)"; }
+u="$(staging_url)"; [ -n "$u" ] && { c=$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$u/" 2>/dev/null); case "$c" in 2*|3*|401) line OK "staging site" "$u ($c)";; *) line MISSING "staging site" "$u returned ${c:-nothing}";; esac; }
+for s in ${HUB_SECRETS:-}; do "$H/bin/secret" --has "$s" && line OK "secret $s" "in the Keychain" || line MISSING "secret $s" "bin/secret --set $s"; done
+exit 0

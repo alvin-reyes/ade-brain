@@ -1,0 +1,7 @@
+#!/bin/bash
+# bin/journal <folder> <text...>: one dated entry in journal/<UTC date>.md
+set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"
+[ $# -ge 2 ] || { echo "usage: bin/journal <folder> <text>" >&2; exit 2; }
+F="$1"; shift; J="$H/journal/$(utc_today).md"; mkdir -p "$H/journal"
+[ -f "$J" ] || printf '# Journal %s\n' "$(utc_today)" > "$J"
+printf '\n## %s UTC · %s\n%s\n' "$(utc_now)" "$F" "$*" >> "$J"

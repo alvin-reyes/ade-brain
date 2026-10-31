@@ -1,0 +1,24 @@
+#!/bin/bash
+# bin/changes: UserPromptSubmit hook at the hub root (no model). One line per folder whose STATE.md or
+# journal changed since the last prompt, so the main session sees work done in other terminals.
+# The first run only records a baseline. Always exits 0.
+. "$(dirname "$0")/lib.sh"; H="$(hub_root)"; ST="$(state_dir)"; mkdir -p "$ST"
+SNAP="$ST/changes-seen"; NEW="$SNAP.new"; : > "$NEW"
+for d in "$H"/projects/*/ "$H"/ops/*/; do
+  [ -f "$d/STATE.md" ] || continue
+  f="${d#$H/}"; f="${f%/}"
+  m=$(stat -f %m "$d/STATE.md" 2>/dev/null || echo 0)
+  n=$(cat "$H"/journal/[0-9]*.md 2>/dev/null | grep -c "^## .* · $f\$")
+  printf '%s %s %s\n' "$f" "$m" "$n" >> "$NEW"
+done
+if [ -f "$SNAP" ]; then
+  while read -r f m n; do
+    read -r pm pn <<<"$(awk -v f="$f" '$1==f{print $2, $3}' "$SNAP")"
+    [ -n "${pm:-}" ] || { pm=$m; pn=$n; }
+    s=""; [ "$m" != "$pm" ] && s="STATE.md updated $(date -r "$m" '+%H:%M')"
+    j=$((n - pn)); [ "$j" -gt 0 ] && s="$s${s:+, }$j journal line$([ "$j" -gt 1 ] && echo s)"
+    [ -n "$s" ] && echo "$f: $s"
+  done < "$NEW"
+fi
+mv "$NEW" "$SNAP"
+exit 0

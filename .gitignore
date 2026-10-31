@@ -1,0 +1,10 @@
+repos/
+*.jsonl
+.env*
+*.pdf
+*.png
+*.jpg
+*.mov
+*.MOV
+.DS_Store
+projects/*/.local/

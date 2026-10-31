@@ -1,0 +1,14 @@
+#!/bin/bash
+# bin/schedule install|uninstall|status: the hub's launchd jobs (the morning briefing, weekdays at HUB_BRIEFING_HOUR:HUB_BRIEFING_MINUTE local time).
+. "$(dirname "$0")/lib.sh"; H="$(hub_root)"; LA="${AGENT_LAUNCHAGENTS:-$HOME/Library/LaunchAgents}"; U="gui/$(id -u)"
+JOBS="briefing"; LOGS="$(state_dir)/logs"
+case "${1:-status}" in
+  install) mkdir -p "$LOGS" "$LA"
+           for j in $JOBS; do p="$LA/ai.agent-hub.$(hub_name).$j.plist"
+             sed -e "s#{{HUB}}#$H#g" -e "s#{{HOME}}#$HOME#g" -e "s#{{LOGS}}#$LOGS#g" -e "s#{{LABEL}}#ai.agent-hub.$(hub_name).$j#g" -e "s#{{HOUR}}#${HUB_BRIEFING_HOUR:-8}#g" -e "s#{{MINUTE}}#${HUB_BRIEFING_MINUTE:-0}#g" "$H/launchd/$j.plist.template" > "$p"
+             [ "${SCHEDULE_DRY:-}" = 1 ] && { echo "wrote $p"; continue; }
+             launchctl bootout "$U/ai.agent-hub.$(hub_name).$j" 2>/dev/null; launchctl bootstrap "$U" "$p" && echo "installed ai.agent-hub.$(hub_name).$j"; done ;;
+  uninstall) for j in $JOBS; do launchctl bootout "$U/ai.agent-hub.$(hub_name).$j" 2>/dev/null; rm -f "$LA/ai.agent-hub.$(hub_name).$j.plist"; echo "removed ai.agent-hub.$(hub_name).$j"; done ;;
+  status) for j in $JOBS; do launchctl print "$U/ai.agent-hub.$(hub_name).$j" >/dev/null 2>&1 && echo "loaded  ai.agent-hub.$(hub_name).$j" || echo "absent  ai.agent-hub.$(hub_name).$j"; done ;;
+  *) echo "usage: bin/schedule install|uninstall|status" >&2; exit 2 ;;
+esac

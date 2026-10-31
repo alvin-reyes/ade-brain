@@ -1,0 +1,86 @@
+#!/bin/bash
+# bin/work [--claude CMD] [--model M] [--effort E] [--agent-model [name=]M] [--agent-effort [name=]E] <folder> [repo]: deep work in a new Terminal, inside the project's checkout, with the folder's hooks.
+# Clones a missing checkout (owner/name as given, else HUB_CODE_OWNER/<name>) to ${AGENT_CODE_DIR:-$HOME/Project}/<name> and records the path in ACCESS.md.
+# --claude picks the Claude install (default: claude_cmd in lib.sh). --model / --effort (anywhere in the arguments) pass through to claude for this session.
+# --agent-model / --agent-effort (repeatable) set the folder's specialist agents: a bare value sets all, name=value one (it wins). WORK_DRY=1 only prints the command. AGENT_TERMINAL=iterm uses iTerm.
+set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"
+USAGE="usage: bin/work [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--agent-model [name=]M] [--agent-effort [name=]E] <projects|ops>/<name> [repo]"
+MODEL=""; EFFORT=""; CL="$(claude_cmd)"; POS=(); ASET=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --model|--effort|--claude) [ $# -ge 2 ] || { echo "$USAGE" >&2; exit 2; }
+      case "$1" in --model) MODEL="$2" ;; --effort) EFFORT="$2" ;; *) CL="$2" ;; esac; shift 2 ;;
+    --agent-model|--agent-effort) [ $# -ge 2 ] || { echo "$USAGE" >&2; exit 2; }
+      k="${1#--agent-}"; v="${2#*=}"; n=""; [ "$v" = "$2" ] || n="${2%%=*}"
+      [[ "$n" =~ ^[A-Za-z0-9._-]*$ ]] || { echo "work: bad agent name '$n'" >&2; exit 2; }
+      if [ "$k" = model ]; then [[ "$v" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "work: bad agent model '$v'" >&2; exit 2; }
+      else case "$v" in low|medium|high|xhigh|max) ;; *) echo "work: agent effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac; fi
+      ASET="$ASET$k $n $v"$'\n'; shift 2 ;;
+    *) POS+=("$1"); shift ;;
+  esac
+done
+[[ "$CL" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "work: bad claude command '$CL'" >&2; exit 2; }
+[ -z "$MODEL" ] || [[ "$MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
+case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
+F="${POS[0]:-}"; WANT="${POS[1]:-}"
+[ -n "$F" ] && [ -d "$H/$F" ] && [ -f "$H/$F/ACCESS.md" ] || { echo "$USAGE" >&2; exit 2; }
+A="$H/$F/ACCESS.md"
+# Code table rows (or rows appended later with an absolute checkout) as "<repo>|<checkout>" (first = default)
+rows=$(awk -F'|' '/^## /{c=($0=="## Code")} /^\|/{n=$2; k=$3; gsub(/^[ \t]+|[ \t]+$/,"",n); gsub(/^[ \t]+|[ \t]+$/,"",k);
+  if((c || k ~ /^[\/~]/) && n!="" && n!="Repo" && n !~ /^-+$/) print n "|" k}' "$A")
+[ -n "$rows" ] || { echo "work: $F has no repo in ACCESS.md" >&2; exit 2; }
+# a repo may be named owner/name in ACCESS.md; WANT matches the full name or the name alone
+row=$(echo "$rows" | { if [ -n "$WANT" ]; then awk -F'|' -v w="$WANT" '{n=$1; sub(/.*\//,"",n)} $1==w || n==w {print; exit}'; else head -1; fi; })
+[ -n "$row" ] || { echo "work: no repo '$WANT' in $F/ACCESS.md" >&2; exit 2; }
+repo="${row%%|*}"; name="${repo##*/}"; dir="${row#*|}"; dir="${dir/#\~/$HOME}"
+own=$(grep -F "| $repo |" "$A" | grep -o 'checkout owned by [^ |]*' | head -1)
+if [ -z "${dir// /}" ] && [ -n "$own" ]; then echo "work: $repo: $own; run bin/work ${own#checkout owned by }" >&2; exit 2; fi
+if [ ! -d "$dir" ]; then
+  dir="${AGENT_CODE_DIR:-$HOME/Project}/$name"; slug="$repo"; if [ "$slug" = "$name" ]; then [ -n "$(code_owner)" ] || { echo "work: $repo has no owner (write owner/name in ACCESS.md or set HUB_CODE_OWNER)" >&2; exit 2; }; slug="$(code_owner)/$name"; fi
+  if [ ! -d "$dir" ]; then
+    mkdir -p "$(dirname "$dir")"; gh repo clone "$slug" "$dir" >&2 || { echo "work: clone of $repo failed" >&2; exit 2; }
+  fi
+  # record the checkout path in this repo's row (BSD-safe: rewrite via a temp file)
+  awk -F'|' -v OFS='|' -v r="$repo" -v d="$dir" '/^## /{c=($0=="## Code")} /^\|/{n=$2; gsub(/^[ \t]+|[ \t]+$/,"",n); if((c || $3 ~ /\/|~/) && n==r){$3=" " d " "}} {print}' "$A" > "$A.tmp" && mv "$A.tmp" "$A"
+fi
+# the folder's specialist agents (front matter + body) go to the session as --agents JSON
+agents=""
+if ls "$H/$F/.claude/agents/"*.md >/dev/null 2>&1; then
+  agents=$(WORK_ASET="$ASET" python3 - "$H/$F/.claude/agents/"*.md <<'PY'
+import json, sys, os
+out = {}
+for p in sys.argv[1:]:
+    t = open(p).read()
+    if not t.startswith("---\n"): continue
+    head, _, body = t[4:].partition("\n---\n")
+    fm = {}
+    for l in head.splitlines():
+        if ":" in l and not l.startswith((" ", "-")):
+            k, _, v = l.partition(":"); fm[k.strip()] = v.strip()
+    a = {"description": fm.get("description", ""), "prompt": body.strip()}
+    if fm.get("tools"): a["tools"] = [x.strip() for x in fm["tools"].split(",")]
+    if fm.get("model") and fm["model"] != "inherit": a["model"] = fm["model"]
+    out[fm.get("name") or os.path.basename(p)[:-3]] = a
+# per-task overrides: "<model|effort> <name or empty> <value>"; bare values first, so name= wins
+sets = [l.split(" ") for l in os.environ.get("WORK_ASET", "").splitlines() if l]
+for k, n, v in sorted(sets, key=lambda s: s[1] != ""):
+    if n and n not in out: sys.exit("work: no agent '%s' in this folder" % n)
+    for name in ([n] if n else out): out[name][k] = v
+print(json.dumps(out, separators=(",", ":")))
+PY
+) || exit 2
+elif [ -n "$ASET" ]; then echo "work: $F has no specialist agents for --agent-model/--agent-effort" >&2; exit 2
+fi
+cmd="cd '$dir' && AGENT_FOLDER='$F' $CL --settings '$H/$F/.claude/settings.json'"
+[ -n "$agents" ] && cmd="$cmd --agents $(printf %q "$agents")"
+[ -n "$MODEL" ] && cmd="$cmd --model $MODEL"
+[ -n "$EFFORT" ] && cmd="$cmd --effort $EFFORT"
+echo "$cmd"
+[ "${WORK_DRY:-}" = 1 ] && exit 0
+# the command (it may hold quotes from the agents JSON) runs from a launcher script, so no AppleScript escaping is needed
+L=$(mktemp "${TMPDIR:-/tmp}/agent-work.XXXXXX"); printf '#!/bin/bash\ntrap '"'"'rm -f "$0"'"'"' EXIT\n%s\n' "$cmd" > "$L"; chmod +x "$L"
+if [ "${AGENT_TERMINAL:-terminal}" = iterm ]; then
+  osascript -e "tell application \"iTerm\" to create window with default profile command \"bash -l $L\""
+else
+  osascript -e "tell application \"Terminal\" to do script \"bash -l $L\"" -e 'tell application "Terminal" to activate'
+fi

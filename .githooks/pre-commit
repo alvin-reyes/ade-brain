@@ -1,0 +1,14 @@
+#!/bin/bash
+# Hub guard: never client code (repos/), never big files, never secrets.
+bad=0
+while IFS= read -r f; do
+  case "$f" in repos/*) echo "REFUSED: $f is under repos/ (client code stays in its own repo)" >&2; bad=1;; esac
+  if [ -f "$f" ] && [ "$(wc -c < "$f")" -gt 1048576 ] && ! grep -qxF "$f" .bigfiles-allow 2>/dev/null; then
+    echo "REFUSED: $f is over 1 MB (add it to .bigfiles-allow if it must be here)" >&2; bad=1; fi
+done < <(git diff --cached --name-only --diff-filter=AM)
+if command -v gitleaks >/dev/null; then
+  gitleaks protect --staged --no-banner --redact >/dev/null 2>&1 || { echo "REFUSED: gitleaks found a secret (run: gitleaks protect --staged -v)" >&2; bad=1; }
+else
+  echo "warning: gitleaks not installed; CI will scan" >&2
+fi
+exit $bad

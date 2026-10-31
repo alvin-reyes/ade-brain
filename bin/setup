@@ -1,0 +1,37 @@
+#!/bin/bash
+# bin/setup: link Claude's auto-memory for the hub root, every folder and each folder's checkouts into the repo; set the git hooks path.
+set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; CH="$(claude_home)"
+link() {  # absolute dir, label, [memory dir to link to; default <dir>/memory]
+  local dir="$1" label="$2" tgt="${3:-$1/memory}" mem
+  mem="$CH/projects/$(encode_path "$1")/memory"
+  mkdir -p "$tgt" "$(dirname "$mem")"
+  if [ -L "$mem" ] && [ "$(readlink "$mem")" = "$tgt" ]; then echo "ok $label"; return; fi
+  if [ -d "$mem" ] && [ ! -L "$mem" ]; then
+    cp -n "$mem"/* "$tgt/" 2>/dev/null || true
+    mv "$mem" "$mem.bak-$(date -u +%Y%m%dT%H%M%SZ)"
+  fi
+  rm -f "$mem"; ln -s "$tgt" "$mem"; echo "linked $label"
+}
+link "$H" "."
+CLAIMED=""
+# folders that mark a row "memory owned by <folder>" go last, so the named owner claims the shared checkout first
+for f in $(for x in $(folders); do grep -q "memory owned by" "$H/$x/ACCESS.md" 2>/dev/null && echo "1 $x" || echo "0 $x"; done | sort | cut -d" " -f2); do
+  link "$H/$f" "$f"
+  # a deep-work session starts in the project's checkout (outside the hub): share the folder's memory with it
+  # one owning folder per checkout (the first whose ACCESS.md fills its Checkout cell); later claimants only get a warning
+  while IFS= read -r r; do
+    case "$CLAIMED" in
+      *"|$r="*) o="${CLAIMED#*|$r=}"; echo "warning: $r is claimed by $f, owned by ${o%%|*}" >&2 ;;
+      *) CLAIMED="$CLAIMED|$r=$f"; link "$r" "$f repo $(basename "$r")" "$H/$f/memory" ;;
+    esac
+  done < <(repos_of "$f")
+done
+# BMAD skills load in every session on this Mac; never replace a skill that is not our link
+mkdir -p "$CH/skills"
+for d in "$H"/.claude/skills/bmad-*/; do
+  [ -d "$d" ] || continue; n=$(basename "$d"); t="$CH/skills/$n"
+  if [ -L "$t" ] && [ "$(readlink "$t")" = "${d%/}" ]; then echo "ok skill $n"
+  elif [ -e "$t" ] || [ -L "$t" ]; then echo "skip skill $n (exists, not ours)"
+  else ln -s "${d%/}" "$t"; echo "linked skill $n"; fi
+done
+git -C "$H" config core.hooksPath .githooks

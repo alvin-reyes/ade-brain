@@ -1,0 +1,10 @@
+#!/bin/bash
+# bin/remote <command...>: run a command on the configured remote box (HUB_REMOTE_* in hub.conf), in HUB_REMOTE_DIR.
+# Read-only use is fine for any agent. Anything that writes (deploys, data changes, file edits) runs only on the owner's
+# explicit say-so for that change. Output that may hold a secret is captured into a variable, never printed.
+set -u; . "$(dirname "$0")/lib.sh"
+[ $# -ge 1 ] || { echo "usage: bin/remote <command...>" >&2; exit 2; }
+[ -n "$(remote_host)" ] || { echo "remote: no HUB_REMOTE_HOST in hub.conf" >&2; exit 2; }
+args=(-p "$(remote_port)" -o BatchMode=yes -o ConnectTimeout=10); [ -n "$(remote_key)" ] && args+=(-i "$(remote_key)")
+cmd="$(printf '%q ' "$@")"; [ -n "$(remote_dir)" ] && cmd="cd $(remote_dir) && $cmd"
+exec ssh "${args[@]}" "$(remote_target)" "$cmd"

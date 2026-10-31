@@ -1,0 +1,25 @@
+#!/bin/bash
+# bin/sync [--yes]: review, then commit and push hub files only (never repos/, never other staged files).
+set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; cd "$H" || exit 1
+PATHS="README.md CLAUDE.md ACCESS.md memory journal reports projects ops docs bin templates tests .claude .githooks .github .gitignore .bigfiles-allow launchd .ade _bmad llms.txt"
+if [ "${1:-}" != "--yes" ]; then
+  # review: read-only, the index is left as it is
+  pending="$(git status --short -- $PATHS)"
+  if [ -z "$pending" ]; then echo "nothing to sync"; exit 0; fi
+  echo "$pending"; git diff HEAD --stat -- $PATHS
+  echo "run bin/sync --yes to commit and push"
+  # --yes would add these too; say so, so the reviewer sees them (a one-line note, last)
+  un="$(git status --short -uall -- .claude | sed -n 's/^?? //p' | tr '\n' ' ')"
+  [ -n "$un" ] && echo "note: untracked under .claude/ that --yes would include: ${un% }"
+  exit 0
+fi
+for p in $PATHS; do [ -e "$p" ] && git add -- "$p"; done
+FILES=()
+while IFS= read -r f; do FILES+=("$f"); done < <(git diff --cached --name-only -- $PATHS)
+if [ "${#FILES[@]}" -eq 0 ]; then echo "nothing to sync"; exit 0; fi
+# --only: commit just the hub files; other staged entries stay staged
+git commit -qm "sync $(utc_today) $(utc_now)" -- "${FILES[@]}" || exit 1
+if git remote get-url origin >/dev/null 2>&1; then
+  git push -q || { echo "push failed" >&2; exit 1; }
+fi
+echo "synced: $(git log -1 --pretty='%h %s')"
