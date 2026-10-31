@@ -49,6 +49,11 @@ printf -- '---\nname: sms-feedback\ndescription: content team on SMS lead alerts
 AGENT_OLLAMA_URL="$U" bin/brain index >/dev/null
 out=$(AGENT_OLLAMA_URL="$U" bin/brain search "sms feedback noisy"); echo "$out" | head -1 | grep -q "memory/sms-feedback.md:1  sms-feedback: content team on SMS lead alerts" || fail "front matter is the heading: [$out]"
 echo "$out" | head -2 | tail -1 | grep -q "metadata" && fail "front matter left in the snippet"
+# 3c. a glob path indexes only matching files (top-level briefs, not whole checkouts beside them)
+G="$(mktemp -d)"; printf '# Brief\nquokka strategy\n' > "$G/brief one.md"; mkdir -p "$G/repo"; printf '# Deep\nquokka internals\n' > "$G/repo/deep.md"
+AGENT_OLLAMA_URL="$U" AGENT_BRAIN_PATHS="$X $G/*.md" bin/brain index >/dev/null
+out=$(bin/brain search quokka); echo "$out" | grep -q "brief one.md" || fail "glob file (with a space) indexed: [$out]"
+echo "$out" | grep -q "deep.md" && fail "glob indexed a file outside the pattern"
 # 4. skipped trees and bad input
 mkdir -p .claude/skills/x repos/y; echo "# zebra skill" > .claude/skills/x/SKILL.md; echo "# zebra repo" > repos/y/a.md
 AGENT_OLLAMA_URL="$U" bin/brain index >/dev/null; bin/brain search zebra | grep -q . && fail "skills or repos indexed"

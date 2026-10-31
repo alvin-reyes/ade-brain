@@ -5,6 +5,7 @@ Run through bin/brain, which passes the hub's settings as environment variables:
   BRAIN_HUB, BRAIN_PATHS (extra dirs/files, space-separated), BRAIN_OLLAMA_URL, BRAIN_MODEL.
 """
 import array
+import glob
 import hashlib
 import json
 import os
@@ -63,10 +64,11 @@ def sources():
                     out[display(p, rel_to)] = p
 
     walk(HUB, HUB)
-    for p in os.environ.get("BRAIN_PATHS", "").split():
-        p = os.path.expanduser(p)
-        if os.path.exists(p):
-            walk(os.path.abspath(p), None)
+    for pat in os.environ.get("BRAIN_PATHS", "").split():
+        # a folder (walked), a file, or a glob such as ~/docs/*.md (matches may contain spaces)
+        for p in sorted(glob.glob(os.path.expanduser(pat))) if any(c in pat for c in "*?[") else [os.path.expanduser(pat)]:
+            if os.path.exists(p):
+                walk(os.path.abspath(p), None)
     return out
 
 

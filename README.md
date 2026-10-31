@@ -39,7 +39,7 @@ Or locally, without GitHub: `bin/init ... --dest ~/Project/acme-sre` copies the 
 | `--model M`, `--effort E` | the default model and effort for sessions (`bin/work`) and the persona agent (default: the persona's) |
 | `--agent-model M` | the folder agents' model (default `sonnet`) |
 | `--briefing-model M` | the morning briefing's model (default `haiku`) |
-| `--brain-path <dir>` | extra folders the brain indexes (e.g. a repo's `docs/`), repeatable |
+| `--brain-path <path>` | extra folders, files or globs the brain indexes (e.g. `~/client/docs`, `'~/client/*.md'`), repeatable |
 | `--embed-model M`, `--ollama-url URL` | the local embedding model (default `nomic-embed-text`) and Ollama address |
 
 ## Personas
