@@ -20,7 +20,7 @@ DB = os.path.join(HUB, ".local", "brain.db")
 URL = os.environ.get("BRAIN_OLLAMA_URL", "http://localhost:11434").rstrip("/")
 MODEL = os.environ.get("BRAIN_MODEL", "nomic-embed-text")
 SKIP_DIRS = {".git", ".claude", "_bmad", "_bmad-output", "repos", "node_modules", ".local", "templates", "personas",
-             "tests", "launchd"}
+             "tests", "test", "launchd", "dist", "build", "runs", "vendor", "target"}
 EXTS = (".md", ".txt")
 MAX_CHUNK = 2000
 # A chunk that looks like it holds a secret is never indexed (gitleaks guards commits; this guards the index).

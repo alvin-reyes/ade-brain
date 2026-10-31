@@ -5,6 +5,7 @@
 # is rebuilt from them and never committed. Without Ollama it still works, keyword only.
 # HUB_BRAIN_PATHS: folders, files or globs (~/client/*.md), space-separated.
 . "$(dirname "$0")/lib.sh"
+[ -f "$(hub_root)/hub.conf" ] && . "$(hub_root)/hub.conf"   # hubs whose lib.sh does not load it
 BRAIN_HUB="$(hub_root)" BRAIN_PATHS="${AGENT_BRAIN_PATHS:-${HUB_BRAIN_PATHS:-}}" \
 BRAIN_OLLAMA_URL="${AGENT_OLLAMA_URL:-${HUB_OLLAMA_URL:-http://localhost:11434}}" \
 BRAIN_MODEL="${AGENT_EMBED_MODEL:-${HUB_EMBED_MODEL:-nomic-embed-text}}" \
