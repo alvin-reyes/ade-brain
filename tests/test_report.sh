@@ -16,6 +16,7 @@ assert_eq "$(bin/stop-check projects/demo)" "" "blocks only once per commit"
 bin/context | grep -q "projects/demo (state may be stale" || fail "root flags stale state"
 echo '{"transcript_path":""}' | bin/session-end projects/demo
 assert_contains "journal/$(date -u +%Y-%m-%d).md" "fix pings" "session-end journals the commits"
+[ -f .local/brain.db ] || fail "session-end refreshes the brain index"
 # transcript start time: a session that started after the commit sees nothing new
 printf '{"timestamp":"2099-01-01T00:00:00.000Z"}\n' > "$AGENT_STATE/t.jsonl"
 n=$(grep -c "auto: session ended" "journal/$(date -u +%Y-%m-%d).md")

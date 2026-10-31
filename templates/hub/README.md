@@ -6,7 +6,8 @@ history** of the work and runs Claude Code agents that know them. Client code st
 
 ## Use it
 
-1. `bin/setup` once per Mac (links Claude's memory and the BMAD skills, sets the git hooks).
+1. `bin/setup` once per Mac (links Claude's memory and the BMAD skills, sets the git hooks); `ollama pull nomic-embed-text`
+   and `bin/brain index` for searchable memory.
 2. `bin/doctor` until what you need is OK. Store secrets with `bin/secret --set <name>`.
 3. Start `claude` at the repo root. The SessionStart hook prints every folder's state and the recent journal.
 4. Optional: `bin/schedule install` for the weekday morning briefing.
@@ -23,6 +24,7 @@ history** of the work and runs Claude Code agents that know them. Client code st
 | `bin/work [opts] <folder> [repo]` | deep work in a new Terminal in the folder's repo checkout |
 | `bin/journal <folder> "<text>"` | one dated journal entry |
 | `bin/new projects/<name>` / `ops/<name>` | a new folder plus its agent |
+| `bin/brain search "<words>"` | search every section of the hub (keywords + meaning); `bin/brain index` refreshes |
 | `bin/remote <cmd>` | a command on the remote box over SSH |
 | `bin/secret <name>` | a secret from the Keychain (`--set`, `--has`, `--forget`, `--list`) |
 | `bin/doctor` | what this Mac can reach; never prints a secret |

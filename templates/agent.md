@@ -11,6 +11,7 @@ Before anything else, read:
 2. `{{FOLDER}}/CLAUDE.md`, `{{FOLDER}}/ACCESS.md` and `{{FOLDER}}/STATE.md`.
 3. `{{FOLDER}}/memory/MEMORY.md` and the files it lists.
 4. The last journal entries for this folder: run `bin/context {{FOLDER}}`.
+5. Anything older: `bin/brain search "<words>"` (file and line of every matching section).
 
 Rules:
 - Run git only in the repos listed in `{{FOLDER}}/ACCESS.md`. Never commit in the hub.

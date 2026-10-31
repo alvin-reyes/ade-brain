@@ -6,7 +6,7 @@ bin/init --list | grep -q "^staff-software-engineer *Staff Software Engineer" ||
 D="$(mktemp -d)/acme-ops"; CO="$(mktemp -d)/acme-infra"; mkdir -p "$CO"
 bin/init --persona devops-sre --client "Acme Corp" --owner "Sam Lee" --dest "$D" --repo acme/infra="$CO" \
   --remote deploy@box.acme.test:2222 --remote-key /keys/acme --remote-dir /srv/app --staging-url https://staging.acme.test \
-  --secret grafana-token --briefing 07:30 >/dev/null || fail "init --dest failed"
+  --secret grafana-token --briefing 07:30 --brain-path ~/notes --embed-model mxbai-embed-large >/dev/null || fail "init --dest failed"
 [ -f "$HUB/hub.conf" ] && fail "--dest wrote into the template"
 cd "$D"
 for f in hub.conf CLAUDE.md ACCESS.md README.md .claude/agents/devops-sre.md ops/environments/STATE.md ops/ci-cd/CLAUDE.md \
@@ -17,7 +17,8 @@ assert_contains CLAUDE.md "when Sam Lee says so" "owner in the rules"
 grep -q "{{" CLAUDE.md ACCESS.md README.md .claude/agents/*.md && fail "unfilled placeholder"
 . ./hub.conf; assert_eq "$HUB_REMOTE_HOST" "box.acme.test" "remote host"; assert_eq "$HUB_REMOTE_PORT" "2222" "remote port"
 assert_eq "$HUB_REMOTE_USER" "deploy" "remote user"; assert_eq "$HUB_BRIEFING_HOUR:$HUB_BRIEFING_MINUTE" "7:30" "briefing time"
-assert_eq "$HUB_SECRETS" "grafana-token" "secret names"; assert_eq "$HUB_REPOS" "acme/infra" "repos"
+assert_eq "$HUB_SECRETS" "grafana-token" "secret names"
+assert_eq "$HUB_BRAIN_PATHS|$HUB_EMBED_MODEL|$HUB_OLLAMA_URL" "$HOME/notes|mxbai-embed-large|http://localhost:11434" "brain settings"; assert_eq "$HUB_REPOS" "acme/infra" "repos"
 assert_contains ops/environments/ACCESS.md "| acme/infra | $CO |" "first folder checks out the first repo"
 assert_contains .claude/agents/ops-environments.md "You are the DevOps / Site Reliability Engineer, working only on ops/environments in the acme-corp-devops-sre hub" "folder agent persona"
 out=$(env -u HUB WORK_DRY=1 bin/work ops/environments) || fail "deep work on the first folder"

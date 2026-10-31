@@ -10,11 +10,16 @@ done
 line OK "claude install" "$(claude_cmd) ($(claude_home))"
 m="$(claude_home)/projects/$(encode_path "$H")/memory"
 if [ -L "$m" ] && [ "$(readlink "$m")" = "$H/memory" ]; then line OK "hub memory link" "$m"; else line MISSING "hub memory link" "run bin/setup (links into $(claude_home))"; fi
+if [ -f "$H/.local/brain.db" ]; then st=$("$H/bin/brain" status 2>/dev/null | awk '$1=="stale"{print $2}')
+  [ "${st:-1}" = 0 ] && line OK "brain index" "up to date" || line MISSING "brain index" "${st:-?} file(s) changed since indexing: bin/brain index"
+else line MISSING "brain index" "none yet: bin/brain index"; fi
 k="$(remote_key)"; [ -z "$k" ] || { [ -f "$k" ] && line OK "remote ssh key" "$k" || line MISSING "remote ssh key" "$k (ask the owner; never copy it into the hub)"; }
 [ "${DOCTOR_OFFLINE:-}" = 1 ] && exit 0
 command -v gh >/dev/null && { gh auth status >/dev/null 2>&1 && line OK "github login" "$(gh api user --jq .login 2>/dev/null)" || line MISSING "github login" "gh auth login"; }
 for r in ${HUB_REPOS:-}; do gh api "repos/$r" >/dev/null 2>&1 && line OK "repo $r" "readable" || line MISSING "repo $r" "ask for access"; done
 [ -n "$(remote_host)" ] && { "$H/bin/remote" true >/dev/null 2>&1 && line OK "remote ssh" "$(remote_target)" || line MISSING "remote ssh" "key not loaded or host unreachable: $(remote_target)"; }
 u="$(staging_url)"; [ -n "$u" ] && { c=$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$u/" 2>/dev/null); case "$c" in 2*|3*|401) line OK "staging site" "$u ($c)";; *) line MISSING "staging site" "$u returned ${c:-nothing}";; esac; }
+ou="${AGENT_OLLAMA_URL:-${HUB_OLLAMA_URL:-http://localhost:11434}}"; em="${AGENT_EMBED_MODEL:-${HUB_EMBED_MODEL:-nomic-embed-text}}"
+if curl -s -m 5 "$ou/api/tags" 2>/dev/null | grep -q "\"$em"; then line OK "embeddings" "$em via $ou"; else line MISSING "embeddings" "ollama pull $em (brain search is keyword-only until then)"; fi
 for s in ${HUB_SECRETS:-}; do "$H/bin/secret" --has "$s" && line OK "secret $s" "in the Keychain" || line MISSING "secret $s" "bin/secret --set $s"; done
 exit 0

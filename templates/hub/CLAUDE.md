@@ -34,6 +34,8 @@ never here.
 - Only the main agent or `bin/sync` commits to the hub.
 
 ## Memory and state
+- **Search before you ask or re-derive**: `bin/brain search "<words>"` finds any section of the hub's Markdown (and the
+  extra paths in hub.conf) by keywords and meaning, with file and line. `bin/brain index` refreshes it (session end does).
 - Memory holds facts and pointers. Never secrets, phone numbers or email addresses of contacts.
 - At the end of a session, or before compaction: update the folder's STATE.md and run `bin/journal <folder> "..."`.
 - New work area: `bin/new projects/<name>` or `bin/new ops/<name>`. Access check: `bin/doctor`. Commit hub changes:

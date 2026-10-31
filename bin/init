@@ -5,15 +5,16 @@
 #            [--remote user@host[:port]] [--remote-key <path>] [--remote-dir <dir>] [--staging-url <url>]
 #            [--secret <name>]... [--briefing HH:MM] [--claude <cmd>] [--claude-config-dir <dir>]
 #            [--model M] [--effort low|medium|high|xhigh|max] [--agent-model M] [--briefing-model M]
+#            [--brain-path <dir>]... [--embed-model M] [--ollama-url URL]
 #   bin/init --list   the personas
 # --dest copies the template to a new directory first (it must not exist); without it, initializes in place.
 # Never overwrites an initialized hub (one with hub.conf). Writes no secrets: only names and locations.
 set -u; T="$(cd "$(dirname "$0")/.." && pwd)"
-usage() { sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 fm() { awk -v k="$2" -F': ' '/^---$/{n++; next} n==1 && $1==k {sub(/^[^:]*: /,""); print; exit}' "$1"; }
 if [ "${1:-}" = --list ]; then for p in "$T"/personas/*.md; do printf '%-28s %s\n' "$(basename "$p" .md)" "$(fm "$p" title)"; done; exit 0; fi
 PERSONA=""; CLIENT=""; OWNER=""; NAME=""; DEST=""; FOLDERS=""; REPOS=(); CODE_OWNER=""; REMOTE=""; RKEY=""; RDIR=""
-STAGING=""; SECRETS=(); BRIEF="08:00"; CLAUDE_CMD="claude"; CFG=""; MODEL=""; EFFORT=""; AMODEL="sonnet"; BMODEL="haiku"
+STAGING=""; SECRETS=(); BRIEF="08:00"; CLAUDE_CMD="claude"; CFG=""; MODEL=""; EFFORT=""; AMODEL="sonnet"; BMODEL="haiku"; BPATHS=(); EMODEL="nomic-embed-text"; OURL="http://localhost:11434"
 while [ $# -gt 0 ]; do
   [ $# -ge 2 ] || usage
   case "$1" in
@@ -21,7 +22,8 @@ while [ $# -gt 0 ]; do
     --folders) FOLDERS="$2";; --repo) REPOS+=("$2");; --code-owner) CODE_OWNER="$2";; --remote) REMOTE="$2";;
     --remote-key) RKEY="$2";; --remote-dir) RDIR="$2";; --staging-url) STAGING="$2";; --secret) SECRETS+=("$2");;
     --briefing) BRIEF="$2";; --claude) CLAUDE_CMD="$2";; --claude-config-dir) CFG="$2";; --model) MODEL="$2";;
-    --effort) EFFORT="$2";; --agent-model) AMODEL="$2";; --briefing-model) BMODEL="$2";; *) usage;;
+    --effort) EFFORT="$2";; --agent-model) AMODEL="$2";; --briefing-model) BMODEL="$2";; --brain-path) BPATHS+=("$2");;
+    --embed-model) EMODEL="$2";; --ollama-url) OURL="$2";; *) usage;;
   esac; shift 2
 done
 [ -n "$PERSONA" ] && [ -n "$CLIENT" ] && [ -n "$OWNER" ] || usage
@@ -33,7 +35,7 @@ slugify() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+
 [[ "$CLAUDE_CMD" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "init: bad --claude command" >&2; exit 2; }
 for s in ${SECRETS[@]+"${SECRETS[@]}"}; do [[ "$s" =~ ^[a-z0-9-]+$ ]] || { echo "init: secret names are a-z 0-9 - (names only, never values)" >&2; exit 2; }; done
 TITLE="$(fm "$P" title)"; [ -n "$MODEL" ] || MODEL="$(fm "$P" model)"; [ -n "$FOLDERS" ] || FOLDERS="$(fm "$P" folders)"; FOCUS="$(fm "$P" briefing_focus)"
-for m in "$MODEL" "$AMODEL" "$BMODEL"; do [ -z "$m" ] || [[ "$m" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "init: bad model name '$m'" >&2; exit 2; }; done
+for m in "$MODEL" "$AMODEL" "$BMODEL" "$EMODEL"; do [ -z "$m" ] || [[ "$m" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "init: bad model name '$m'" >&2; exit 2; }; done
 case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "init: --effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
 # the install's config dir: --claude-config-dir, else the CLAUDE_CONFIG_DIR its wrapper exports, else ~/.claude
 if [ -z "$CFG" ]; then
@@ -109,6 +111,9 @@ HUB_BRIEFING_HOUR=$(q "$((10#${BRIEF%%:*}))")
 HUB_BRIEFING_MINUTE=$(q "$((10#${BRIEF##*:}))")
 HUB_BRIEFING_FOCUS=$(q "$FOCUS")
 HUB_TOOLS=""
+HUB_BRAIN_PATHS=$(q "${BPATHS[*]+${BPATHS[*]}}")
+HUB_EMBED_MODEL=$(q "$EMODEL")
+HUB_OLLAMA_URL=$(q "$OURL")
 CONF
 render "$T/templates/hub/CLAUDE.md" "$H/CLAUDE.md"
 render "$T/templates/hub/ACCESS.md" "$H/ACCESS.md"
@@ -124,4 +129,4 @@ for f in $FOLDERS; do HUB="$H" "$H/bin/new" "$f" >/dev/null || exit 1; done
 if [ -n "$FIRST_REPO_ROW" ]; then f1="${FOLDERS%% *}"; printf '%s\n' "$FIRST_REPO_ROW" >> "$H/$f1/ACCESS.md"; fi
 HUB="$H" "$H/bin/journal" hub "Hub initialized from ai-agent-hub-template: $TITLE for $CLIENT (owner $OWNER); folders: $FOLDERS" 
 echo "initialized $NAME ($TITLE for $CLIENT) at $H"
-echo "next: cd $H && bin/setup && bin/doctor, then start $CLAUDE_CMD there"
+echo "next: cd $H && bin/setup && bin/brain index && bin/doctor, then start $CLAUDE_CMD there"

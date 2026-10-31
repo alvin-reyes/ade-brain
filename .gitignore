@@ -8,3 +8,4 @@ repos/
 *.MOV
 .DS_Store
 projects/*/.local/
+.local/

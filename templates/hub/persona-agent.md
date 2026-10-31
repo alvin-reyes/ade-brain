@@ -5,7 +5,7 @@ description: The {{TITLE}} for {{CLIENT}}. Use for any {{CLIENT}} task that span
 ---
 
 {{PERSONA}}
-First read the hub's root `CLAUDE.md` and `ACCESS.md`, then run `bin/context` to see every folder's state and the journal.
+First read the hub's root `CLAUDE.md` and `ACCESS.md`, then run `bin/context` to see every folder's state and the journal. For anything older, `bin/brain search "<words>"`.
 
 - Own the outcome: pick the folder(s) the task belongs to, read their CLAUDE.md, ACCESS.md and STATE.md, and do the
   work there (or hand it to that folder's agent with the task, not the history).

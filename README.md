@@ -39,6 +39,8 @@ Or locally, without GitHub: `bin/init ... --dest ~/Project/acme-sre` copies the 
 | `--model M`, `--effort E` | the default model and effort for sessions (`bin/work`) and the persona agent (default: the persona's) |
 | `--agent-model M` | the folder agents' model (default `sonnet`) |
 | `--briefing-model M` | the morning briefing's model (default `haiku`) |
+| `--brain-path <dir>` | extra folders the brain indexes (e.g. a repo's `docs/`), repeatable |
+| `--embed-model M`, `--ollama-url URL` | the local embedding model (default `nomic-embed-text`) and Ollama address |
 
 ## Personas
 
@@ -60,6 +62,23 @@ Or locally, without GitHub: `bin/init ... --dest ~/Project/acme-sre` copies the 
 
 Add a persona: copy one in `personas/`, keep the front matter (`title`, `folders`, `model`, `briefing_focus`) and the
 `{{CLIENT}}`/`{{OWNER}}` placeholders, and write its habits.
+
+## The brain: searchable memory (SQLite + vectors)
+
+`bin/brain` keeps every Markdown section of the hub (STATE, memory, journal, notes, docs, plus `HUB_BRAIN_PATHS`) in
+one SQLite file, `.local/brain.db` (gitignored, one per hub, so clients never mix). Search ranks two signals together:
+SQLite FTS5 keywords (names, numbers, IDs) and vectors from a **local Ollama** embedding model (meaning). Nothing leaves
+the Mac; no Python packages; without Ollama it still works, keyword only.
+
+```bash
+ollama pull nomic-embed-text        # once per Mac
+bin/brain index                     # incremental; session end runs it too; --full rebuilds
+bin/brain search "what did the client decide about SMS"   # file:line, heading, snippet; --json, -n N
+bin/brain status                    # sections, embedded, stale files
+```
+
+Files stay the source of truth: agents write STATE, memory and notes as before; the index is rebuilt from them. Sections
+that look like they hold a secret are never indexed. `bin/doctor` checks the index is fresh and the model is pulled.
 
 ## Models and Claude installs
 

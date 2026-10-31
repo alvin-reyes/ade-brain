@@ -1,0 +1,52 @@
+#!/bin/bash
+. "$(dirname "$0")/helpers.sh"
+make_hub; cd "$HUB"
+bin/new projects/demo >/dev/null
+cat > projects/demo/STATE.md <<'MD'
+# State: demo
+## Live
+- The billing service runs on the staging box.
+## Open
+- Lauren asked to stop the SMS lead alerts; email already reaches her phone.
+MD
+mkdir -p projects/demo/notes; cat > projects/demo/notes/call.md <<'MD'
+# Call 29 Oct
+## Photos
+No families or faces in the hero photos; use small towns and main streets.
+MD
+# a fake key built from parts, so the literal never sits in the repo (gitleaks would flag the test itself)
+printf '## Secrets\naws_secret_access_key = %s\n' "9fXvPj2LsZqk1Wm8""RtYb3Nc7Hd5Ea0Ug4Ko6Ti2s" >> projects/demo/notes/call.md
+X="$(mktemp -d)"; printf '# Proposal\n## Borrower portal\nStage 1 discovery costs CAD 5,750.\n' > "$X/portal.md"
+# 1. keyword-only: no embedding server reachable, still indexes and finds
+out=$(AGENT_OLLAMA_URL=http://127.0.0.1:9 AGENT_BRAIN_PATHS="$X" bin/brain index 2>&1) || fail "index without ollama failed: $out"
+echo "$out" | grep -qi "keyword only" || fail "says it fell back to keyword search: [$out]"
+AGENT_OLLAMA_URL=http://127.0.0.1:9 bin/brain search "SMS lead alerts" | head -1 | grep -q "projects/demo/STATE.md:" || fail "keyword hit with path"
+AGENT_OLLAMA_URL=http://127.0.0.1:9 bin/brain search "discovery" | grep -q "portal.md" || fail "extra paths indexed"
+bin/brain search "aws_secret_access_key" | grep -q "call.md" && fail "a chunk with a secret was indexed"
+[ -f .local/brain.db ] || fail "db at .local/brain.db"; grep -q '^\.local/' .gitignore || fail ".local/ is gitignored"
+# 2. vectors via an Ollama-compatible server
+P="$(mktemp -d)"; python3 "$REPO/tests/fake_ollama.py" "$P/port" "$P/models" & SRV=$!; trap 'kill $SRV 2>/dev/null' EXIT
+for i in 1 2 3 4 5 6 7 8 9 10; do [ -s "$P/port" ] && break; sleep 0.2; done
+U="http://127.0.0.1:$(cat "$P/port")"
+AGENT_OLLAMA_URL="$U" AGENT_BRAIN_PATHS="$X" bin/brain index --full >/dev/null || fail "full index with vectors"
+assert_contains "$P/models" "nomic-embed-text" "default embedding model"
+st=$(AGENT_OLLAMA_URL="$U" bin/brain status); echo "$st" | grep -qE "embedded +[1-9]" || fail "chunks embedded: [$st]"
+echo "$st" | grep -qE "^stale +0" || fail "nothing stale after index: [$st]"
+# semantic: words not in the text's exact form still rank the right section first via the vector side
+AGENT_OLLAMA_URL="$U" bin/brain search "hero photos families" | head -1 | grep -q "call.md:.*Photos" || fail "hybrid search ranks the photos section"
+AGENT_OLLAMA_URL="$U" bin/brain search --json "billing service" | python3 -c "import json,sys; r=json.load(sys.stdin); assert r[0]['path'].endswith('STATE.md') and r[0]['line']>0" || fail "--json output"
+# 3. incremental: an unchanged hub re-embeds nothing; an edit re-embeds one file; a delete removes it
+: > "$P/models"; AGENT_OLLAMA_URL="$U" AGENT_BRAIN_PATHS="$X" bin/brain index >/dev/null
+[ -s "$P/models" ] && fail "unchanged files were re-embedded"
+echo "- Renewal questions go to servicing." >> projects/demo/STATE.md
+AGENT_OLLAMA_URL="$U" bin/brain status | grep -qE "^stale +1" || fail "edit makes one file stale"
+AGENT_OLLAMA_URL="$U" AGENT_BRAIN_PATHS="$X" bin/brain index >/dev/null
+AGENT_OLLAMA_URL="$U" bin/brain search "renewal servicing" | head -1 | grep -q "STATE.md" || fail "edit indexed"
+rm "$X/portal.md"; AGENT_OLLAMA_URL="$U" AGENT_BRAIN_PATHS="$X" bin/brain index >/dev/null
+bin/brain search "discovery" | grep -q "portal.md" && fail "deleted file still indexed"
+# 4. skipped trees and bad input
+mkdir -p .claude/skills/x repos/y; echo "# zebra skill" > .claude/skills/x/SKILL.md; echo "# zebra repo" > repos/y/a.md
+AGENT_OLLAMA_URL="$U" bin/brain index >/dev/null; bin/brain search zebra | grep -q . && fail "skills or repos indexed"
+bin/brain search >/dev/null 2>&1; assert_eq "$?" "2" "search needs a query"
+bin/brain nope >/dev/null 2>&1; assert_eq "$?" "2" "unknown command"
+echo ok

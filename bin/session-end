@@ -33,8 +33,10 @@ commit_folder() {
   [ ${#fs[@]} -gt 0 ] && git commit -q -m "session $F $(date -u '+%Y-%m-%d %H:%M')" -- "${fs[@]}" >/dev/null 2>&1
   return 0
 }
-[ -n "$commits" ] || { commit_folder; exit 0; }
+refresh_brain() { [ -x "$H/bin/brain" ] && timeout 120 "$H/bin/brain" index >/dev/null 2>&1; return 0; }
+[ -n "$commits" ] || { refresh_brain; commit_folder; exit 0; }
 files=$(find "$H/$F" -type f -not -path '*/.git/*' -mmin "-$(( (now - start) / 60 + 1 ))" 2>/dev/null | sed "s#^$H/$F/##" | head -10 | tr '\n' ',' | sed 's/,$//; s/,/, /g')
 "$(dirname "$0")/journal" "$F" "auto: session ended; commits: $commits${pushed:+; branches pushed: $pushed}; changed files in folder: ${files:-none}"
+refresh_brain
 commit_folder
 exit 0

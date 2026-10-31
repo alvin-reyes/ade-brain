@@ -6,7 +6,7 @@ out=$("$(claude_cmd)" -p "You are $(hub_name)'s $(persona_title) for ${HUB_OWNER
 1) what is live and whether it is healthy, 2) anything broken (ALERT or failed lines in the journal), \
 3) what is waiting on ${HUB_OWNER:-the owner}, on the client, on others, 4) calls or deadlines coming up (dates in STATE.md), \
 5) the top 5 tasks for today with the folder for each.${HUB_BRIEFING_FOCUS:+ Also: $HUB_BRIEFING_FOCUS} Do not change anything." \
-  --model "${AGENT_BRIEFING_MODEL:-${HUB_BRIEFING_MODEL:-haiku}}" --allowedTools "Read,Grep,Glob,Bash(bin/context:*)" < /dev/null 2>&1); rc=$?
+  --model "${AGENT_BRIEFING_MODEL:-${HUB_BRIEFING_MODEL:-haiku}}" --allowedTools "Read,Grep,Glob,Bash(bin/context:*),Bash(bin/brain search:*)" < /dev/null 2>&1); rc=$?
 out=$(printf '%s\n' "$out" | tail -40)
 if [ "$rc" -ne 0 ] || [ -z "${out//[[:space:]]/}" ]; then
   why="$(printf '%s\n' "$out" | grep -v '^[[:space:]]*$' | tail -1 | cut -c1-200)"
