@@ -25,7 +25,17 @@ WORK_DRY=1 bin/work projects/demo nope >/dev/null 2>&1; assert_eq "$?" "2" "unkn
 # negatives
 WORK_DRY=1 bin/work projects/nope >/dev/null 2>&1; assert_eq "$?" "2" "unknown folder"
 bin/new projects/bare >/dev/null
-WORK_DRY=1 bin/work projects/bare >/dev/null 2>&1; assert_eq "$?" "2" "folder with no repo"
+# a folder with no repo opens in the hub folder itself; a named repo it lacks is still refused
+out=$(WORK_DRY=1 bin/work projects/bare); assert_eq "$?" "0" "folder with no repo opens"
+echo "$out" | grep -q "^cd '$HUB/projects/bare' && " || fail "no-repo folder starts in the hub folder"
+WORK_DRY=1 bin/work projects/bare nope >/dev/null 2>&1; assert_eq "$?" "2" "no-repo folder with a repo name"
+# a placeholder row ("(none of its own; ...)") is not a repo: gh is never called, hub folder
+bin/new ops/watch >/dev/null
+printf '| (none of its own; fixes go to the owning folder'"'"'s repo) | | | | |\n' >> ops/watch/ACCESS.md
+G="$(mktemp -d)"; printf '#!/bin/bash\necho called > "%s/gh.called"; exit 1\n' "$G" > "$G/gh"; chmod +x "$G/gh"
+out=$(PATH="$G:$PATH" WORK_DRY=1 bin/work ops/watch 2>&1); assert_eq "$?" "0" "placeholder row opens"
+[ ! -e "$G/gh.called" ] || fail "placeholder row never clones"
+echo "$out" | grep -q "^cd '$HUB/ops/watch' && " || fail "placeholder row starts in the hub folder"
 # a missing checkout is cloned to AGENT_CODE_DIR (gh stubbed) and recorded in ACCESS.md
 S="$(mktemp -d)"; C="$(mktemp -d)"
 printf '#!/bin/bash\necho "$@" > "%s/gh.args"; mkdir -p "$4"\n' "$S" > "$S/gh"; chmod +x "$S/gh"

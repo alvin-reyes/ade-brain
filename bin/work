@@ -1,6 +1,6 @@
 #!/bin/bash
 # bin/work [--claude CMD] [--model M] [--effort E] [--prompt TEXT] [--no-remote] [--agent-model [name=]M] [--agent-effort [name=]E] <folder> [repo]: deep work in a new Terminal, inside the project's checkout, with the folder's hooks.
-# Clones a missing checkout (owner/name as given, else HUB_CODE_OWNER/<name>) to ${AGENT_CODE_DIR:-$HOME/Project}/<name> and records the path in ACCESS.md.
+# A folder with no repo (none, or a "(none ...)" row) works in the hub folder itself. Clones a missing checkout (owner/name as given, else HUB_CODE_OWNER/<name>) to ${AGENT_CODE_DIR:-$HOME/Project}/<name> and records the path in ACCESS.md.
 # --claude picks the Claude install (default: claude_cmd in lib.sh). --model / --effort (anywhere in the arguments) pass through to claude for this session.
 # --prompt TEXT is the session's first message (passed last, after --, quoted for the launcher).
 # Remote Control is on for every session, named after the folder (projects/acme -> acme); --no-remote turns it off.
@@ -35,21 +35,26 @@ F="${POS[0]:-}"; F="${F%/}"; WANT="${POS[1]:-}"   # projects/x/ (tab completion)
 A="$H/$F/ACCESS.md"
 # Code table rows (or rows appended later with an absolute checkout) as "<repo>|<checkout>" (first = default)
 rows=$(awk -F'|' '/^## /{c=($0=="## Code")} /^\|/{n=$2; k=$3; gsub(/^[ \t]+|[ \t]+$/,"",n); gsub(/^[ \t]+|[ \t]+$/,"",k);
-  if((c || k ~ /^[\/~]/) && n!="" && n!="Repo" && n !~ /^-+$/) print n "|" k}' "$A")
-[ -n "$rows" ] || { echo "work: $F has no repo in ACCESS.md" >&2; exit 2; }
-# a repo may be named owner/name in ACCESS.md; WANT matches the full name or the name alone
-row=$(echo "$rows" | { if [ -n "$WANT" ]; then awk -F'|' -v w="$WANT" '{n=$1; sub(/.*\//,"",n)} $1==w || n==w {print; exit}'; else head -1; fi; })
-[ -n "$row" ] || { echo "work: no repo '$WANT' in $F/ACCESS.md" >&2; exit 2; }
-repo="${row%%|*}"; name="${repo##*/}"; dir="${row#*|}"; dir="${dir/#\~/$HOME}"
-own=$(grep -F "| $repo |" "$A" | grep -o 'checkout owned by [^ |]*' | head -1)
-if [ -z "${dir// /}" ] && [ -n "$own" ]; then echo "work: $repo: $own; run bin/work ${own#checkout owned by }" >&2; exit 2; fi
-if [ ! -d "$dir" ]; then
-  dir="${AGENT_CODE_DIR:-$HOME/Project}/$name"; slug="$repo"; if [ "$slug" = "$name" ]; then [ -n "$(code_owner)" ] || { echo "work: $repo has no owner (write owner/name in ACCESS.md or set HUB_CODE_OWNER)" >&2; exit 2; }; slug="$(code_owner)/$name"; fi
+  if((c || k ~ /^[\/~]/) && n!="" && n!="Repo" && n !~ /^-+$/ && n !~ /^\(/) print n "|" k}' "$A")   # "(none ...)" = no repo
+if [ -z "$rows" ]; then
+  # a folder with no code repo of its own works in the hub folder itself
+  [ -z "$WANT" ] || { echo "work: no repo '$WANT' in $F/ACCESS.md" >&2; exit 2; }
+  dir="$H/$F"
+else
+  # a repo may be named owner/name in ACCESS.md; WANT matches the full name or the name alone
+  row=$(echo "$rows" | { if [ -n "$WANT" ]; then awk -F'|' -v w="$WANT" '{n=$1; sub(/.*\//,"",n)} $1==w || n==w {print; exit}'; else head -1; fi; })
+  [ -n "$row" ] || { echo "work: no repo '$WANT' in $F/ACCESS.md" >&2; exit 2; }
+  repo="${row%%|*}"; name="${repo##*/}"; dir="${row#*|}"; dir="${dir/#\~/$HOME}"
+  own=$(grep -F "| $repo |" "$A" | grep -o 'checkout owned by [^ |]*' | head -1)
+  if [ -z "${dir// /}" ] && [ -n "$own" ]; then echo "work: $repo: $own; run bin/work ${own#checkout owned by }" >&2; exit 2; fi
   if [ ! -d "$dir" ]; then
-    mkdir -p "$(dirname "$dir")"; gh repo clone "$slug" "$dir" >&2 || { echo "work: clone of $repo failed" >&2; exit 2; }
+    dir="${AGENT_CODE_DIR:-$HOME/Project}/$name"; slug="$repo"; if [ "$slug" = "$name" ]; then [ -n "$(code_owner)" ] || { echo "work: $repo has no owner (write owner/name in ACCESS.md or set HUB_CODE_OWNER)" >&2; exit 2; }; slug="$(code_owner)/$name"; fi
+    if [ ! -d "$dir" ]; then
+      mkdir -p "$(dirname "$dir")"; gh repo clone "$slug" "$dir" >&2 || { echo "work: clone of $repo failed" >&2; exit 2; }
+    fi
+    # record the checkout path in this repo's row (BSD-safe: rewrite via a temp file)
+    awk -F'|' -v OFS='|' -v r="$repo" -v d="$dir" '/^## /{c=($0=="## Code")} /^\|/{n=$2; gsub(/^[ \t]+|[ \t]+$/,"",n); if((c || $3 ~ /\/|~/) && n==r){$3=" " d " "}} {print}' "$A" > "$A.tmp" && mv "$A.tmp" "$A"
   fi
-  # record the checkout path in this repo's row (BSD-safe: rewrite via a temp file)
-  awk -F'|' -v OFS='|' -v r="$repo" -v d="$dir" '/^## /{c=($0=="## Code")} /^\|/{n=$2; gsub(/^[ \t]+|[ \t]+$/,"",n); if((c || $3 ~ /\/|~/) && n==r){$3=" " d " "}} {print}' "$A" > "$A.tmp" && mv "$A.tmp" "$A"
 fi
 # the folder's specialist agents (front matter + body) go to the session as --agents JSON
 agents=""
