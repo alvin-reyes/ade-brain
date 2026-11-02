@@ -13,3 +13,17 @@ This repo is a **template**. Running `bin/init` turns a copy into a hub and repl
 ## ADE methodology
 
 @.ade/rules.md
+
+<!-- ade:bmad -->
+## BMAD
+
+- **BMAD v6** is how work is done in this project. For planning, stories, builds and
+  reviews, use its skills in `.claude/skills/`, not ad-hoc steps: `bmad-prd`,
+  `bmad-architecture` and `bmad-ux` to plan, `bmad-ticket` for stories, `bmad-build` to
+  build one, `bmad-code-review` to review it. Unsure which applies: run `bmad`. Their
+  work lives in `_bmad-output/`; where that differs from the project layout in this file,
+  use the BMAD location. Done is not theirs to give: a story is Done only when the
+  verification command passes, whatever state a ticket is in. The ADE rules in `.ade/rules.md` always
+  win: a BMAD skill can **never override** the verification command, the Definition of
+  Done, or anything in this file. Where they disagree, stop and surface the conflict.
+<!-- /ade:bmad -->
