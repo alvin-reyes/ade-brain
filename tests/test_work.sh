@@ -77,6 +77,10 @@ assert_eq "$(field "$out" tester model)" "qwen3:32b" "colon model name for an ag
 WORK_DRY=1 bin/work projects/demo --agent-model nobody=opus >/dev/null 2>&1; assert_eq "$?" "2" "unknown agent name"
 WORK_DRY=1 bin/work projects/demo --agent-effort huge >/dev/null 2>&1; assert_eq "$?" "2" "bad agent effort"
 WORK_DRY=1 bin/work projects/demo --agent-model 'x;y' >/dev/null 2>&1; assert_eq "$?" "2" "unsafe agent model"
+# --prompt with the agents JSON in front of it: still valid bash, still last
+out=$(WORK_DRY=1 bin/work projects/demo --prompt 'go -- now')
+printf '%s\n' "$out" | bash -n || fail "agents + prompt is not valid bash"
+q=$(printf %q 'go -- now'); [[ "$out" == *" -- $q" ]] || fail "agents + prompt: the prompt is last"
 rm -rf projects/demo/.claude/agents
 WORK_DRY=1 bin/work projects/demo | grep -q -- "--agents" && fail "no agents dir, no --agents"
 WORK_DRY=1 bin/work projects/demo --agent-model haiku >/dev/null 2>&1; assert_eq "$?" "2" "--agent-model with no agents"
@@ -90,6 +94,17 @@ WORK_DRY=1 bin/work projects/demo | grep -qE -- "--model|--effort" && fail "no o
 WORK_DRY=1 bin/work --effort huge projects/demo >/dev/null 2>&1; assert_eq "$?" "2" "unknown effort level"
 WORK_DRY=1 bin/work --model 'opus;rm' projects/demo >/dev/null 2>&1; assert_eq "$?" "2" "unsafe model name"
 WORK_DRY=1 bin/work projects/demo --model >/dev/null 2>&1; assert_eq "$?" "2" "option without a value"
+# --prompt: the session's first message, last on the command after --, surviving quotes, newlines, $ and backticks
+P0=$'Don\'t say "hi" $HOME `id`\n--second line'
+out=$(WORK_DRY=1 bin/work projects/demo --prompt "$P0" --model opus)
+printf '%s\n' "$out" | bash -n || fail "command with a prompt is not valid bash"
+assert_eq "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "1" "the prompt stays on one command line"
+echo "$out" | grep -q -- "--model opus -- " || fail "the prompt comes last, after --"
+assert_eq "${out%" -- $(printf %q "$P0")"}" "${out%% -- *}" "the command ends with exactly the quoted prompt"
+got=$(eval "printf %s $(printf %q "$P0")"); assert_eq "$got" "$P0" "prompt round trip"
+WORK_DRY=1 bin/work projects/demo | grep -q -- " -- " && fail "no --prompt, no positional prompt"
+WORK_DRY=1 bin/work projects/demo --prompt >/dev/null 2>&1; assert_eq "$?" "2" "--prompt without a value"
+WORK_DRY=1 bin/work projects/demo --prompt "" >/dev/null 2>&1; assert_eq "$?" "2" "empty --prompt"
 # which claude install: HUB_CLAUDE from hub.conf, else claude; AGENT_CLAUDE or --claude picks another
 WORK_DRY=1 bin/work projects/demo | grep -q "' claude --settings" || fail "default is claude"
 echo 'HUB_CLAUDE=claude-personal' > hub.conf
