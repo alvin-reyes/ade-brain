@@ -55,15 +55,15 @@ mkdir -p projects/demo/.claude/agents
 printf -- '---\nname: tester\ndescription: Runs "tests"\ntools: Read, Bash\nmodel: inherit\n---\nYou test things.\nSecond line.\n' > projects/demo/.claude/agents/tester.md
 out=$(WORK_DRY=1 bin/work projects/demo)
 echo "$out" | grep -q -- "--agents " || fail "work passes --agents"
-j=$(eval "$(printf '%s\n' "$out" | sed -E 's/^cd .* && AGENT_FOLDER=[^ ]* [^ ]* --settings [^ ]* --agents /printf %s /')")
+j=$(eval "$(printf '%s\n' "$out" | sed -E 's/^cd .* && AGENT_FOLDER=[^ ]* [^ ]* --settings [^ ]* --agents /printf %s /; s/ --remote-control [^ ]*//')")
 assert_eq "$(echo "$j" | python3 -c 'import json,sys; d=json.load(sys.stdin)["tester"]; print(d["description"]+"|"+d["prompt"].splitlines()[0]+"|"+",".join(d["tools"]) if isinstance(d["tools"],list) else d["tools"])')" 'Runs "tests"|You test things.|Read,Bash' "agents json"
 # apostrophes and double quotes in an agent body must not break the command
 printf -- '---\nname: quoty\ndescription: Jared'"'"'s helper\n---\nDon'"'"'t say "hi" \\ there.\n' > projects/demo/.claude/agents/quoty.md
 out=$(WORK_DRY=1 bin/work projects/demo)
 printf '%s\n' "$out" | bash -n || fail "command with quotes is not valid bash"
-chk=$(printf '%s\n' "$out" | sed -E 's/^cd .* && AGENT_FOLDER=[^ ]* [^ ]* --settings [^ ]* --agents /printf %s /'); [ "$(eval "$chk" | python3 -c 'import json,sys; print(json.load(sys.stdin)["quoty"]["prompt"])')" = "Don't say \"hi\" \\ there." ] || fail "quoted JSON round trip"
+chk=$(printf '%s\n' "$out" | sed -E 's/^cd .* && AGENT_FOLDER=[^ ]* [^ ]* --settings [^ ]* --agents /printf %s /; s/ --remote-control [^ ]*//'); [ "$(eval "$chk" | python3 -c 'import json,sys; print(json.load(sys.stdin)["quoty"]["prompt"])')" = "Don't say \"hi\" \\ there." ] || fail "quoted JSON round trip"
 # per-task subagent model/effort: bare value = every agent, name=value = one agent (wins over bare)
-aj() { printf '%s\n' "$1" | sed -E 's/^cd .* && AGENT_FOLDER=[^ ]* [^ ]* --settings [^ ]* --agents /printf %s /; s/ --(model|effort) [^ ]*//g'; }
+aj() { printf '%s\n' "$1" | sed -E 's/^cd .* && AGENT_FOLDER=[^ ]* [^ ]* --settings [^ ]* --agents /printf %s /; s/ --(model|effort|remote-control) [^ ]*//g'; }
 field() { eval "$(aj "$1")" | python3 -c "import json,sys; print(json.load(sys.stdin)['$2'].get('$3',''))"; }
 out=$(WORK_DRY=1 bin/work projects/demo --agent-model haiku --agent-model quoty=opus --agent-effort tester=low)
 assert_eq "$(field "$out" tester model)" "haiku" "bare --agent-model sets every agent"
@@ -72,7 +72,7 @@ assert_eq "$(field "$out" tester effort)" "low" "name=effort sets that agent"
 assert_eq "$(field "$out" quoty effort)" "" "effort not set elsewhere"
 out=$(WORK_DRY=1 bin/work projects/demo); assert_eq "$(field "$out" tester model)" "" "inherit stays unset without options"
 out=$(WORK_DRY=1 bin/work projects/demo --model qwen/qwen3-coder --agent-model tester=qwen3:32b) || fail "OpenRouter/Ollama model names"
-echo "$out" | grep -q -- "--model qwen/qwen3-coder$" || fail "slash model name passes through"
+echo "$out" | grep -q -- "--model qwen/qwen3-coder --remote-control demo$" || fail "slash model name passes through"
 assert_eq "$(field "$out" tester model)" "qwen3:32b" "colon model name for an agent"
 WORK_DRY=1 bin/work projects/demo --agent-model nobody=opus >/dev/null 2>&1; assert_eq "$?" "2" "unknown agent name"
 WORK_DRY=1 bin/work projects/demo --agent-effort huge >/dev/null 2>&1; assert_eq "$?" "2" "bad agent effort"
@@ -86,9 +86,9 @@ WORK_DRY=1 bin/work projects/demo | grep -q -- "--agents" && fail "no agents dir
 WORK_DRY=1 bin/work projects/demo --agent-model haiku >/dev/null 2>&1; assert_eq "$?" "2" "--agent-model with no agents"
 # per-task model and effort, before or after the folder
 out=$(WORK_DRY=1 bin/work --model opus --effort high projects/demo)
-echo "$out" | grep -q -- "--model opus --effort high$" || fail "work passes --model and --effort"
+echo "$out" | grep -q -- "--model opus --effort high --remote-control demo$" || fail "work passes --model and --effort"
 echo "$out" | grep -q "cd '$R'" || fail "options do not shift the folder"
-WORK_DRY=1 bin/work projects/demo demo-code --effort low | grep -q -- "--effort low$" || fail "options after the repo"
+WORK_DRY=1 bin/work projects/demo demo-code --effort low | grep -q -- "--effort low --remote-control demo$" || fail "options after the repo"
 WORK_DRY=1 bin/work projects/demo | grep -qE -- "--model|--effort" && fail "no options, no --model/--effort"
 # negatives
 WORK_DRY=1 bin/work --effort huge projects/demo >/dev/null 2>&1; assert_eq "$?" "2" "unknown effort level"
@@ -99,12 +99,20 @@ P0=$'Don\'t say "hi" $HOME `id`\n--second line'
 out=$(WORK_DRY=1 bin/work projects/demo --prompt "$P0" --model opus)
 printf '%s\n' "$out" | bash -n || fail "command with a prompt is not valid bash"
 assert_eq "$(printf '%s\n' "$out" | wc -l | tr -d ' ')" "1" "the prompt stays on one command line"
-echo "$out" | grep -q -- "--model opus -- " || fail "the prompt comes last, after --"
+echo "$out" | grep -q -- "--model opus --remote-control demo -- " || fail "the prompt comes last, after --"
 assert_eq "${out%" -- $(printf %q "$P0")"}" "${out%% -- *}" "the command ends with exactly the quoted prompt"
 got=$(eval "printf %s $(printf %q "$P0")"); assert_eq "$got" "$P0" "prompt round trip"
 WORK_DRY=1 bin/work projects/demo | grep -q -- " -- " && fail "no --prompt, no positional prompt"
 WORK_DRY=1 bin/work projects/demo --prompt >/dev/null 2>&1; assert_eq "$?" "2" "--prompt without a value"
 WORK_DRY=1 bin/work projects/demo --prompt "" >/dev/null 2>&1; assert_eq "$?" "2" "empty --prompt"
+# Remote Control on by default, named after the folder, before any prompt; --no-remote leaves it out
+out=$(WORK_DRY=1 bin/work projects/demo)
+echo "$out" | grep -q -- " --remote-control demo" || fail "remote control on, named after the folder"
+out=$(WORK_DRY=1 bin/work projects/demo --prompt "go")
+echo "$out" | grep -q -- " --remote-control demo .*-- go$" || fail "remote control comes before the prompt"
+WORK_DRY=1 bin/work --no-remote projects/demo | grep -q -- "--remote-control" && fail "--no-remote leaves it out"
+WORK_DRY=1 bin/work projects/demo --no-remote | grep -q -- "--remote-control" && fail "--no-remote after the folder leaves it out"
+WORK_DRY=1 bin/work projects/demo/ | grep -q -- " --remote-control demo" || fail "a trailing slash still names the session after the folder"
 # which claude install: HUB_CLAUDE from hub.conf, else claude; AGENT_CLAUDE or --claude picks another
 WORK_DRY=1 bin/work projects/demo | grep -q "' claude --settings" || fail "default is claude"
 echo 'HUB_CLAUDE=claude-personal' > hub.conf

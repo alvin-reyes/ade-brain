@@ -104,7 +104,7 @@ Other providers (OpenRouter, Ollama, a second account) work through a wrapper co
 - **The journal** (`journal/<UTC date>.md`): the shared timeline every agent and hook appends to.
 - **Hooks**: SessionStart prints the state, UserPromptSubmit reports other terminals' changes, and in deep work Stop asks
   for a STATE update after new commits and SessionEnd journals the commits.
-- **Deep work**: `bin/work <folder>` opens a Terminal in the folder's repo checkout with its context and hooks. `--prompt "<task>"` starts that session with its first message.
+- **Deep work**: `bin/work <folder>` opens a Terminal in the folder's repo checkout with its context and hooks. `--prompt "<task>"` starts that session with its first message. Every session starts with Remote Control on, named after the folder, so you can follow it from your phone; `--no-remote` turns that off (use it with an API-key wrapper such as an OpenRouter or Ollama one: Remote Control needs a claude.ai login).
 - **The morning briefing**: `bin/briefing` (Haiku, read-only) and `bin/schedule install` for weekdays.
 - **BMAD v6** skills in `.claude/skills/` for PRDs, specs, stories, builds and reviews, under the ADE rules (`.ade/rules.md`).
 - **Access tools**: `bin/remote` (SSH to the box), `bin/secret` (macOS Keychain), `bin/doctor` (what this Mac can reach).

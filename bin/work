@@ -1,16 +1,18 @@
 #!/bin/bash
-# bin/work [--claude CMD] [--model M] [--effort E] [--prompt TEXT] [--agent-model [name=]M] [--agent-effort [name=]E] <folder> [repo]: deep work in a new Terminal, inside the project's checkout, with the folder's hooks.
+# bin/work [--claude CMD] [--model M] [--effort E] [--prompt TEXT] [--no-remote] [--agent-model [name=]M] [--agent-effort [name=]E] <folder> [repo]: deep work in a new Terminal, inside the project's checkout, with the folder's hooks.
 # Clones a missing checkout (owner/name as given, else HUB_CODE_OWNER/<name>) to ${AGENT_CODE_DIR:-$HOME/Project}/<name> and records the path in ACCESS.md.
 # --claude picks the Claude install (default: claude_cmd in lib.sh). --model / --effort (anywhere in the arguments) pass through to claude for this session.
 # --prompt TEXT is the session's first message (passed last, after --, quoted for the launcher).
+# Remote Control is on for every session, named after the folder (projects/acme -> acme); --no-remote turns it off.
 # --agent-model / --agent-effort (repeatable) set the folder's specialist agents: a bare value sets all, name=value one (it wins). WORK_DRY=1 only prints the command. AGENT_TERMINAL=iterm uses iTerm.
 set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"
-USAGE="usage: bin/work [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--agent-model [name=]M] [--agent-effort [name=]E] <projects|ops>/<name> [repo]"
-MODEL=""; EFFORT=""; PROMPT=""; CL="$(claude_cmd)"; POS=(); ASET=""
+USAGE="usage: bin/work [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--no-remote] [--agent-model [name=]M] [--agent-effort [name=]E] <projects|ops>/<name> [repo]"
+MODEL=""; EFFORT=""; PROMPT=""; REMOTE=1; CL="$(claude_cmd)"; POS=(); ASET=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --model|--effort|--claude) [ $# -ge 2 ] || { echo "$USAGE" >&2; exit 2; }
       case "$1" in --model) MODEL="$2" ;; --effort) EFFORT="$2" ;; *) CL="$2" ;; esac; shift 2 ;;
+    --no-remote) REMOTE=0; shift ;;
     --prompt) [ $# -ge 2 ] && [ -n "$2" ] || { echo "$USAGE" >&2; exit 2; }; PROMPT="$2"; shift 2 ;;
     --agent-model|--agent-effort) [ $# -ge 2 ] || { echo "$USAGE" >&2; exit 2; }
       k="${1#--agent-}"; v="${2#*=}"; n=""; [ "$v" = "$2" ] || n="${2%%=*}"
@@ -28,7 +30,7 @@ case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be
 [ -n "$MODEL" ] || MODEL="${HUB_MODEL:-}"; [ -n "$EFFORT" ] || EFFORT="${HUB_EFFORT:-}"
 [ -z "$MODEL" ] || [[ "$MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
 case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
-F="${POS[0]:-}"; WANT="${POS[1]:-}"
+F="${POS[0]:-}"; F="${F%/}"; WANT="${POS[1]:-}"   # projects/x/ (tab completion) = projects/x
 [ -n "$F" ] && [ -d "$H/$F" ] && [ -f "$H/$F/ACCESS.md" ] || { echo "$USAGE" >&2; exit 2; }
 A="$H/$F/ACCESS.md"
 # Code table rows (or rows appended later with an absolute checkout) as "<repo>|<checkout>" (first = default)
@@ -83,6 +85,7 @@ cmd="cd '$dir' && AGENT_FOLDER='$F' $CL --settings '$H/$F/.claude/settings.json'
 [ -n "$agents" ] && cmd="$cmd --agents $(printf %q "$agents")"
 [ -n "$MODEL" ] && cmd="$cmd --model $MODEL"
 [ -n "$EFFORT" ] && cmd="$cmd --effort $EFFORT"
+[ "$REMOTE" = 1 ] && cmd="$cmd --remote-control $(printf %q "${F##*/}")"
 [ -n "$PROMPT" ] && cmd="$cmd -- $(printf %q "$PROMPT")"
 echo "$cmd"
 [ "${WORK_DRY:-}" = 1 ] && exit 0
