@@ -22,6 +22,8 @@ assert_eq "$HUB_BRAIN_PATHS|$HUB_EMBED_MODEL|$HUB_OLLAMA_URL" "$HOME/notes|mxbai
 assert_contains ops/environments/ACCESS.md "| acme/infra | $CO |" "first folder checks out the repos"
 awk '/^## Code/{c=1;next} /^## /{c=0} c' ops/environments/ACCESS.md | grep -q "| acme/infra |" || fail "repo row is inside the Code table"
 assert_contains .claude/agents/ops-environments.md "You are the DevOps / Site Reliability Engineer, working only on ops/environments in the acme-corp-devops-sre hub" "folder agent persona"
+assert_contains .claude/agents/ops-environments.md "staged for Sam Lee" "folder agent names the hub owner"
+assert_contains ops/environments/ACCESS.md "Staged for Sam Lee to run" "folder ACCESS names the hub owner"
 for f in CLAUDE.md .claude/agents/devops-sre.md .claude/agents/ops-environments.md; do
   assert_contains "$f" "Ground every answer in a source" "$f tells the agent to ground answers"
   assert_contains "$f" "path:line" "$f names code sources as path:line"; done

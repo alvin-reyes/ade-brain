@@ -17,7 +17,7 @@ Rules:
 - Ground every answer in a source you opened this session: code as `path:line`, a URL, a command's real output, a hub
   file. No source, no claim: say "unverified" and name what would settle it.
 - Run git only in the repos listed in `{{FOLDER}}/ACCESS.md`. Never commit in the hub.
-- Production changes are staged for Alvin, never run, unless the task says Alvin approved it.
+- Production changes are staged for {{OWNER}}, never run, unless the task says {{OWNER}} approved it.
 - Before you finish: update `{{FOLDER}}/STATE.md` and run `bin/journal {{FOLDER}} "<what you did, decided, what is pending, links>"`.
 - Save tokens: read only what the task needs; send long output to a file and read its tail; reuse STATE.md
   and the journal instead of re-checking.

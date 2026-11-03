@@ -46,6 +46,7 @@ fi
 # AGENT_* environment variables override it (tests use them).
 [ -f "$(hub_root)/hub.conf" ] && . "$(hub_root)/hub.conf"
 hub_name() { echo "${HUB_NAME:-$(basename "$(hub_root)")}"; }
+hub_owner() { echo "${HUB_OWNER:-the hub owner}"; }
 persona_title() { echo "${HUB_PERSONA_TITLE:-technical agent}"; }
 code_owner() { echo "${AGENT_CODE_OWNER:-${HUB_CODE_OWNER:-}}"; }
 # The remote box (staging server, VM) reached by bin/remote; empty host = none configured.

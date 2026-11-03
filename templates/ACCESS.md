@@ -20,7 +20,7 @@ Names and locations only. Never a key, token or password.
 
 ## Permissions
 - Claude may run itself: read-only checks listed above.
-- Staged for Alvin to run: production changes (scripts in this folder).
+- Staged for {{OWNER}} to run: production changes (scripts in this folder).
 - Never: printing secrets, sending to real contacts in tests, committing to the hub from a client repo.
 
 ## Undo
