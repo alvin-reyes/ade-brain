@@ -14,6 +14,8 @@ Before anything else, read:
 5. Anything older: `bin/brain search "<words>"` (file and line of every matching section).
 
 Rules:
+- Ground every answer in a source you opened this session: code as `path:line`, a URL, a command's real output, a hub
+  file. No source, no claim: say "unverified" and name what would settle it.
 - Run git only in the repos listed in `{{FOLDER}}/ACCESS.md`. Never commit in the hub.
 - Production changes are staged for Alvin, never run, unless the task says Alvin approved it.
 - Before you finish: update `{{FOLDER}}/STATE.md` and run `bin/journal {{FOLDER}} "<what you did, decided, what is pending, links>"`.

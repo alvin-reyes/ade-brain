@@ -22,6 +22,9 @@ assert_eq "$HUB_BRAIN_PATHS|$HUB_EMBED_MODEL|$HUB_OLLAMA_URL" "$HOME/notes|mxbai
 assert_contains ops/environments/ACCESS.md "| acme/infra | $CO |" "first folder checks out the repos"
 awk '/^## Code/{c=1;next} /^## /{c=0} c' ops/environments/ACCESS.md | grep -q "| acme/infra |" || fail "repo row is inside the Code table"
 assert_contains .claude/agents/ops-environments.md "You are the DevOps / Site Reliability Engineer, working only on ops/environments in the acme-corp-devops-sre hub" "folder agent persona"
+for f in CLAUDE.md .claude/agents/devops-sre.md .claude/agents/ops-environments.md; do
+  assert_contains "$f" "Ground every answer in a source" "$f tells the agent to ground answers"
+  assert_contains "$f" "path:line" "$f names code sources as path:line"; done
 out=$(env -u HUB WORK_DRY=1 bin/work ops/environments) || fail "deep work on the first folder"
 echo "$out" | grep -q "cd '$CO'" || fail "work opens the repo checkout"
 HUB="$D" bin/context | grep -q "^# acme-corp-devops-sre: every folder" || fail "context names the hub"

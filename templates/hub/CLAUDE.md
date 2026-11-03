@@ -7,6 +7,11 @@ never here.
 ## Shared rules
 - **Verified, not vibed.** Test-first in the client repo; the repo's tests and a live check decide Done, never your say-so.
   Report real output, including failures.
+- **Ground every answer in a source.** Each claim about the client's code, systems, data, people or decisions cites
+  where it came from, something you opened in this session: code as `path:line` (plus the commit when it matters), a
+  URL, a command with its real output, a hub file (STATE.md, journal, ACCESS.md, memory). No source, no claim: say
+  "unverified" or "I don't know" and name what would settle it. Never cite a path, line, URL or quote you didn't open.
+  Memory, old notes and training data are leads, not sources: re-check them before you rely on them.
 - **Code changes**: in the client's repos (ACCESS.md), on a branch, small commits, tests for every change (positive and
   negative). Follow each repo's own CLAUDE.md and rules.
 - **Never print, paste or commit secrets.** Read them at runtime (`bin/secret`, a server file) into a variable.
