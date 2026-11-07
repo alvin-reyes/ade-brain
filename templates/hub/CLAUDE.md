@@ -26,6 +26,11 @@ never here.
   If the data can't support a number, say so and name the data needed.
 - Pronouns: they/them for anyone whose pronouns aren't stated.
 
+## Tools
+- **Hub:** `bin/brain search`, `bin/journal`, `bin/context`, `bin/work`, `bin/doctor`, `bin/secret`, `bin/remote`, `bin/sync`.
+- **Hub memory** (facts, people, gotchas): `memory/` at the hub root (index `memory/MEMORY.md`). Search it or
+  `bin/brain search` before saying you can't do something or asking {{OWNER}}.
+
 ## The main agent (a session at the hub root)
 1. The SessionStart hook prints every folder's state and the recent journal. Read it.
 2. Propose the day's tasks across folders: what is waiting on {{OWNER}}, what is due, what is broken.
