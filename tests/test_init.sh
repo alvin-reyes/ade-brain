@@ -49,5 +49,6 @@ bin/init --persona tech-lead --client X --owner Y --folders "projects/Bad" --des
 bin/init --persona staff-software-engineer --client "Beta Inc" --owner "Pat" >/dev/null || fail "init in place failed"
 assert_contains hub.conf "HUB_NAME=beta-inc-staff-software-engineer" "derived name"
 assert_contains hub.conf "HUB_AUTO_SYNC=1" "auto sync on by default"
-for f in projects/app projects/proposals projects/client ops/environments; do [ -f "$f/STATE.md" ] || fail "default folder $f"; done
+for f in projects/app projects/proposals projects/client ops/environments; do [ -f "$f/STATE.md" ] || fail "default folder $f"
+  grep -qF "/bin/changes $f\"" "$f/.claude/settings.json" || fail "$f hears hub changes (UserPromptSubmit)"; done
 echo ok
