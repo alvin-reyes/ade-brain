@@ -40,4 +40,25 @@ echo "$T" | bin/session-end projects/demo
 assert_eq "$(git rev-parse HEAD)" "$h" "no hub changes, no commit"
 echo x >> projects/demo/STATE.md; echo "$T" | bin/session-end .
 assert_eq "$(git rev-parse HEAD)" "$h" "hub root session never commits"
+# auto sync: session end starts bin/sync --auto in the background, and never waits on it or fails because of it
+M="$AGENT_STATE/synced"; rm -f "$M"
+echo "$T" | AGENT_AUTO_SYNC=1 AGENT_SYNC_CMD="touch $M" bin/session-end projects/demo; assert_eq "$?" "0" "session-end with auto sync exits 0"
+for i in 1 2 3 4 5 6 7 8 9 10; do [ -e "$M" ] && break; sleep 0.3; done
+[ -e "$M" ] || fail "session end did not start the auto sync"
+rm -f "$M"; echo "$T" | AGENT_AUTO_SYNC=0 AGENT_SYNC_CMD="touch $M" bin/session-end projects/demo; sleep 1
+[ -e "$M" ] && fail "AGENT_AUTO_SYNC=0 still started the auto sync"
+t0=$(date +%s); echo "$T" | AGENT_AUTO_SYNC=1 AGENT_SYNC_CMD="sleep 20" bin/session-end projects/demo; rc=$?
+assert_eq "$rc" "0" "slow sync: session-end still exits 0"; [ $(( $(date +%s) - t0 )) -lt 10 ] || fail "session end waited on the sync"
+echo "$T" | AGENT_AUTO_SYNC=1 AGENT_SYNC_CMD="false" bin/session-end projects/demo; assert_eq "$?" "0" "failing sync: session-end exits 0"
+# the other exit (code commits made this session): journals them and starts the sync too
+echo y > "$R/b" && git -C "$R" add b && git -C "$R" commit -qm "second fix"; rm -f "$M"
+echo '{"transcript_path":""}' | AGENT_AUTO_SYNC=1 AGENT_SYNC_CMD="touch $M" bin/session-end projects/demo
+assert_contains "journal/$(date -u +%Y-%m-%d).md" "second fix" "commits path ran"
+for i in 1 2 3 4 5 6 7 8 9 10; do [ -e "$M" ] && break; sleep 0.3; done; [ -e "$M" ] || fail "commits path did not start the auto sync"
+# HUB_AUTO_SYNC=0 in hub.conf turns it off too (no AGENT_AUTO_SYNC set)
+rm -f "$M"; echo HUB_AUTO_SYNC=0 > hub.conf
+echo "$T" | env -u AGENT_AUTO_SYNC AGENT_SYNC_CMD="touch $M" bin/session-end projects/demo; sleep 1
+[ -e "$M" ] && fail "HUB_AUTO_SYNC=0 still started the auto sync"
+rm -f hub.conf; echo "$T" | env -u AGENT_AUTO_SYNC AGENT_SYNC_CMD="touch $M" bin/session-end projects/demo
+for i in 1 2 3 4 5 6 7 8 9 10; do [ -e "$M" ] && break; sleep 0.3; done; [ -e "$M" ] || fail "auto sync is on by default"
 echo ok

@@ -1,6 +1,7 @@
 #!/bin/bash
 # bin/session-end <folder>: SessionEnd hook (no model). Journals the commits made during the session, then
-# commits that folder's hub files and the journal to the hub (only those paths; never pushes; `bin/sync` pushes).
+# commits that folder's hub files and the journal to the hub (only those paths), then starts `bin/sync --auto` in the
+# background, which pushes (off: HUB_AUTO_SYNC=0 in hub.conf or AGENT_AUTO_SYNC=0; AGENT_SYNC_CMD replaces the command, for tests).
 # Reads the hook JSON on stdin; session start = first transcript line's timestamp, else the last 8 hours.
 # Writes nothing when no repo has commits since then. Always exits 0.
 . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; F="${1:-.}"
@@ -34,9 +35,17 @@ commit_folder() {
   return 0
 }
 refresh_brain() { [ -x "$H/bin/brain" ] && timeout 120 "$H/bin/brain" index >/dev/null 2>&1; return 0; }
-[ -n "$commits" ] || { refresh_brain; commit_folder; exit 0; }
+# then push the hub: bin/sync --auto, detached so the session never waits on it
+auto_sync() {
+  [ "${AGENT_AUTO_SYNC:-${HUB_AUTO_SYNC:-1}}" = 0 ] && return 0
+  if [ -n "${AGENT_SYNC_CMD:-}" ]; then (cd "$H" && nohup $AGENT_SYNC_CMD >/dev/null 2>&1 < /dev/null &) 2>/dev/null
+  else (cd "$H" && nohup "$H/bin/sync" --auto >/dev/null 2>&1 < /dev/null &) 2>/dev/null; fi
+  return 0
+}
+[ -n "$commits" ] || { refresh_brain; commit_folder; auto_sync; exit 0; }
 files=$(find "$H/$F" -type f -not -path '*/.git/*' -mmin "-$(( (now - start) / 60 + 1 ))" 2>/dev/null | sed "s#^$H/$F/##" | head -10 | tr '\n' ',' | sed 's/,$//; s/,/, /g')
 "$(dirname "$0")/journal" "$F" "auto: session ended; commits: $commits${pushed:+; branches pushed: $pushed}; changed files in folder: ${files:-none}"
 refresh_brain
 commit_folder
+auto_sync
 exit 0
