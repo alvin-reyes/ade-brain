@@ -1,0 +1,25 @@
+#!/bin/bash
+# bin/monitor: run every folder's read-only monitors; journal when the status line changes, and once per ALERT; notify on ALERT.
+# A monitor is an executable projects/<x>/monitors.d/*.sh or ops/<x>/monitors.d/*.sh: read-only, its first output line is
+# the status (an optional leading timestamp is ignored), lines starting with ALERT alert. Runs under launchd every 30
+# minutes (bin/schedule) with the plist's PATH only, killed after MONITOR_TIMEOUT seconds (300).
+# State per monitor in $ST: <key> (last output), <key>.status (status line, leading timestamp stripped), <key>.alert (present while alerting).
+. "$(dirname "$0")/lib.sh"; H="$(hub_root)"; ST="$(state_dir)/monitor-state"; mkdir -p "$ST"
+for m in "$H"/projects/*/monitors.d/*.sh "$H"/ops/*/monitors.d/*.sh; do
+  [ -x "$m" ] || continue
+  rel="${m#$H/}"; folder="${rel%%/monitors.d/*}"; key="$(encode_path "$rel")"
+  out="$(timeout "${MONITOR_TIMEOUT:-300}" "$m" 2>&1 | head -20)"; printf '%s' "$out" > "$ST/$key"
+  # "Fri 10:05 UTC | ..." or "2026-10-30 10:05Z | ...": the time changes every run, the rest is the status
+  status="$(echo "$out" | head -1 | sed -E 's/^([A-Z][a-z]{2} [0-9:]{4,5} [A-Z]{2,4}|[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9:]{4,8}Z?) *\| *//')"
+  say=""; [ -f "$ST/$key.status" ] || say=1   # first run
+  [ "$status" != "$(cat "$ST/$key.status" 2>/dev/null)" ] && say=1; printf '%s' "$status" > "$ST/$key.status"
+  alert=0
+  if echo "$out" | grep -q '^ALERT'; then
+    if [ ! -e "$ST/$key.alert" ]; then : > "$ST/$key.alert"; say=1; alert=1; fi
+  else rm -f "$ST/$key.alert"; fi
+  [ -n "$say" ] && "$H/bin/journal" "$folder" "monitor $(basename "$m"): $out"
+  if [ "$alert" = 1 ] && [ "${MONITOR_QUIET:-}" != 1 ]; then
+    osascript -e "display notification \"$(echo "$out" | grep '^ALERT' | head -1 | tr -d '"\\')\" with title \"$(hub_name): $folder\"" 2>/dev/null
+  fi
+done
+exit 0

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>{{LABEL}}</string>
+  <!-- every folder's monitors.d/*.sh every 30 minutes; they get this PATH only, not the shell profile -->
+  <key>ProgramArguments</key><array><string>/bin/bash</string><string>{{HUB}}/bin/monitor</string></array>
+  <key>StartInterval</key><integer>1800</integer>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>{{HOME}}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string></dict>
+  <key>StandardOutPath</key><string>{{LOGS}}/monitor.log</string>
+  <key>StandardErrorPath</key><string>{{LOGS}}/monitor.log</string>
+</dict></plist>

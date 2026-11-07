@@ -1,9 +1,10 @@
 #!/bin/bash
 # bin/schedule install|uninstall|status: the hub's launchd jobs: the morning briefing (weekdays at
-# HUB_BRIEFING_HOUR:HUB_BRIEFING_MINUTE local time) and sync (bin/sync --auto every 30 minutes; not installed, and
-# removed on install, when hub.conf has HUB_AUTO_SYNC=0). Re-run install after pulling new jobs into the hub.
+# HUB_BRIEFING_HOUR:HUB_BRIEFING_MINUTE local time), monitor (bin/monitor every 30 minutes) and sync (bin/sync --auto
+# every 30 minutes; not installed, and removed on install, when hub.conf has HUB_AUTO_SYNC=0).
+# Re-run install after pulling new jobs into the hub.
 . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; LA="${AGENT_LAUNCHAGENTS:-$HOME/Library/LaunchAgents}"; U="gui/$(id -u)"
-ALL="briefing sync"; LOGS="$(state_dir)/logs"
+ALL="briefing monitor sync"; LOGS="$(state_dir)/logs"
 JOBS="$ALL"; OFF=""; [ "${HUB_AUTO_SYNC:-1}" = 0 ] && { JOBS="${ALL/ sync/}"; OFF="sync"; }
 label() { echo "ai.agent-hub.$(hub_name).$1"; }
 remove() { [ "${SCHEDULE_DRY:-}" = 1 ] || launchctl bootout "$U/$(label "$1")" 2>/dev/null; rm -f "$LA/$(label "$1").plist"; echo "removed $(label "$1")"; }
