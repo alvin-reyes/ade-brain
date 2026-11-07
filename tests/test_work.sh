@@ -124,6 +124,8 @@ echo "$out" | grep -q -- " --remote-control demo .*-- go$" || fail "remote contr
 WORK_DRY=1 bin/work --no-remote projects/demo | grep -q -- "--remote-control" && fail "--no-remote leaves it out"
 WORK_DRY=1 bin/work projects/demo --no-remote | grep -q -- "--remote-control" && fail "--no-remote after the folder leaves it out"
 WORK_DRY=1 bin/work projects/demo/ | grep -q -- " --remote-control demo" || fail "a trailing slash still names the session after the folder"
+out=$(WORK_DRY=1 bin/work projects/demo demo-code --no-remote); echo "$out" | grep -q "cd '$R'" || fail "--no-remote after the repo still finds the repo"
+echo "$out" | grep -q -- "--remote-control" && fail "--no-remote after the repo leaves it out"
 # which claude install: HUB_CLAUDE from hub.conf, else claude; AGENT_CLAUDE or --claude picks another
 WORK_DRY=1 bin/work projects/demo | grep -q "' claude --settings" || fail "default is claude"
 echo 'HUB_CLAUDE=claude-personal' > hub.conf
