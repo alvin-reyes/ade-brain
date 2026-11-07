@@ -52,6 +52,10 @@ never here.
 - At the end of a session, or before compaction: update the folder's STATE.md and run `bin/journal <folder> "..."`.
 - New work area: `bin/new projects/<name>` or `bin/new ops/<name>`. Access check: `bin/doctor`. Commit hub changes:
   `bin/sync` (review), then `bin/sync --yes`.
+- `bin/sync --auto` commits and pushes hub files every 30 minutes and at the end of each focus session (log
+  `~/.agent-hub/{{NAME}}/logs/sync.log`; off: `HUB_AUTO_SYNC=0` in hub.conf). A refused or failed run is in that log.
+- Monitors: `projects/<x>/monitors.d/*.sh` and `ops/<x>/monitors.d/*.sh`, read-only, first line the status, `ALERT` lines
+  alert; `bin/monitor` runs them every 30 minutes and journals changes.
 
 ## Token budget
 - Read files on demand: ACCESS.md, a folder's files and memory only when the task needs them.

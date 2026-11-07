@@ -10,7 +10,8 @@ history** of the work and runs Claude Code agents that know them. Client code st
    and `bin/brain index` for searchable memory.
 2. `bin/doctor` until what you need is OK. Store secrets with `bin/secret --set <name>`.
 3. Start `claude` at the repo root. The SessionStart hook prints every folder's state and the recent journal.
-4. Optional: `bin/schedule install` for the weekday morning briefing.
+4. `bin/schedule install`: the weekday morning briefing, `bin/monitor` and `bin/sync --auto` (both every 30 minutes).
+   Auto sync off: `HUB_AUTO_SYNC=0` in `hub.conf`, then `bin/schedule install` again.
 
 ## Folders
 
@@ -28,8 +29,10 @@ history** of the work and runs Claude Code agents that know them. Client code st
 | `bin/remote <cmd>` | a command on the remote box over SSH |
 | `bin/secret <name>` | a secret from the Keychain (`--set`, `--has`, `--forget`, `--list`) |
 | `bin/doctor` | what this Mac can reach; never prints a secret |
-| `bin/briefing`, `bin/schedule install` | the morning briefing, and its weekday launchd job |
+| `bin/briefing`, `bin/schedule install` | the morning briefing; the launchd jobs (briefing, monitor, sync) |
+| `bin/monitor` | run every folder's `monitors.d/*.sh`; journal status changes and ALERTs, notify on ALERT |
 | `bin/work --model M --agent-model [name=]M` | override this hub's models for one session (defaults in `hub.conf`) |
 | `bin/sync`, then `bin/sync --yes` | review, then commit and push hub files only |
+| `bin/sync --auto` | the same, unattended (the 30-minute job and each session end); log `~/.agent-hub/{{NAME}}/logs/sync.log` |
 
 Rules: [CLAUDE.md](CLAUDE.md). Verification: `bash tests/run.sh`.

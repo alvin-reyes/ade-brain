@@ -41,6 +41,7 @@ Or locally, without GitHub: `bin/init ... --dest ~/Project/acme-sre` copies the 
 | `--briefing-model M` | the morning briefing's model (default `haiku`) |
 | `--brain-path <path>` | extra folders, files or globs the brain indexes (e.g. `~/client/docs`, `'~/client/*.md'`), repeatable |
 | `--embed-model M`, `--ollama-url URL` | the local embedding model (default `nomic-embed-text`) and Ollama address |
+| `--auto-sync on\|off` | `HUB_AUTO_SYNC`: push the hub every 30 minutes and at each focus session end (default `on`) |
 
 ## Personas
 
@@ -102,16 +103,41 @@ Other providers (OpenRouter, Ollama, a second account) work through a wrapper co
 - **One folder per work area** (`projects/<name>`, `ops/<name>`): `CLAUDE.md`, `ACCESS.md` (names and locations, never
   values), `STATE.md` (Live, Staged, Open, Waiting on, Next session starts with), `memory/`, and a named agent.
 - **The journal** (`journal/<UTC date>.md`): the shared timeline every agent and hook appends to.
-- **Hooks**: SessionStart prints the state, UserPromptSubmit reports other terminals' changes, and in deep work Stop asks
-  for a STATE update after new commits and SessionEnd journals the commits.
+- **Hooks**: SessionStart prints the state; UserPromptSubmit, in every terminal (hub root and deep work), reports what
+  other terminals changed since the last prompt (STATE.md updates, new journal entries with their text, new or updated
+  memory files with their description); in deep work Stop asks for a STATE update after new commits, and SessionEnd
+  journals the commits, commits the folder and starts `bin/sync --auto`, which pushes.
 - **Deep work**: `bin/work <folder>` opens a Terminal in the folder's repo checkout with its context and hooks (a folder with no repo, such as an ops watcher, opens in the hub folder itself). `--prompt "<task>"` starts that session with its first message. Every session starts with Remote Control on, named after the folder, so you can follow it from your phone; `--no-remote` turns that off (use it with an API-key wrapper such as an OpenRouter or Ollama one: Remote Control needs a claude.ai login).
-- **The morning briefing**: `bin/briefing` (Haiku, read-only) and `bin/schedule install` for weekdays.
+- **Scheduled jobs** (`bin/schedule install`, launchd): the weekday morning briefing (`bin/briefing`, Haiku, read-only);
+  `bin/monitor` every 30 minutes; and `bin/sync --auto` every 30 minutes.
+- **Auto sync**: `bin/sync --auto` commits and pushes the hub's files unattended: one run at a time, skipped while git
+  is busy, refused without gitleaks or without the git hooks (`bin/setup`), every commit to push scanned first, one
+  rebase retry, never a force push. One line per run in `~/.agent-hub/<name>/logs/sync.log`. Off: `HUB_AUTO_SYNC=0`
+  in `hub.conf` (or `bin/init --auto-sync off`), then `bin/schedule install` again.
+- **Monitors**: any executable `projects/<x>/monitors.d/*.sh` or `ops/<x>/monitors.d/*.sh`. Each is read-only; its first
+  output line is the status (a leading timestamp such as `Fri 10:05 UTC |` is ignored), and lines starting with `ALERT`
+  alert. `bin/monitor` journals a status change and each new ALERT once, and shows a notification for an ALERT. Under
+  launchd a monitor gets the plist's PATH only (`~/.local/bin`, Homebrew, system), not your shell profile, and is
+  killed after `MONITOR_TIMEOUT` seconds (300).
 - **BMAD v6** skills in `.claude/skills/` for PRDs, specs, stories, builds and reviews, under the ADE rules (`.ade/rules.md`).
 - **Access tools**: `bin/remote` (SSH to the box), `bin/secret` (macOS Keychain), `bin/doctor` (what this Mac can reach).
 
 Does a checkout know my work? Yes, as far as the hub's files go: STATE.md, memory, the journal and ACCESS.md are
 committed, so a fresh clone (plus `bin/setup`) starts with full context. Secrets, SSH keys and files outside the repo
 (downloads, PDFs) are not in it; `bin/doctor` says what is missing on a new Mac.
+
+## Upgrading a hub made before auto sync
+
+After pulling these scripts into a hub made earlier:
+
+1. Folder sessions hear hub changes only with the new `UserPromptSubmit` hook, and `bin/new` keeps an existing
+   `projects/<x>/.claude/settings.json` (or `ops/<x>/...`). For each folder, either move that file aside and run
+   `bin/new <folder>` again (it remakes only missing files), or add this line under `"hooks"` by hand, with your hub's
+   path and the folder:
+   `"UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "\"/path/to/hub\"/bin/changes projects/<x>" }] }],`
+2. Run `bin/schedule install` again to load the monitor and sync jobs.
+3. Auto sync is on unless `hub.conf` says `HUB_AUTO_SYNC=0`. It needs gitleaks and `bin/setup` (git hooks); without
+   them every run is refused and logged in `sync.log`.
 
 ## Tests
 
