@@ -1,8 +1,13 @@
 #!/bin/bash
-# bin/sync [--yes]: review, then commit and push hub files only (never repos/, never other staged files).
+# bin/sync [--yes|--auto]: review, then commit and push hub files only (never repos/, never other staged files).
+# --auto: unattended --yes for the 30-minute launchd job and the end of every focus session. One run at a time
+# (lock), skips while git is busy (index.lock, rebase, merge), refuses without gitleaks, rebases once if the push is rejected,
+# one line per run in $AGENT_SYNC_LOG (default $(state_dir)/logs/sync.log). HUB_AUTO_SYNC=0 in hub.conf turns it off.
+# Exit 0 = synced, nothing to do or skipped; 1 = failed.
 set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; cd "$H" || exit 1
-PATHS="README.md CLAUDE.md ACCESS.md memory journal reports projects ops docs bin templates tests .claude .githooks .github .gitignore .bigfiles-allow launchd .ade _bmad llms.txt"
-if [ "${1:-}" != "--yes" ]; then
+PATHS="README.md CLAUDE.md ACCESS.md memory journal reports projects ops docs bin templates tests .claude .githooks .github .gitignore .bigfiles-allow launchd .ade _bmad _bmad-output llms.txt"
+MODE="${1:-}"
+if [ "$MODE" != "--yes" ] && [ "$MODE" != "--auto" ]; then
   # review: read-only, the index is left as it is
   pending="$(git status --short -- $PATHS)"
   if [ -z "$pending" ]; then echo "nothing to sync"; exit 0; fi
@@ -13,13 +18,56 @@ if [ "${1:-}" != "--yes" ]; then
   [ -n "$un" ] && echo "note: untracked under .claude/ that --yes would include: ${un% }"
   exit 0
 fi
+if [ "$MODE" = "--auto" ]; then
+  LOG="${AGENT_SYNC_LOG:-$(state_dir)/logs/sync.log}"; mkdir -p "$(dirname "$LOG")" 2>/dev/null
+  log() { echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') $*" >> "$LOG" 2>/dev/null; }
+  [ "${HUB_AUTO_SYNC:-1}" = 0 ] && { log "skipped: auto sync is off (HUB_AUTO_SYNC=0 in hub.conf)"; exit 0; }
+  LOCK="${AGENT_SYNC_LOCK:-$(state_dir)/sync.lock}"; mkdir -p "$(dirname "$LOCK")" 2>/dev/null
+  # stale lock: its owner (pid inside) is gone, or it is over 2 hours old (a run killed mid-way)
+  if [ -d "$LOCK" ]; then
+    op=$(cat "$LOCK/pid" 2>/dev/null)
+    if { [ -n "$op" ] && ! kill -0 "$op" 2>/dev/null; } || [ -n "$(find "$LOCK" -maxdepth 0 -mmin +120 2>/dev/null)" ]; then rm -rf "$LOCK"; log "removed stale lock"; fi
+  fi
+  mkdir "$LOCK" 2>/dev/null || { log "skipped: another sync is running"; exit 0; }
+  echo $$ > "$LOCK/pid"; trap '[ "$(cat "$LOCK/pid" 2>/dev/null)" = $$ ] && rm -rf "$LOCK"' EXIT
+  G="$(git rev-parse --git-dir 2>/dev/null)" || { log "failed: not a git repo"; exit 1; }
+  for b in index.lock MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD rebase-merge rebase-apply; do
+    [ -e "$G/$b" ] && { log "skipped: git is busy ($b)"; exit 0; }
+  done
+  command -v gitleaks >/dev/null || { log "refused: gitleaks not installed (the secret check must run on every auto commit)"; exit 1; }
+  [ "$(git config core.hooksPath)" = .githooks ] || { log "refused: core.hooksPath is not .githooks (run bin/setup), so the pre-commit secret check would not run"; exit 1; }
+fi
 for p in $PATHS; do [ -e "$p" ] && git add -- "$p"; done
 FILES=()
 while IFS= read -r f; do FILES+=("$f"); done < <(git diff --cached --name-only -- $PATHS)
-if [ "${#FILES[@]}" -eq 0 ]; then echo "nothing to sync"; exit 0; fi
-# --only: commit just the hub files; other staged entries stay staged
-git commit -qm "sync $(utc_today) $(utc_now)" -- "${FILES[@]}" || exit 1
-if git remote get-url origin >/dev/null 2>&1; then
-  git push -q || { echo "push failed" >&2; exit 1; }
+ahead=0; git rev-parse -q --verify '@{u}' >/dev/null 2>&1 && ahead=$(git rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)
+if [ "${#FILES[@]}" -eq 0 ] && { [ "$MODE" != "--auto" ] || [ "$ahead" = 0 ]; }; then
+  if [ "$MODE" = "--auto" ]; then log "nothing to sync"; else echo "nothing to sync"; fi; exit 0
 fi
+if [ "${#FILES[@]}" -gt 0 ]; then
+  # --only: commit just the hub files; other staged entries stay staged. The pre-commit hook (repos/, size, gitleaks) runs.
+  if ! git commit -qm "sync $(utc_today) $(utc_now)" -- "${FILES[@]}"; then
+    [ "$MODE" = "--auto" ] && { git reset -q -- "${FILES[@]}" 2>/dev/null; log "failed: commit refused (pre-commit hook, or the index was busy), ${#FILES[@]} file(s) left uncommitted"; }
+    exit 1
+  fi
+fi
+if git remote get-url origin >/dev/null 2>&1; then
+  if [ "$MODE" = "--auto" ]; then
+    # every commit about to leave (also ones made earlier without a scan, e.g. --no-verify) is scanned first
+    if git rev-parse -q --verify '@{u}' >/dev/null 2>&1 && [ -n "$(git rev-list '@{u}..HEAD')" ] && \
+       ! gitleaks detect --no-banner --no-color --log-level warn --redact --log-opts='@{u}..HEAD' >> "$LOG" 2>&1; then
+      log "refused: gitleaks found a secret in the commits to push ($(git rev-list --count '@{u}..HEAD') commit(s)); nothing pushed"; exit 1; fi
+    if ! git push -q 2>>"$LOG"; then
+      # rejected (the remote moved on): rebase once onto it, then push again; never force.
+      # Not with other staged files: autostash would bring them back unstaged.
+      if ! git diff --cached --quiet; then log "failed: push rejected and other files are staged, so no rebase (commit $(git log -1 --pretty=%h) kept locally)"; exit 1; fi
+      if git pull -q --rebase --autostash >>"$LOG" 2>&1 && git push -q 2>>"$LOG"; then log "synced after rebase: $(git log -1 --pretty='%h %s')"; exit 0; fi
+      { [ -d "$G/rebase-merge" ] || [ -d "$G/rebase-apply" ]; } && git rebase --abort 2>/dev/null
+      log "failed: push failed (commit $(git log -1 --pretty=%h) kept locally; git's reason is above)"; exit 1
+    fi
+  else
+    git push -q || { echo "push failed" >&2; exit 1; }
+  fi
+fi
+if [ "$MODE" = "--auto" ]; then log "synced: $(git log -1 --pretty='%h %s') (${#FILES[@]} file(s))"; exit 0; fi
 echo "synced: $(git log -1 --pretty='%h %s')"

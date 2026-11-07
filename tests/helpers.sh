@@ -11,4 +11,6 @@ make_hub() {
   git -C "$HUB" init -q && git -C "$HUB" config user.name t && git -C "$HUB" config user.email t@t
   CLAUDE_HOME="$(mktemp -d)"; export HUB CLAUDE_HOME
   export AGENT_OLLAMA_URL=http://127.0.0.1:9   # tests never reach a real Ollama (test_brain runs a fake one)
+  # tests never push a real hub or touch the real sync log/lock; test_report turns auto sync on with a stub
+  export AGENT_AUTO_SYNC=0 AGENT_SYNC_LOG="$(mktemp -d)/sync.log" AGENT_SYNC_LOCK="$(mktemp -d)/sync.lock"
 }
