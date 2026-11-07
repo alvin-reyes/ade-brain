@@ -6,7 +6,7 @@ bin/init --list | grep -q "^staff-software-engineer *Staff Software Engineer" ||
 D="$(mktemp -d)/acme-ops"; CO="$(mktemp -d)/acme-infra"; mkdir -p "$CO"
 bin/init --persona devops-sre --client "Acme Corp" --owner "Sam Lee" --dest "$D" --repo acme/infra="$CO" \
   --remote deploy@box.acme.test:2222 --remote-key /keys/acme --remote-dir /srv/app --staging-url https://staging.acme.test \
-  --secret grafana-token --briefing 07:30 --brain-path ~/notes --embed-model mxbai-embed-large >/dev/null || fail "init --dest failed"
+  --secret grafana-token --briefing 07:30 --auto-sync off --brain-path ~/notes --embed-model mxbai-embed-large >/dev/null || fail "init --dest failed"
 [ -f "$HUB/hub.conf" ] && fail "--dest wrote into the template"
 cd "$D"
 for f in hub.conf CLAUDE.md ACCESS.md README.md .claude/agents/devops-sre.md ops/environments/STATE.md ops/ci-cd/CLAUDE.md \
@@ -19,7 +19,7 @@ assert_contains .claude/agents/devops-sre.md "no Co-Authored-By" "no AI trailer 
 grep -q "{{" CLAUDE.md ACCESS.md README.md .claude/agents/*.md && fail "unfilled placeholder"
 . ./hub.conf; assert_eq "$HUB_REMOTE_HOST" "box.acme.test" "remote host"; assert_eq "$HUB_REMOTE_PORT" "2222" "remote port"
 assert_eq "$HUB_REMOTE_USER" "deploy" "remote user"; assert_eq "$HUB_BRIEFING_HOUR:$HUB_BRIEFING_MINUTE" "7:30" "briefing time"
-assert_eq "$HUB_SECRETS" "grafana-token" "secret names"
+assert_eq "$HUB_SECRETS" "grafana-token" "secret names"; assert_eq "$HUB_AUTO_SYNC" "0" "--auto-sync off"
 assert_eq "$HUB_BRAIN_PATHS|$HUB_EMBED_MODEL|$HUB_OLLAMA_URL" "$HOME/notes|mxbai-embed-large|http://localhost:11434" "brain settings"; assert_eq "$HUB_REPOS" "acme/infra" "repos"
 assert_contains ops/environments/ACCESS.md "| acme/infra | $CO |" "first folder checks out the repos"
 awk '/^## Code/{c=1;next} /^## /{c=0} c' ops/environments/ACCESS.md | grep -q "| acme/infra |" || fail "repo row is inside the Code table"
@@ -43,9 +43,11 @@ bin/init --persona tech-lead --client X >/dev/null 2>&1; assert_eq "$?" "2" "own
 bin/init --persona tech-lead --client X --owner Y --dest "$D" >/dev/null 2>&1; assert_eq "$?" "2" "existing dest refused"
 bin/init --persona tech-lead --client X --owner Y --secret 'sk-ABC123=' --dest "$(mktemp -d)/s" >/dev/null 2>&1; assert_eq "$?" "2" "secret value refused"
 bin/init --persona tech-lead --client X --owner Y --briefing 25:00 --dest "$(mktemp -d)/b" >/dev/null 2>&1; assert_eq "$?" "2" "bad briefing time"
+bin/init --persona tech-lead --client X --owner Y --auto-sync maybe --dest "$(mktemp -d)/a" >/dev/null 2>&1; assert_eq "$?" "2" "bad --auto-sync"
 bin/init --persona tech-lead --client X --owner Y --folders "projects/Bad" --dest "$(mktemp -d)/f" >/dev/null 2>&1; assert_eq "$?" "2" "bad folder"
 # in place, default folders and name from the client
 bin/init --persona staff-software-engineer --client "Beta Inc" --owner "Pat" >/dev/null || fail "init in place failed"
 assert_contains hub.conf "HUB_NAME=beta-inc-staff-software-engineer" "derived name"
+assert_contains hub.conf "HUB_AUTO_SYNC=1" "auto sync on by default"
 for f in projects/app projects/proposals projects/client ops/environments; do [ -f "$f/STATE.md" ] || fail "default folder $f"; done
 echo ok
