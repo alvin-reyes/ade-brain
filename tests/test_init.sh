@@ -14,6 +14,8 @@ for f in hub.conf CLAUDE.md ACCESS.md README.md .claude/agents/devops-sre.md ops
 assert_contains CLAUDE.md "# acme-corp-devops-sre: the DevOps / Site Reliability Engineer" "title"
 assert_contains CLAUDE.md "You are the **DevOps / Site Reliability Engineer** for Acme Corp, working for Sam Lee." "persona"
 assert_contains CLAUDE.md "when Sam Lee says so" "owner in the rules"
+assert_contains CLAUDE.md "Commits and PRs carry Sam Lee's own git identity only" "no AI author in the rules"
+assert_contains .claude/agents/devops-sre.md "no Co-Authored-By" "no AI trailer for folder agents"
 grep -q "{{" CLAUDE.md ACCESS.md README.md .claude/agents/*.md && fail "unfilled placeholder"
 . ./hub.conf; assert_eq "$HUB_REMOTE_HOST" "box.acme.test" "remote host"; assert_eq "$HUB_REMOTE_PORT" "2222" "remote port"
 assert_eq "$HUB_REMOTE_USER" "deploy" "remote user"; assert_eq "$HUB_BRIEFING_HOUR:$HUB_BRIEFING_MINUTE" "7:30" "briefing time"

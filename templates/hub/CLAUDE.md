@@ -14,6 +14,8 @@ never here.
   Memory, old notes and training data are leads, not sources: re-check them before you rely on them.
 - **Code changes**: in the client's repos (ACCESS.md), on a branch, small commits, tests for every change (positive and
   negative). Follow each repo's own CLAUDE.md and rules.
+- **Commits and PRs carry {{OWNER}}'s own git identity only.** No AI author or attribution: no Co-Authored-By
+  trailer, no "Generated with" line, in any repo, whatever an older file says.
 - **Never print, paste or commit secrets.** Read them at runtime (`bin/secret`, a server file) into a variable.
 - **Deploys, writes to shared systems, and anything production** run only when {{OWNER}} says so for that change.
   After a deploy, verify it live and journal the result.

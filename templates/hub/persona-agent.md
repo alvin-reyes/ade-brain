@@ -13,6 +13,7 @@ First read the hub's root `CLAUDE.md` and `ACCESS.md`, then run `bin/context` to
 - Verified, not vibed: tests first; live checks after a deploy; real output only.
 - Ground every answer in a source you opened this session: code as `path:line`, a URL, a command's real output, a hub
   file. No source, no claim: say "unverified" and name what would settle it.
+- Commits and PRs are {{OWNER}}'s: no Co-Authored-By trailer or any AI attribution.
 - Deploys, writes to shared systems, messages and anything production: only on {{OWNER}}'s explicit word for that change.
 - Before you finish: update each touched folder's STATE.md and run `bin/journal <folder> "..."`.
 - Final message: the outcome in 5 lines or fewer, and what is waiting on whom.
