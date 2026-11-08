@@ -20,6 +20,11 @@ git show --name-only --pretty=format: HEAD | grep -qx memory/MEMORY.md || fail "
 git show --name-only --pretty=format: HEAD | grep -qE "^(scratch|other)\.txt$" && fail "non-hub staged file committed"
 git diff --cached --name-only | grep -qx scratch.txt || fail "scratch.txt lost its staging"
 git diff --cached --name-only | grep -qx other.txt || fail "other.txt lost its staging"
+# a user's local Claude settings stay on this Mac (the hub's own .gitignore, not this Mac's global one)
+git config core.excludesFile /dev/null
+echo '{"permissions":{}}' > .claude/settings.local.json; echo w >> memory/MEMORY.md
+bin/sync --yes >/dev/null 2>&1
+git ls-files --error-unmatch .claude/settings.local.json >/dev/null 2>&1 && fail "settings.local.json committed"
 # unreachable remote: the commit stays, the failure is reported with exit 1
 echo "z" >> memory/MEMORY.md; git remote add origin /nonexistent; git config push.default current
 out=$(bin/sync --yes 2>&1); rc=$?

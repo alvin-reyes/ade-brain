@@ -23,6 +23,11 @@ bin/context projects/demo | grep -q '^## Shared rules' && fail "plain context ha
 # named repo, and a repo that is not in ACCESS.md
 WORK_DRY=1 bin/work projects/demo demo-code | grep -q "cd '$R'" || fail "named repo"
 WORK_DRY=1 bin/work projects/demo nope >/dev/null 2>&1; assert_eq "$?" "2" "unknown repo name"
+# a checkout path with a single quote: the launch command still cds into it
+Q="$(mktemp -d)/o'brien-code"; mkdir -p "$Q" && git -C "$Q" init -q
+bin/new projects/quote >/dev/null; printf '| quote-code | %s | main | Alvin | none |\n' "$Q" >> projects/quote/ACCESS.md
+out=$(WORK_DRY=1 bin/work projects/quote) || fail "work with a quote in the checkout path"
+assert_eq "$(eval "${out%% && *}" && pwd)" "$(cd "$Q" && pwd)" "launch command cds into a path with a quote"
 # negatives
 WORK_DRY=1 bin/work projects/nope >/dev/null 2>&1; assert_eq "$?" "2" "unknown folder"
 bin/new projects/bare >/dev/null

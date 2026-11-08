@@ -86,7 +86,8 @@ PY
 ) || exit 2
 elif [ -n "$ASET" ]; then echo "work: $F has no specialist agents for --agent-model/--agent-effort" >&2; exit 2
 fi
-cmd="cd '$dir' && AGENT_FOLDER='$F' $CL --settings '$H/$F/.claude/settings.json'"
+sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }   # single-quoted for the launcher, a ' inside kept
+cmd="cd $(sq "$dir") && AGENT_FOLDER='$F' $CL --settings $(sq "$H/$F/.claude/settings.json")"
 [ -n "$agents" ] && cmd="$cmd --agents $(printf %q "$agents")"
 [ -n "$MODEL" ] && cmd="$cmd --model $MODEL"
 [ -n "$EFFORT" ] && cmd="$cmd --effort $EFFORT"
