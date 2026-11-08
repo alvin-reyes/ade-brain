@@ -9,3 +9,4 @@ repos/
 .DS_Store
 projects/*/.local/
 .local/
+.claude/settings.local.json

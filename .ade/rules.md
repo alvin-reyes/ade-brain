@@ -40,13 +40,20 @@ command decides.
   Context · Decision · Consequences). Read the existing ADRs before diverging; never
   silently re-decide.
 - **Stay in your lane.** Each role owns specific artifacts (see `.claude/agents/`). Don't
-  redesign the architecture as a developer, or pick the stack as a designer.
+  redesign the architecture as a developer, or pick the stack as a designer. `adversarial-reviewer` is
+  additionally restricted to read-only tools: it judges work, it never edits it. `qa`
+  may write only the story's Verification section and the journal, never code or tests.
 - **Adversarial review is mandatory.** Every artifact is reviewed by a skeptic whose job
   is to break it. Material flaws block; they are not waved through.
 - **The constitution binds.** `CLAUDE.md` holds the project's standing conventions. Read
   it first and never contradict it.
 - **Keep the journal.** When a plan is approved, a story is sharded or a story is Done,
-  append one dated line to `.ade/session.md`.
+  append one dated line to `.ade/session.md`. The architect records approvals, the
+  scrum-master records shards, and QA records Done when the
+  verification command passes.
+- **Commit as the user.** Commits and pull requests go out under the user's own git
+  identity. Add no AI attribution: no `Co-Authored-By` trailer for an agent or model, no
+  "Generated with ..." line in a PR description.
 
 ## 3. Definition of Done (per story)
 A story is Done only when ALL hold:
@@ -57,3 +64,9 @@ A story is Done only when ALL hold:
 4. Any shared contract it introduced is recorded in `.ade/context/`.
 
 If any is false, the story is not Done: no exceptions, no overrides by assertion.
+
+<!-- ade:archive -->
+## 4. The archive
+`.ade/archive/` holds earlier BMAD versions of this project. It is
+read-only history: never treat it as current documents, never write to it,
+and read it only when a person asks about the earlier work.

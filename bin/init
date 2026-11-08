@@ -56,7 +56,9 @@ if [ -n "$DEST" ]; then
 fi
 [ -f "$H/hub.conf" ] && { echo "init: $H is already initialized (hub.conf exists)" >&2; exit 2; }
 # the persona text, with client and owner filled in
-PERSONA_TEXT="$(awk '/^---$/{n++; next} n>=2' "$P" | sed -e "s#{{CLIENT}}#$CLIENT#g" -e "s#{{OWNER}}#$OWNER#g")"
+# (python, not sed: a name with & or # would be read as sed syntax)
+PERSONA_TEXT="$(awk '/^---$/{n++; next} n>=2' "$P" | CLIENT="$CLIENT" OWNER="$OWNER" python3 -c 'import os, sys
+print(sys.stdin.read().replace("{{CLIENT}}", os.environ["CLIENT"]).replace("{{OWNER}}", os.environ["OWNER"]), end="")')"
 render() {  # template output: fill placeholders (multi-line values via python, so no sed escaping problems)
   NAME="$NAME" TITLE="$TITLE" CLIENT="$CLIENT" OWNER="$OWNER" PERSONA="$PERSONA_TEXT" SLUG="$PERSONA" MODEL="${MODEL:-inherit}" \
   REPO_ROWS="$REPO_ROWS" REMOTE_TXT="$REMOTE_TXT" STAGING_TXT="${STAGING:-none}" SECRETS_TXT="$SECRETS_TXT" FOLDER_LIST="$FOLDER_LIST" \
@@ -123,7 +125,18 @@ render "$T/templates/hub/ACCESS.md" "$H/ACCESS.md"
 render "$T/templates/hub/README.md" "$H/README.md"
 mkdir -p "$H/.claude/agents" "$H/journal" "$H/memory" "$H/projects" "$H/ops"
 render "$T/templates/hub/persona-agent.md" "$H/.claude/agents/$PERSONA.md"
-sed -i '' -e "s#^project_name = .*#project_name = \"$NAME\"#" -e "s#^output_folder = .*#output_folder = \"$H/_bmad-output\"#" "$H/_bmad/config.toml" 2>/dev/null
+# BMAD's project name and output folder (python: the hub path may hold & or #); a failure stops init, never silently
+if [ -f "$H/_bmad/config.toml" ]; then
+  python3 - "$H/_bmad/config.toml" "$NAME" "$H/_bmad-output" <<'PY' || { echo "init: could not write _bmad/config.toml" >&2; exit 1; }
+import re, sys
+p, name, out = sys.argv[1:]
+q = lambda v: '"%s"' % v.replace("\\", "\\\\").replace('"', '\\"')
+s = open(p).read()
+s = re.sub(r"(?m)^project_name = .*$", lambda m: "project_name = " + q(name), s)
+s = re.sub(r"(?m)^output_folder = .*$", lambda m: "output_folder = " + q(out), s)
+open(p, "w").write(s)
+PY
+fi
 [ -f "$H/memory/MEMORY.md" ] || printf '# Memory index (hub root: cross-folder facts)\n\n' > "$H/memory/MEMORY.md"
 if [ ! -d "$H/.git" ]; then git -C "$H" init -q && git -C "$H" branch -M main 2>/dev/null; fi
 git -C "$H" config core.hooksPath .githooks
