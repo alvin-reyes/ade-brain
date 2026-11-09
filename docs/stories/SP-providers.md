@@ -1,6 +1,6 @@
 # SP: DeepSeek behind Claude Code (GLM disabled, Meta left out)
 
-Status: **approved by the owner 2026-11-09; in build.** Owner rule added the same day: DeepSeek only in the owner's own hubs
+Status: **QA passed, awaiting code review (2026-11-09); not Done.** Earlier: approved by the owner 2026-11-09, in build. Owner rule added the same day: DeepSeek only in the owner's own hubs
 (AC31 to AC34).
 
 Earlier status: **UNBLOCKED for DeepSeek** (2026-11-09). S0 item 21 answered for `deepseek` in `.ade/context/engines.md`: focus session,
@@ -291,4 +291,63 @@ Command: `bash tests/run.sh` (must print `ok    test_providers.sh` and every exi
 
 Real output recorded by QA:
 
-_(empty; QA fills this in. Dev agents do not write here.)_
+Status: **QA passed, awaiting code review** (2026-11-09). Not Done: the adversarial code review is still open.
+
+Run (hermetic, as required): `S=$(mktemp -d); mkdir -p "$S/home" "$S/tmp"; env -i PATH="$PATH" HOME="$S/home" TMPDIR="$S/tmp" LANG=C bash tests/run.sh`
+(no `CLAUDE_CONFIG_DIR` / `HUB_CLAUDE_CONFIG_DIR`). Exit 0. Real output:
+
+```
+ok    test_brain.sh
+ok    test_briefing.sh
+ok    test_changes.sh
+ok    test_context.sh
+ok    test_doctor.sh
+ok    test_init.sh
+ok    test_lib.sh
+ok    test_models.sh
+ok    test_monitor.sh
+ok    test_new.sh
+ok    test_precommit.sh
+ok    test_providers.sh
+ok    test_remote.sh
+ok    test_report.sh
+ok    test_root.sh
+ok    test_schedule.sh
+ok    test_secret.sh
+ok    test_session_end.sh
+ok    test_setup.sh
+ok    test_sync.sh
+ok    test_work.sh
+```
+
+`tests/run.sh` hides a passing suite's output, so the SKIP lines come from `bash tests/test_providers.sh` alone (same hermetic
+env, exit 0, last line `ok`):
+
+```
+SKIP AC7 checkout_base_url_conflict_refused: S0 item 21: the provider layer's env wins over checkout and user settings (engines.md, Settings precedence)
+SKIP AC19 allowed_tools_applied: none needed for DeepSeek (engines.md, Tool restriction)
+```
+
+Safety: `shasum ~/.claude-caiden/settings.json ~/.claude/settings.json` before and after the runs are identical
+(`5f36b2ea...` and `7d2a7b7e...`).
+
+Criteria map (QA read each check's body, not only the exit code): AC1 `provider_rows_static`; AC2 `dry_run_deepseek`; AC3
+`launcher_file_holds_no_key`; AC4 `engine_argv_holds_no_key`; AC5 `fail_closed_on_missing_key` and `fail_closed_on_empty_key`;
+AC6 `key_checked_once_before_launch` and `single_merged_settings_keeps_hooks`; AC8 `provider_implies_no_remote`; AC9
+`provider_rejects_wrapper_from_each_source`; AC10 `provider_model_rules` and `hub_model_not_passed`; AC11
+`provider_effort_accepted` and `provider_effort_refused`; AC12 `hub_provider_model_override` and `hub_provider_model_checked`;
+AC13 `no_base_url_override`; AC14 `provider_env_not_trusted` and `provider_not_allowed`; AC15 `no_go_pair_refused_by_work`; AC16
+`agents_provider_check`; AC17 `doctor_provider_rows_name_only`; AC18 `meta_row_only_with_a_go`; AC20 `readme_provider_section`;
+AC21 `adr_0002_provider_section`; AC22 `scope_guard_briefing_and_agent`; AC23 `hermetic_fake_engine_only`; AC25
+`provider_config_dir_isolated`; AC26 `provider_memory_linked`; AC27 `provider_resume_refused`; AC28 `provider_layer_flags`; AC29
+`anthropic_path_unchanged`; AC30 mapped to the AC3/AC4/AC6 checks; AC31 `deepseek_client_hub_refused`; AC32
+`deepseek_owned_hub_allowed`; AC33 `owned_by_owner_env_not_trusted`; AC34 `doctor_flags_client_hub_deepseek`. AC24: the five
+named suites are unchanged against `origin/s0-providers` (empty diff) and each printed `ok` above.
+
+SKIPs: AC7 and AC19 print the recorded reason and first assert the engines.md line (`The env block of the --settings layer
+**wins**`, and `Tool restriction (AC19): none needed for DeepSeek.`); both lines exist in `.ade/context/engines.md`, so the reasons
+match. Neither is a silent pass.
+
+Weak spots (not failures): AC22 depends on a local `origin/s0-providers` ref and fails with a clear message if it is absent
+(needs `git fetch`). AC23's "no other `claude` ran" is shown by the nonce marker plus PATH, not by tracing every process.
+
