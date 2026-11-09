@@ -20,3 +20,4 @@
 - 2026-11-09: S1 (docs/stories/S1-session-end-without-hook.md) Done: QA mapped all 18 ACs to named checks and `bash tests/run.sh` passed (exit 0, all 20 test files ok).
 - 2026-11-09: S1 reopened: code review blocked (stale-lock takeover race, two tests pass with the bug, timing-sensitive waits); back to the developer.
 - 2026-11-09: S1 re-verified by QA after the reopen (fixes bccbd79): `bash tests/run.sh` all 20 test files ok, new lock/log/--since/stdin checks present and asserting; awaiting code re-review before Done.
+- 2026-11-09: S1 Done: QA re-verification green and the adversarial code re-review passed (race, mutation and flakiness checks). Owner decisions open: 120-minute lock age rule; SessionEnd hook time limit.
