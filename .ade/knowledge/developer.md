@@ -6,3 +6,4 @@
 - 2026-11-09: bin/work's launcher runs through osascript; a stub must run it with plain `bash "$L"`, not `bash -l`, or the login profile resets PATH and the real `claude` runs.
 - 2026-11-09: don't patch bin/ scripts with a shell heredoc whose delimiter is `PY`: bin/work embeds `<<'PY'` blocks, so the outer heredoc ends early. Put the patch script in a file.
 - 2026-11-09: `bash tests/test_providers.sh <check> ...` runs single checks, which helps for red-first evidence.
+- 2026-11-09: macOS `mktemp -d` with no template ignores `TMPDIR` (it uses the per-user `/var/folders/.../T`); only an explicit template (`mktemp -d "$TMPDIR/x.XXXXXX"`) lands in `TMPDIR`. So "TMPDIR is empty afterwards" proves nothing about make_hub's dirs: list them and check each is gone. Grep-based mutations need `grep -F` when the pattern has `$` (BRE treats it as an anchor and the mutation silently does not apply: check the diff).

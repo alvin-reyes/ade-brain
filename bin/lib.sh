@@ -45,7 +45,7 @@ fi
 # Providers behind Claude Code (story SP; contract in .ade/context/providers.md, findings in .ade/context/engines.md).
 # One row per provider; anthropic (Claude Code's own login) has no row. Base URLs live only here: no override, ever.
 # Fields: base_url, secret (Keychain name for bin/secret), label (doctor), model/opus/sonnet/haiku/small (slots),
-# owner_only (1 = only in a hub with HUB_OWNED_BY_OWNER=1; owner rule 2026-11-09, ADR 0002).
+# owner_only (1 = only in a hub with HUB_OWNED_BY_OWNER=1; owner rule 2026-11-09, ADR 0002; a row without it is owner-only too).
 providers() { echo "deepseek glm"; }
 provider_field() {
   case "$1:$2" in
@@ -58,6 +58,7 @@ provider_field() {
     glm:base_url) echo "https://api.z.ai/api/anthropic" ;;
     glm:secret) echo "zai-api-key" ;;
     glm:label) echo "z.ai API key" ;;
+    glm:owner_only) echo 1 ;;
     glm:model|glm:opus|glm:sonnet|glm:haiku|glm:small) echo "unconfirmed" ;;
     *) return 1 ;;
   esac
@@ -81,11 +82,19 @@ provider_model_ok() {
 # provider_model_id <provider> <model>: a slot alias resolved through the row, else the model itself
 provider_model_id() { case "$2" in opus|sonnet|haiku) provider_field "$1" "$2" ;; *) echo "$2" ;; esac; }
 # provider_hub_refusal <provider>: prints why this hub may not use it (empty = it may). Call after hub.conf is read.
+# Fails closed: only owner_only 0 opens a provider to client hubs; a missing value counts as owner-only.
 provider_hub_refusal() {
-  [ "$(provider_field "$1" owner_only)" = 1 ] && [ "${HUB_OWNED_BY_OWNER:-}" != 1 ] &&
+  local o; o="$(provider_field "$1" owner_only)"
+  [ "$o" = 0 ] || [ "${HUB_OWNED_BY_OWNER:-}" = 1 ] && return 0
+  if [ "$o" = 1 ]; then
     echo "$1 is only for the owner's own hubs (HUB_OWNED_BY_OWNER=1 in hub.conf): its terms allow training on API data and store it in the People's Republic of China (ADR 0002)"
-  return 0
+  else
+    echo "$1 has no owner_only value in bin/lib.sh, so it is refused outside the owner's own hubs (HUB_OWNED_BY_OWNER=1 in hub.conf, ADR 0002)"
+  fi
 }
+# provider_scrub_vars: names that beat apiKeyHelper or switch Claude Code to another backend (auth order:
+# ANTHROPIC_AUTH_TOKEN > ANTHROPIC_API_KEY > apiKeyHelper > OAuth). A provider session never passes them on.
+provider_scrub_vars() { echo "ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_CUSTOM_HEADERS CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY CLAUDE_CODE_OAUTH_TOKEN"; }
 # hub.conf (written by bin/init): who this agent is and what it can reach. Names and locations only, never secrets.
 # AGENT_* environment variables override it (tests use them). Provider choice and hub ownership come only from hub.conf.
 unset HUB_PROVIDER HUB_PROVIDERS_ALLOWED HUB_OWNED_BY_OWNER

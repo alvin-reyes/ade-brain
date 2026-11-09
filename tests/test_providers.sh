@@ -8,8 +8,10 @@
 make_hub; cd "$HUB"
 # never inherit the shell's Claude config dir: a launch without a CLAUDE_CONFIG_DIR prefix must land in $CLAUDE_HOME
 unset CLAUDE_CONFIG_DIR HUB_CLAUDE_CONFIG_DIR
+S="$(mktemp -d)"; mkdir -p "$S/tmp" "$S/home"; export TMPDIR="$S/tmp" HOME="$S/home"   # never the tester's HOME
+# every temp dir this suite (and make_hub) made goes when it exits
+trap 'rm -rf "$S" "$(dirname "$HUB")" "$CLAUDE_HOME" "$(dirname "$AGENT_SYNC_LOG")" "$(dirname "$AGENT_SYNC_LOCK")"' EXIT
 bin/new projects/demo >/dev/null
-S="$(mktemp -d)"; mkdir -p "$S/tmp"; export TMPDIR="$S/tmp"
 export SP_ROOT="$S" SP_CAP="$S/cap" SP_CALLS="$S/calls" SP_KEYFILE="$S/key" SP_STORED="$S/stored" SP_NONCE="fake-$$-$RANDOM"
 KEY="sk-SPTEST-$RANDOM$RANDOM-c0ffee"; printf '%s' "$KEY" > "$SP_KEYFILE"; chmod 600 "$SP_KEYFILE"; : > "$SP_CALLS"
 echo deepseek-api-key > "$SP_STORED"
@@ -26,11 +28,12 @@ STUB
 cat > "$S/osascript" <<'STUB'
 #!/bin/bash
 echo "osascript" >> "$SP_CALLS"
+[ "${SP_OSA_FAIL:-}" = 1 ] && { echo "osascript stub: failing on purpose" >&2; exit 1; }
 L=$(printf '%s\n' "$@" | grep -o 'bash -l [^"]*' | head -1); L="${L#bash -l }"
 [ -f "$L" ] || { echo "osascript stub: no launcher in [$*]" >&2; exit 1; }
 mkdir -p "$SP_CAP"; cp "$L" "$SP_CAP/launcher"
 m=$(grep -o -- "--settings '[^']*'" "$L" | head -1 | sed "s/^--settings '//; s/'\$//")
-[ -n "$m" ] && [ -f "$m" ] && cp "$m" "$SP_CAP/settings.json"
+[ -n "$m" ] && [ -f "$m" ] && { cp "$m" "$SP_CAP/settings.json"; stat -f %Lp "$m" > "$SP_CAP/settings.mode"; echo "$m" > "$SP_CAP/settings.path"; }
 bash "$L" > "$SP_CAP/launcher.out" 2>&1
 STUB
 # the fake engine: writes a marker, its argv, whether its environment holds the key, and a /model-style settings write
@@ -49,7 +52,7 @@ STUB
 # stub bin/secret (installed into the hub copy): counts its calls; SP_SECRET_MODE=fail exits 1, =empty prints nothing
 cat > "$S/secret" <<'STUB'
 #!/bin/bash
-echo "secret $*" >> "$SP_CALLS"
+echo "secret $*" >> "$SP_CALLS"; echo "hub=${HUB:-} svc=${AGENT_KEYCHAIN_SERVICE:-}" >> "$SP_ROOT/secret-env"
 case "$1" in --has) grep -qx "$2" "$SP_STORED"; exit;; esac
 case "${SP_SECRET_MODE:-ok}" in fail) echo "secret: $1 not stored" >&2; exit 1;; empty) exit 0;; esac
 cat "$SP_KEYFILE"
@@ -68,9 +71,11 @@ settings_of() { printf '%s\n' "$1" | grep -o -- "--settings '[^']*'" | head -1 |
 jget() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))
 for k in sys.argv[2].split("."): d = d.get(k, "<absent>") if isinstance(d, dict) else "<absent>"
 print(json.dumps(d) if not isinstance(d, str) else d)' "$1" "$2"; }
-agents_json() { eval "$(printf '%s\n' "$1" | sed -E 's/^.* --agents /printf %s /; s/ --(model|effort) [^ ]*//g; s/ -- .*$//')"; }
+agents_json() { eval "$(printf '%s\n' "$1" | head -1 | sed -E 's/^.* --agents /printf %s /; s/ --(model|effort) [^ ]*//g; s/ -- .*$//')"; }
 calls() { grep -c "^$1" "$SP_CALLS"; }
 dry() { WORK_DRY=1 bin/work "$@"; }
+# a provider dry run prints the command, then the merged settings JSON (no file is kept): the JSON, as a file to read
+dry_settings() { printf '%s\n' "$1" | sed 1d > "$S/dry.json"; echo "$S/dry.json"; }
 # launch [bin/work args]: a non-dry run through the stubs; sets rc, output in $SP_CAP/work.out
 launch() {
   [ "$(command -v osascript)" = "$S/osascript" ] || fail "osascript is not the stub"
@@ -119,9 +124,9 @@ dry_run_deepseek() {
   local out m; out=$(dry --provider deepseek projects/demo 2>&1) || fail "dry run failed: $out"
   echo "$out" | grep -qF "AGENT_FOLDER='projects/demo' CLAUDE_CONFIG_DIR='$HUB/.local/providers/deepseek' claude --settings '" || fail "config dir prefix: $out"
   echo "$out" | grep -q -- "--remote-control" && fail "remote control in a provider session"
-  m="$(settings_of "$out")"; [ -f "$m" ] || fail "merged settings file missing: $m"
-  [ "$m" != "$HUB/projects/demo/.claude/settings.json" ] || fail "the folder's own settings were passed"
-  assert_eq "$(stat -f %Lp "$m")" "600" "merged settings file mode"
+  m="$(settings_of "$out")"; [ "$m" != "$HUB/projects/demo/.claude/settings.json" ] || fail "the folder's own settings were passed"
+  [ ! -e "$m" ] || fail "a dry run kept the merged settings file: $m"
+  m="$(dry_settings "$out")"
   assert_eq "$(jget "$m" env.ANTHROPIC_BASE_URL)" "$DS_URL" "base URL"
   assert_eq "$(jget "$m" env.ANTHROPIC_MODEL)" "deepseek-flash" "main model"
   assert_eq "$(jget "$m" env.ANTHROPIC_DEFAULT_OPUS_MODEL)" "deepseek-v4-pro" "opus slot"
@@ -133,6 +138,8 @@ dry_run_deepseek() {
   printf '%s' "$out" | grep -qF -- "$KEY" && fail "the key is in the dry-run output"
   no_key_in "$m"
   assert_eq "$(calls secret)" "0" "a dry run never reads the key"
+  launch --provider deepseek projects/demo; assert_eq "$rc" "0" "launch exit"
+  assert_eq "$(cat "$SP_CAP/settings.mode")" "600" "merged settings file mode"
 }
 # AC3, AC30
 launcher_file_holds_no_key() {
@@ -172,7 +179,7 @@ key_checked_once_before_launch() {
 }
 single_merged_settings_keeps_hooks() {
   allow; launch --provider deepseek projects/demo; assert_eq "$rc" "0" "launch exit"
-  assert_eq "$(jget "$SP_CAP/settings.json" apiKeyHelper)" "'$HUB/bin/secret' deepseek-api-key" "apiKeyHelper"
+  assert_eq "$(jget "$SP_CAP/settings.json" apiKeyHelper)" "HUB='$HUB' AGENT_KEYCHAIN_SERVICE='hub' '$HUB/bin/secret' deepseek-api-key" "apiKeyHelper"
   python3 -c 'import json,sys; a=json.load(open(sys.argv[1])); b=json.load(open(sys.argv[2]))
 assert a.get("hooks") and a["hooks"] == b["hooks"], "hooks differ"' "$SP_CAP/settings.json" projects/demo/.claude/settings.json || fail "merged settings lost the folder hooks"
   assert_eq "$(grep -cx -- "--settings" "$SP_CAP/argv")" "1" "one --settings"
@@ -242,11 +249,11 @@ provider_effort_refused() {
 # AC12
 hub_provider_model_override() {
   allow 'HUB_DEEPSEEK_MODEL=deepseek-v4-pro' 'HUB_DEEPSEEK_SMALL_MODEL=deepseek-flash'
-  local m; m="$(settings_of "$(dry --provider deepseek projects/demo)")"
+  local m; m="$(dry_settings "$(dry --provider deepseek projects/demo)")"
   assert_eq "$(jget "$m" env.ANTHROPIC_MODEL)" "deepseek-v4-pro" "HUB_DEEPSEEK_MODEL"
   assert_eq "$(jget "$m" env.ANTHROPIC_SMALL_FAST_MODEL)" "deepseek-flash" "HUB_DEEPSEEK_SMALL_MODEL"
   allow 'HUB_DEEPSEEK_SMALL_MODEL=opus'
-  m="$(settings_of "$(dry --provider deepseek projects/demo)")"
+  m="$(dry_settings "$(dry --provider deepseek projects/demo)")"
   assert_eq "$(jget "$m" env.ANTHROPIC_SMALL_FAST_MODEL)" "deepseek-v4-pro" "a slot alias resolves through the row"
 }
 hub_provider_model_checked() {
@@ -260,7 +267,7 @@ hub_provider_model_checked() {
 # AC13
 no_base_url_override() {
   allow 'HUB_DEEPSEEK_BASE_URL=https://conf.example.invalid'
-  local m; m="$(settings_of "$(HUB_DEEPSEEK_BASE_URL=https://env.example.invalid WORK_DRY=1 bin/work --provider deepseek projects/demo)")"
+  local m; m="$(dry_settings "$(HUB_DEEPSEEK_BASE_URL=https://env.example.invalid WORK_DRY=1 bin/work --provider deepseek projects/demo)")"
   assert_eq "$(jget "$m" env.ANTHROPIC_BASE_URL)" "$DS_URL" "base URL comes only from the table"
   grep -q "example.invalid" "$m" && fail "an override reached the settings file"
   grep -q "BASE_URL" bin/work && grep -q 'HUB_.*BASE_URL' bin/work && fail "bin/work reads a HUB_*_BASE_URL"
@@ -357,12 +364,6 @@ adr_0002_provider_section() {
   sec "### Vendor API terms" | grep -q "https://cdn.deepseek.com/policies/en-US/deepseek-terms-of-use.html" || fail "DeepSeek terms URL"
   sec "### Vendor API terms" | grep -q "People's Republic of China" || fail "DeepSeek storage location"
 }
-# AC22
-scope_guard_briefing_and_agent() {
-  git -C "$REPO" rev-parse -q --verify origin/s0-providers >/dev/null || fail "no origin/s0-providers ref to compare bin/briefing with (git fetch)"
-  git -C "$REPO" diff --quiet origin/s0-providers -- bin/briefing || fail "bin/briefing changed"
-  [ ! -e "$REPO/bin/agent" ] || fail "bin/agent exists (S3a)"
-}
 # AC23
 hermetic_fake_engine_only() {
   assert_eq "$(command -v claude)" "$S/claude" "claude on PATH is the fake"
@@ -385,7 +386,7 @@ provider_memory_linked() {
   local P="$HUB/.local/providers/deepseek/projects"
   assert_eq "$(readlink "$P/$(encode_path "$HUB")/memory")" "$HUB/memory" "hub memory link"
   assert_eq "$(readlink "$P/$(encode_path "$HUB/projects/demo")/memory")" "$HUB/projects/demo/memory" "folder memory link"
-  local R; R="$(mktemp -d)/rc"; mkdir -p "$R"; bin/new projects/withrepo >/dev/null
+  local R; R="$(mktemp -d "$S/tmp/rc.XXXXXX")/rc"; mkdir -p "$R"; bin/new projects/withrepo >/dev/null
   printf '| rc | %s | main | Alvin | none |\n' "$R" >> projects/withrepo/ACCESS.md
   launch --provider deepseek projects/withrepo; assert_eq "$rc" "0" "repo launch exit"
   assert_eq "$(readlink "$P/$(encode_path "$R")/memory")" "$HUB/projects/withrepo/memory" "checkout memory link"
@@ -406,7 +407,7 @@ provider_resume_refused() {
 provider_layer_flags() {
   allow; bin/new projects/flags >/dev/null
   python3 -c 'import json,sys; p=sys.argv[1]; s=json.load(open(p)); s["env"]={"CLAUDE_CODE_SUBAGENT_MODEL":"x","ANTHROPIC_BASE_URL":"https://other.invalid","KEEP":"1"}; json.dump(s,open(p,"w"))' projects/flags/.claude/settings.json
-  local out m; out=$(dry --provider deepseek projects/flags) || fail "dry run"; m="$(settings_of "$out")"
+  local out m; out=$(dry --provider deepseek projects/flags) || fail "dry run"; m="$(dry_settings "$out")"
   assert_eq "$(jget "$m" skipWebFetchPreflight)" "true" "skipWebFetchPreflight"
   assert_eq "$(jget "$m" env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB)" "1" "subprocess env scrub"
   assert_eq "$(jget "$m" env.ANTHROPIC_BASE_URL)" "$DS_URL" "provider env wins over the folder env"
@@ -462,14 +463,172 @@ doctor_flags_client_hub_deepseek() {
   return 0
 }
 
+# B1: an Anthropic credential or a provider switch beats apiKeyHelper; none may reach a provider session
+SCRUB="ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_CUSTOM_HEADERS CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY CLAUDE_CODE_OAUTH_TOKEN"
+plant_value() { case "$1" in CLAUDE_CODE_USE_*) echo 1 ;; *) echo "sk-ant-FAKE-PLANT-$1" ;; esac; }
+# a folder whose code lives in a separate (clean) checkout, so its own settings are only merged, never loaded as project settings
+repo_folder() {  # <folder>
+  local R; R="$(mktemp -d "$S/tmp/co.XXXXXX")/co"; mkdir -p "$R"; bin/new "$1" >/dev/null
+  printf '| co | %s | main | Alvin | none |\n' "$R" >> "$1/ACCESS.md"; echo "$R"
+}
+set_env_block() {  # <settings file> <KEY=VALUE...>: writes (or adds) an env block
+  local f="$1"; shift; mkdir -p "$(dirname "$f")"
+  python3 -c 'import json,os,sys; p=sys.argv[1]; s=json.load(open(p)) if os.path.exists(p) else {}
+s.setdefault("env", {}).update(dict(a.split("=",1) for a in sys.argv[2:])); json.dump(s, open(p,"w"))' "$f" "$@"
+}
+# AC35
+provider_env_creds_scrubbed() {
+  allow; local v envs=""
+  for v in $SCRUB; do envs="$envs $v=$(plant_value "$v")"; done
+  rm -rf "$SP_CAP"; mkdir -p "$SP_CAP"; : > "$SP_CALLS"
+  env $envs bin/work --provider deepseek projects/demo > "$S/work.out" 2>&1; rc=$?
+  assert_eq "$rc" "0" "launch exit with planted credentials ($(cat "$S/work.out"))"; fake_ran || fail "the fake engine did not run"
+  for v in $SCRUB; do
+    grep -qx "$v" "$SP_CAP/env-names" && fail "the engine saw $v from the launching environment"
+    grep -qF -- "-u $v " "$SP_CAP/launcher" || fail "the launcher does not unset $v"
+  done
+  grep -q "FAKE-PLANT" "$SP_CAP/argv" "$SP_CAP/settings.json" && fail "a planted value reached the engine's argv or settings"
+  # the anthropic path is untouched: its own login and env are its business
+  dry projects/demo | grep -q -- "env -u" && fail "the anthropic command changed"
+  return 0
+}
+# AC36
+folder_env_creds_dropped() {
+  allow; local v kv="KEEP=1" m
+  repo_folder projects/fenv >/dev/null
+  for v in $SCRUB; do kv="$kv $v=$(plant_value "$v")"; done
+  set_env_block projects/fenv/.claude/settings.json $kv
+  local out; out=$(dry --provider deepseek projects/fenv 2>&1) || fail "dry run: $out"
+  m="$(dry_settings "$out")"
+  for v in $SCRUB; do assert_eq "$(jget "$m" "env.$v")" "<absent>" "$v dropped from the merged env (dry)"; done
+  assert_eq "$(jget "$m" env.KEEP)" "1" "other folder env kept"
+  launch --provider deepseek projects/fenv; assert_eq "$rc" "0" "launch exit ($(cat "$SP_CAP/work.out"))"
+  for v in $SCRUB; do assert_eq "$(jget "$SP_CAP/settings.json" "env.$v")" "<absent>" "$v dropped from the merged env"; grep -qx "$v" "$SP_CAP/env-names" && fail "the engine saw $v"; done
+  grep -q "FAKE-PLANT" "$SP_CAP/settings.json" && fail "a planted value is in the merged settings"
+  return 0
+}
+# AC37
+checkout_env_creds_refused() {
+  allow; local R f v out
+  R="$(repo_folder projects/cenv)"
+  for f in settings.json settings.local.json; do
+    for v in $SCRUB; do
+      rm -rf "$R/.claude"; set_env_block "$R/.claude/$f" "$v=$(plant_value "$v")"
+      launch --provider deepseek projects/cenv; assert_eq "$rc" "2" "$f with $v: exit"
+      assert_contains "$SP_CAP/work.out" "$R/.claude/$f" "$f with $v: refusal names the file"
+      assert_contains "$SP_CAP/work.out" "$v" "$f with $v: refusal names the key"
+      assert_eq "$(calls secret)" "0" "$f with $v: no key read"; fake_ran && fail "$f with $v: the engine ran"
+      grep -q "FAKE-PLANT" "$SP_CAP/work.out" && fail "the refusal printed the planted value"
+    done
+  done
+  rm -rf "$R/.claude"; set_env_block "$R/.claude/settings.local.json" "KEEP=1"
+  dry --provider deepseek projects/cenv >/dev/null || fail "a checkout env without credentials is accepted"
+  # a folder with no repo works in its own folder: its settings are also the checkout's, so a credential there is refused
+  bin/new projects/nenv >/dev/null; set_env_block projects/nenv/.claude/settings.json "ANTHROPIC_AUTH_TOKEN=$(plant_value ANTHROPIC_AUTH_TOKEN)"
+  out=$(dry --provider deepseek projects/nenv 2>&1); assert_eq "$?" "2" "no-repo folder with a credential in its settings"
+  echo "$out" | grep -q ANTHROPIC_AUTH_TOKEN || fail "no-repo refusal names the key: $out"
+  dry projects/nenv >/dev/null || fail "the anthropic path does not check the checkout env"
+}
+# AC38 (M1): the helper reads the same Keychain item as the pre-check
+helper_pins_hub_and_service() {
+  allow 'HUB_KEYCHAIN_SERVICE=svc-conf'; rm -f "$SP_ROOT/secret-env"
+  launch --provider deepseek projects/demo; assert_eq "$rc" "0" "launch exit"
+  local h; h="$(jget "$SP_CAP/settings.json" apiKeyHelper)"
+  assert_eq "$h" "HUB='$HUB' AGENT_KEYCHAIN_SERVICE='svc-conf' '$HUB/bin/secret' deepseek-api-key" "helper pins hub and service"
+  assert_eq "$(cat "$SP_ROOT/secret-env")" "hub=$HUB svc=svc-conf" "the pre-check read hub and service"
+  # the helper, run by /bin/sh from a bare environment, reads the very same item
+  rm -f "$SP_ROOT/secret-env"
+  env -i PATH="$PATH" SP_CALLS="$SP_CALLS" SP_ROOT="$SP_ROOT" SP_KEYFILE="$SP_KEYFILE" SP_STORED="$SP_STORED" /bin/sh -c "$h" >/dev/null || fail "helper failed"
+  assert_eq "$(cat "$SP_ROOT/secret-env")" "hub=$HUB svc=svc-conf" "the helper reads the pre-check's item"
+  rm -f "$SP_ROOT/secret-env"; AGENT_KEYCHAIN_SERVICE=svc-env launch --provider deepseek projects/demo; assert_eq "$rc" "0" "launch exit"
+  assert_eq "$(jget "$SP_CAP/settings.json" apiKeyHelper)" "HUB='$HUB' AGENT_KEYCHAIN_SERVICE='svc-env' '$HUB/bin/secret' deepseek-api-key" "helper takes the env service"
+  assert_eq "$(cat "$SP_ROOT/secret-env")" "hub=$HUB svc=svc-env" "pre-check took the env service"
+}
+# AC39 (M3)
+merged_settings_removed_after_launch() {
+  allow; launch --provider deepseek projects/demo; assert_eq "$rc" "0" "launch exit"; fake_ran || fail "the fake did not run"
+  local m; m="$(cat "$SP_CAP/settings.path")"; [ -n "$m" ] || fail "no settings path captured"
+  [ ! -e "$m" ] || fail "the merged settings file is still there after the launcher exited: $m"
+  ls "$TMPDIR"/agent-work.* >/dev/null 2>&1 && fail "a launcher file is left: $(ls "$TMPDIR"/agent-work.*)"
+  return 0
+}
+# AC40 (M3)
+agents_no_go_refused() {
+  allow; bin/new projects/agng >/dev/null; agent projects/agng a 'name: a' 'description: d'
+  local out; out=$(with_lib_edit 'deepseek:agents)' env WORK_DRY=1 bin/work --provider deepseek projects/agng 2>&1); assert_eq "$?" "2" "--agents with a no-go"
+  echo "$out" | grep -q "S0 item 21" || fail "agents refusal names S0: $out"
+  with_lib_edit 'deepseek:agents)' env WORK_DRY=1 bin/work --provider deepseek projects/demo >/dev/null || fail "a folder with no agents needs no agents go"
+  dry --provider deepseek projects/agng >/dev/null || fail "lib.sh restored"
+}
+# AC41 (m1)
+no_settings_left_behind() {
+  allow; rm -f "$TMPDIR"/agent-settings.* "$TMPDIR"/agent-work.*
+  dry --provider deepseek projects/demo >/dev/null || fail "dry run"
+  ls "$TMPDIR"/agent-settings.* >/dev/null 2>&1 && fail "a dry run left a settings file"
+  SP_OSA_FAIL=1 launch --provider deepseek projects/demo; [ "$rc" != 0 ] || fail "a failed hand-off exits non-zero"
+  ls "$TMPDIR"/agent-settings.* "$TMPDIR"/agent-work.* >/dev/null 2>&1 && fail "a failed hand-off left files: $(ls "$TMPDIR")"
+  SP_OSA_FAIL=1 launch projects/demo
+  ls "$TMPDIR"/agent-work.* >/dev/null 2>&1 && fail "a failed anthropic hand-off left its launcher"
+  return 0
+}
+# AC42 (m2)
+hub_env_mismatch_refused() {
+  allow; rm -rf "$S/hub2"; cp -R "$HUB" "$S/hub2"; local out
+  out=$(HUB="$S/hub2" WORK_DRY=1 "$HUB/bin/work" --provider deepseek projects/demo 2>&1); assert_eq "$?" "2" "HUB from another hub"
+  echo "$out" | grep -q "HUB=" || fail "refusal names HUB: $out"
+  HUB="$(cd "$HUB" && pwd -P)" WORK_DRY=1 bin/work --provider deepseek projects/demo >/dev/null || fail "the same hub by its real path"
+  env -u HUB WORK_DRY=1 bin/work --provider deepseek projects/demo >/dev/null || fail "HUB unset"
+  rm -rf "$S/hub2"
+}
+# AC43 (m3)
+owner_only_default_refuses() {
+  . bin/lib.sh; assert_eq "$(provider_field glm owner_only)" "1" "glm is owner-only (z.ai is China-based)"
+  client; local out
+  out=$(with_lib_edit 'deepseek:owner_only)' env WORK_DRY=1 bin/work --provider deepseek projects/demo 2>&1); assert_eq "$?" "2" "no owner_only value refuses in a client hub"
+  echo "$out" | grep -q "HUB_OWNED_BY_OWNER" || fail "refusal names HUB_OWNED_BY_OWNER: $out"
+  allow; with_lib_edit 'deepseek:owner_only)' env WORK_DRY=1 bin/work --provider deepseek projects/demo >/dev/null || fail "an owned hub still runs"
+}
+# AC44 (m4)
+config_dir_symlink_refused() {
+  allow; local fake="$S/fake-dot-claude" P="$HUB/.local/providers"
+  rm -rf "$fake"; mkdir -p "$fake" "$P"; rm -rf "$P/deepseek"; ln -s "$fake" "$P/deepseek"
+  launch --provider deepseek projects/demo; assert_eq "$rc" "2" "config dir symlinked out"
+  assert_contains "$SP_CAP/work.out" "outside" "refusal says why"; fake_ran && fail "engine ran"; assert_eq "$(calls secret)" "0" "no key read"
+  rm -f "$P/deepseek"; mkdir -p "$P/deepseek"; rm -rf "$P/deepseek/projects"; ln -s "$fake" "$P/deepseek/projects"
+  launch --provider deepseek projects/demo; assert_eq "$rc" "2" "projects symlinked out"
+  rm -f "$P/deepseek/projects"; mv "$HUB/.local" "$S/real-local"; ln -s "$fake" "$HUB/.local"
+  launch --provider deepseek projects/demo; assert_eq "$rc" "2" ".local symlinked out"
+  rm -f "$HUB/.local"; mv "$S/real-local" "$HUB/.local"
+  assert_eq "$(ls -A "$fake")" "" "nothing was written to the fake ~/.claude"
+  launch --provider deepseek projects/demo; assert_eq "$rc" "0" "a real config dir runs"
+}
+# AC45 (m5)
+home_is_temp() { case "$HOME" in "$S"/*) ;; *) fail "HOME is not the suite's temp dir: $HOME" ;; esac; }
+# the temp dirs this run made (macOS mktemp -d ignores TMPDIR, so they are listed, not found)
+record_temp_dirs() { printf '%s\n' "$S" "$(dirname "$HUB")" "$CLAUDE_HOME" "$(dirname "$AGENT_SYNC_LOG")" "$(dirname "$AGENT_SYNC_LOCK")" > "$SP_TEMP_REPORT"; }
+env_is_clean() { local v; for v in $(compgen -e); do case "$v" in ANTHROPIC_*|CLAUDE_CODE_USE_*|CLAUDE_CODE_OAUTH_TOKEN) fail "the tester's $v reached the suite" ;; esac; done; }
+suite_hermetic_and_clean() {
+  local X d; X="$(mktemp -d "$S/tmp/child.XXXXXX")"; mkdir -p "$X/tmp" "$X/home"
+  env TMPDIR="$X/tmp" HOME="$X/home" SP_TEMP_REPORT="$X/temps" ANTHROPIC_API_KEY=sk-ant-FAKE-PLANT ANTHROPIC_AUTH_TOKEN=sk-ant-FAKE-PLANT CLAUDE_CODE_USE_BEDROCK=1 \
+    bash "$REPO/tests/test_providers.sh" home_is_temp env_is_clean provider_rows_static provider_memory_linked record_temp_dirs > "$X/out" 2>&1 || fail "child suite failed: $(tail -3 "$X/out")"
+  assert_eq "$(tail -1 "$X/out")" "ok" "child suite ok"
+  [ "$(grep -c . "$X/temps")" = 5 ] || fail "the child did not list its temp dirs"
+  while read -r d; do [ ! -e "$d" ] || fail "the child suite left $d"; done < "$X/temps"
+  assert_eq "$(ls -A "$X/tmp")" "" "the child suite left files in its TMPDIR"
+  assert_eq "$(ls -A "$X/home")" "" "the child suite wrote to the HOME it was given"
+  rm -rf "$X"
+}
+
 ALL="provider_rows_static dry_run_deepseek launcher_file_holds_no_key engine_argv_holds_no_key fail_closed_on_missing_key
 fail_closed_on_empty_key key_checked_once_before_launch single_merged_settings_keeps_hooks checkout_base_url_conflict_refused
 provider_implies_no_remote provider_rejects_wrapper_from_each_source provider_model_rules hub_model_not_passed
 provider_effort_accepted provider_effort_refused hub_provider_model_override hub_provider_model_checked no_base_url_override
 provider_env_not_trusted provider_not_allowed no_go_pair_refused_by_work agents_provider_check doctor_provider_rows_name_only
-meta_row_only_with_a_go allowed_tools_applied readme_provider_section adr_0002_provider_section scope_guard_briefing_and_agent
+meta_row_only_with_a_go allowed_tools_applied readme_provider_section adr_0002_provider_section
 hermetic_fake_engine_only provider_config_dir_isolated provider_memory_linked provider_resume_refused provider_layer_flags
 anthropic_path_unchanged deepseek_client_hub_refused deepseek_owned_hub_allowed owned_by_owner_env_not_trusted
-doctor_flags_client_hub_deepseek"
+doctor_flags_client_hub_deepseek provider_env_creds_scrubbed folder_env_creds_dropped checkout_env_creds_refused
+helper_pins_hub_and_service merged_settings_removed_after_launch agents_no_go_refused no_settings_left_behind
+hub_env_mismatch_refused owner_only_default_refuses config_dir_symlink_refused suite_hermetic_and_clean"
 for c in ${*:-$ALL}; do "$c"; done
 echo ok

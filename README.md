@@ -120,6 +120,9 @@ A focus session can run Claude Code against DeepSeek instead of Anthropic. The C
   key, `bin/work` stops before Claude Code starts.
 - **Exposure (credential option 1):** the key is read by Claude Code's `apiKeyHelper` (`bin/secret deepseek-api-key`)
   only, so it is never in the environment, argv or a file; hooks and tool commands cannot see it.
+- **No Anthropic credential reaches DeepSeek:** `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY` and the other names in
+  `provider_scrub_vars` (`bin/lib.sh`) would beat the helper, so the session starts without them and drops them from the
+  folder's settings; a checkout whose `.claude/settings.json` or `settings.local.json` sets one in `env` is refused.
 - **Models:** `--model` is a slot alias (`opus`, `sonnet`, `haiku`) or a row id (`deepseek-flash`, `deepseek-v4-pro`);
   `HUB_DEEPSEEK_MODEL` and `HUB_DEEPSEEK_SMALL_MODEL` change the defaults. `HUB_MODEL` and `HUB_AGENT_MODEL` are not
   used (they may be Anthropic ids). There is no base URL override.

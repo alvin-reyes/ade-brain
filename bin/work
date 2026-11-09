@@ -9,6 +9,8 @@
 # its own config dir; a merged settings file whose apiKeyHelper reads the key (the key is checked once, never written).
 # --agent-model / --agent-effort (repeatable) set the folder's specialist agents: a bare value sets all, name=value one (it wins). WORK_DRY=1 only prints the command. AGENT_TERMINAL=iterm uses iTerm.
 set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"
+# temp files (merged settings, launcher) go on any exit until the launcher is handed off; the launcher then removes them
+MS=""; L=""; trap '[ -z "$MS" ] || rm -f "$MS"; [ -z "$L" ] || rm -f "$L"' EXIT
 USAGE="usage: bin/work [--provider P] [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--no-remote] [--agent-model [name=]M] [--agent-effort [name=]E] <projects|ops>/<name> [repo]"
 MODEL=""; EFFORT=""; PROMPT=""; REMOTE=1; CL="$(claude_cmd)"; POS=(); ASET=""; PROV="${HUB_PROVIDER:-anthropic}"
 while [ $# -gt 0 ]; do
@@ -38,6 +40,10 @@ case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be
 [[ "$PROV" =~ ^[a-z0-9-]+$ ]] || { echo "work: bad provider name '$PROV'" >&2; exit 2; }
 case " ${HUB_PROVIDERS_ALLOWED:-anthropic} " in *" $PROV "*) ;; *) echo "work: provider $PROV is not in HUB_PROVIDERS_ALLOWED (hub.conf)" >&2; exit 2 ;; esac
 if [ "$PROV" != anthropic ]; then
+  # HUB (environment) picks the hub every helper reads; a provider session only runs from the hub this script is in
+  OWN="$(cd "$(dirname "$0")/.." && pwd -P)"
+  [ -z "${HUB:-}" ] || [ "$(cd "$HUB" 2>/dev/null && pwd -P)" = "$OWN" ] ||
+    { echo "work: HUB=$HUB is not this script's hub ($OWN); a provider session runs only from its own hub" >&2; exit 2; }
   provider_field "$PROV" base_url >/dev/null || { echo "work: no provider '$PROV' in bin/lib.sh" >&2; exit 2; }
   why="$(provider_hub_refusal "$PROV")"; [ -z "$why" ] || { echo "work: $why" >&2; exit 2; }
   [ "$CL" = claude ] || { echo "work: --provider $PROV needs plain claude, not '$CL' (a wrapper could send the session elsewhere)" >&2; exit 2; }
@@ -124,14 +130,35 @@ TRAP='rm -f "$0"'
 if [ "$PROV" = anthropic ]; then
   cmd="cd $(sq "$dir") && AGENT_FOLDER='$F' $CL --settings $(sq "$H/$F/.claude/settings.json")"
 else
-  SEC="$(provider_field "$PROV" secret)"; CD="$H/.local/providers/$PROV"
+  SEC="$(provider_field "$PROV" secret)"; CD="$H/.local/providers/$PROV"; SVC="$(keychain_service)"; SCRUB="$(provider_scrub_vars)"
+  # the provider config dir stays inside the hub: never a symlink out to ~/.claude or anywhere else
+  RL="$(cd "$H" && pwd -P)/.local"
+  for p in "$H/.local" "$CD" "$CD/projects"; do
+    r="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$p")"
+    case "$r" in "$RL"|"$RL"/*) ;; *) echo "work: $p resolves to $r, outside $H/.local; a provider config dir stays in the hub" >&2; exit 2 ;; esac
+  done
+  # the checkout's own settings load as project settings, below nothing that can unset a key: an Anthropic credential or a
+  # backend switch in their env would beat apiKeyHelper and go to the provider, so refuse (names only, never values)
+  why="$(WORK_SCRUB="$SCRUB" python3 - "$dir/.claude/settings.json" "$dir/.claude/settings.local.json" <<'PY'
+import json, os, sys
+bad = os.environ["WORK_SCRUB"].split()
+for p in sys.argv[1:]:
+    if not os.path.exists(p): continue
+    try: env = (json.load(open(p)) or {}).get("env") or {}
+    except Exception: print("%s is not readable JSON" % p); continue
+    hit = [k for k in bad if k in env]
+    if hit: print("%s sets %s in its env" % (p, " ".join(hit)))
+PY
+)" || why="the checkout's settings could not be checked"
+  [ -z "$why" ] || { echo "work: $why; a provider session would send that to $PROV instead of its key (remove it, or run without --provider)" >&2; exit 2; }
   # fail closed: Claude Code never starts against another provider without its key (it would send the Anthropic login there).
   # The key is read once into a subshell variable, checked and dropped; it is never printed, written or passed on.
   if [ "${WORK_DRY:-}" != 1 ]; then
-    ( key="$("$H/bin/secret" "$SEC" 2>/dev/null)" && [ -n "$key" ]; r=$?; unset key; exit "$r" ) ||
+    ( key="$(HUB="$H" AGENT_KEYCHAIN_SERVICE="$SVC" "$H/bin/secret" "$SEC" 2>/dev/null)" && [ -n "$key" ]; r=$?; unset key; exit "$r" ) ||
       { echo "work: no $(provider_field "$PROV" label) in the Keychain; store it with: bin/secret --set $SEC" >&2; exit 1; }
   fi
-  # one settings file: the folder's (hooks kept) plus the provider layer, whose env wins; never a key value
+  # one settings file: the folder's (hooks kept) plus the provider layer, whose env wins; never a key value. The helper pins
+  # the hub and Keychain service the pre-check used, so both read the same item; the folder's credentials and switches are dropped
   [ -f "$H/$F/.claude/settings.json" ] || { echo "work: $F has no .claude/settings.json" >&2; exit 2; }
   MS=$(mktemp "${TMPDIR:-/tmp}/agent-settings.XXXXXX") && chmod 600 "$MS" || exit 2
   WORK_PENV="ANTHROPIC_BASE_URL=$(provider_field "$PROV" base_url)
@@ -141,19 +168,21 @@ ANTHROPIC_DEFAULT_SONNET_MODEL=$(provider_field "$PROV" sonnet)
 ANTHROPIC_DEFAULT_HAIKU_MODEL=$(provider_field "$PROV" haiku)
 ANTHROPIC_SMALL_FAST_MODEL=$P_SMALL
 CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1" python3 - "$H/$F/.claude/settings.json" "$MS" "$(sq "$H/bin/secret") $SEC" <<'PY' || { rm -f "$MS"; exit 2; }
+CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1" WORK_SCRUB="$SCRUB" python3 - "$H/$F/.claude/settings.json" "$MS" "HUB=$(sq "$H") AGENT_KEYCHAIN_SERVICE=$(sq "$SVC") $(sq "$H/bin/secret") $SEC" <<'PY' || exit 2
 import json, os, sys
 src, dst, helper = sys.argv[1:4]
 s = json.load(open(src))
 env = dict(s.get("env") or {})
 env.pop("CLAUDE_CODE_SUBAGENT_MODEL", None)   # agents' own model: values resolve through the slots
+for k in os.environ["WORK_SCRUB"].split(): env.pop(k, None)
 for l in os.environ["WORK_PENV"].splitlines():
     k, _, v = l.partition("="); env[k] = v
 s["env"] = env; s["apiKeyHelper"] = helper; s["skipWebFetchPreflight"] = True
 json.dump(s, open(dst, "w"), indent=2)
 PY
-  # its own config dir, so /model writes there and not to the owner's settings.json
-  cmd="cd $(sq "$dir") && AGENT_FOLDER='$F' CLAUDE_CONFIG_DIR=$(sq "$CD") $CL --settings $(sq "$MS")"
+  # its own config dir, so /model writes there and not to the owner's settings.json; env -u drops any credential or backend
+  # switch the launching (login) shell holds, since those beat apiKeyHelper
+  cmd="cd $(sq "$dir") && env$(printf ' -u %s' $SCRUB) AGENT_FOLDER='$F' CLAUDE_CONFIG_DIR=$(sq "$CD") $CL --settings $(sq "$MS")"
   TRAP="rm -f \"\$0\" $(sq "$MS")"
 fi
 [ -n "$agents" ] && cmd="$cmd --agents $(printf %q "$agents")"
@@ -162,7 +191,8 @@ fi
 [ "$REMOTE" = 1 ] && cmd="$cmd --remote-control $(printf %q "${F##*/}")"
 [ -n "$PROMPT" ] && cmd="$cmd -- $(printf %q "$PROMPT")"
 echo "$cmd"
-[ "${WORK_DRY:-}" = 1 ] && exit 0
+# a dry run shows the merged settings instead of keeping the file (the EXIT trap removes it)
+if [ "${WORK_DRY:-}" = 1 ]; then [ -z "$MS" ] || { cat "$MS"; echo; } 2>/dev/null; exit 0; fi
 if [ "$PROV" != anthropic ]; then   # the memory links bin/setup makes, inside the provider's config dir
   plink() { local m="$CD/projects/$(encode_path "$1")/memory"; mkdir -p "$2" "$(dirname "$m")"
     [ -L "$m" ] && [ "$(readlink "$m")" = "$2" ] && return 0
@@ -176,4 +206,4 @@ if [ "${AGENT_TERMINAL:-terminal}" = iterm ]; then
   osascript -e "tell application \"iTerm\" to create window with default profile command \"bash -l $L\""
 else
   osascript -e "tell application \"Terminal\" to do script \"bash -l $L\"" -e 'tell application "Terminal" to activate'
-fi
+fi && { MS=""; L=""; }   # handed off: the launcher's own trap removes both

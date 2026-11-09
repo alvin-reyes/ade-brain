@@ -16,7 +16,11 @@ same table, never a copy. Findings: `engines.md`. Decision and terms: `decisions
   effort go; remote no. glm: all no. One go per `case` line.
 - `provider_no_go_reason <p> <feature>` names "S0 item 21, .ade/context/engines.md".
 - `provider_model_ok <p> <m>`: a slot alias (`opus`, `sonnet`, `haiku`) or a row id. `provider_model_id` resolves an alias.
-- `provider_hub_refusal <p>`: prints the reason this hub may not use `<p>` (empty = it may).
+- `provider_hub_refusal <p>`: prints the reason this hub may not use `<p>` (empty = it may). Fails closed: only
+  `owner_only` `0` opens a row to client hubs; a missing value counts as owner-only. glm is `owner_only` 1.
+- `provider_scrub_vars`: the names that beat `apiKeyHelper` or switch Claude Code's backend (`ANTHROPIC_AUTH_TOKEN`,
+  `ANTHROPIC_API_KEY`, `ANTHROPIC_CUSTOM_HEADERS`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`,
+  `CLAUDE_CODE_USE_FOUNDRY`, `CLAUDE_CODE_OAUTH_TOKEN`). S3a's `bin/agent` must strip the same list.
 - No base URL override exists (`HUB_<P>_BASE_URL` is never read).
 
 ## `hub.conf` keys
@@ -28,12 +32,17 @@ same table, never a copy. Findings: `engines.md`. Decision and terms: `decisions
 
 ## A provider session (`bin/work --provider <p>`)
 - Refused (exit 2): not allowed; no row; owner-only in a client hub; a command other than plain `claude`; a feature
-  without a go; `--resume`, `--continue`, `-r`, `-c`; a model not allowed. Missing or empty key: exit 1 with the
+  without a go; `--resume`, `--continue`, `-r`, `-c`; a model not allowed; `HUB` (environment) naming another hub
+  than the script's own; `<hub>/.local`, the config dir or its `projects/` resolving outside `<hub>/.local`; the
+  checkout's `.claude/settings.json` or `settings.local.json` setting a `provider_scrub_vars` name in `env`. Missing or empty key: exit 1 with the
   `bin/secret --set <secret>` hint, before Claude Code starts. Dry runs never read the key.
-- Command: `cd '<dir>' && AGENT_FOLDER='<F>' CLAUDE_CONFIG_DIR='<hub>/.local/providers/<p>' claude --settings '<merged>'`,
-  no `--remote-control`.
-- Merged settings (mktemp, mode 600, removed by the launcher's trap): the folder's settings plus `apiKeyHelper`
-  (`'<hub>/bin/secret' <secret>`), `skipWebFetchPreflight: true`, and an `env` block (provider keys win) with
+- Command: `cd '<dir>' && env -u <each provider_scrub_vars name> AGENT_FOLDER='<F>'
+  CLAUDE_CONFIG_DIR='<hub>/.local/providers/<p>' claude --settings '<merged>'`, no `--remote-control`. A dry run
+  (`WORK_DRY=1`) prints the command, then the merged settings JSON, and keeps no file.
+- Merged settings (mktemp, mode 600, removed by the launcher's trap, or by `bin/work`'s own trap on any exit before
+  the hand-off): the folder's settings minus any `provider_scrub_vars` name in `env`, plus `apiKeyHelper`
+  (`HUB='<hub>' AGENT_KEYCHAIN_SERVICE='<svc>' '<hub>/bin/secret' <secret>`, the hub and Keychain service the key
+  pre-check used), `skipWebFetchPreflight: true`, and an `env` block (provider keys win) with
   `ANTHROPIC_BASE_URL`, `ANTHROPIC_MODEL`, `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL`, `ANTHROPIC_SMALL_FAST_MODEL`,
   `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1`. Never `CLAUDE_CODE_SUBAGENT_MODEL`,
   never a key.
