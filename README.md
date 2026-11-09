@@ -6,6 +6,9 @@ engineer, QA, security engineer, architect, tech lead, PM or fractional CTO, for
 The hub is a private repo of Bash and Markdown that holds the **context, state and history** of the work. Every
 session starts with what is live, open and waiting; agents keep it up to date; the client's code stays in its own repos.
 
+**Guide:** [`docs/index.html`](docs/index.html) walks through making a hub, the daily flow, hooks, the brain, auto sync,
+monitors and every setting, with flow diagrams.
+
 ## Make a hub
 
 ```bash
@@ -16,9 +19,14 @@ bin/init --list                                   # the personas
 bin/init --persona devops-sre --client "Acme Corp" --owner "Sam Lee" \
   --repo acme/infra=~/code/infra --remote deploy@staging.acme.com:22 --remote-key ~/.ssh/acme \
   --staging-url https://staging.acme.com --secret grafana-token --briefing 08:00
+git add -A && git commit -m "Initialize the hub" && git push -u origin main   # once, by hand
 bin/setup && bin/doctor
 claude
 ```
+
+Commit `hub.conf` by hand: `bin/init` commits nothing, and `bin/sync` leaves `hub.conf` out. Without it, a fresh clone
+falls back to the folder name for the hub name (a different state folder, launchd labels and Keychain service) and has
+no secret names to check. `push -u` also sets the upstream auto sync needs. Commit it again whenever you edit it.
 
 Or locally, without GitHub: `bin/init ... --dest ~/Project/acme-sre` copies the template to a new folder first.
 
@@ -125,6 +133,12 @@ Other providers (OpenRouter, Ollama, a second account) work through a wrapper co
 Does a checkout know my work? Yes, as far as the hub's files go: STATE.md, memory, the journal and ACCESS.md are
 committed, so a fresh clone (plus `bin/setup`) starts with full context. Secrets, SSH keys and files outside the repo
 (downloads, PDFs) are not in it; `bin/doctor` says what is missing on a new Mac.
+
+**A new Mac: clone to the same absolute path.** Several committed files hold the first Mac's absolute paths: each
+folder's `.claude/settings.json` (the hook commands), `HUB_CLAUDE_CONFIG_DIR` in `hub.conf`, and `output_folder` in
+`_bmad/config.toml`. Use the same user name and folder. Otherwise fix those values: move each folder's
+`.claude/settings.json` aside and run `bin/new <folder>` again, edit `hub.conf` and `_bmad/config.toml`, then run
+`bin/setup` and `bin/schedule install`.
 
 ## Upgrading a hub made before auto sync
 
