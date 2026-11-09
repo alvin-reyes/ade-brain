@@ -17,6 +17,7 @@
 - 2026-11-09: providers section passed review; owner approval of revision 7 is now effective; five review minors folded in.
 - 2026-11-09: sharded S1 (docs/stories/S1-session-end-without-hook.md, 18 ACs): bounded stdin read, --since, sync lock for session-end and sync --yes, log; the held-pipe-under-script test verified to hang on today's code.
 - 2026-11-09: sharded SP (docs/stories/SP-providers.md, 24 ACs, blocked on S0 item 21): providers deepseek, glm, meta; fail-closed key read, merged settings, go/no-go, wrapper refusal, name-only doctor rows. bin/agent parts left to S3a.
+- 2026-11-09: re-sharded SP for DeepSeek only (docs/stories/SP-providers.md, 30 ACs, unblocked): S0 item 21 answered for deepseek; glm shipped no-go; meta left out (AC18); /model fixed by a per-provider CLAUDE_CONFIG_DIR, --resume refused; key pre-check mandatory. Open: owner data-sharing decision and DeepSeek terms, live Keychain-login check.
 - 2026-11-09: S1 (docs/stories/S1-session-end-without-hook.md) Done: QA mapped all 18 ACs to named checks and `bash tests/run.sh` passed (exit 0, all 20 test files ok).
 - 2026-11-09: S1 reopened: code review blocked (stale-lock takeover race, two tests pass with the bug, timing-sensitive waits); back to the developer.
 - 2026-11-09: S1 re-verified by QA after the reopen (fixes bccbd79): `bash tests/run.sh` all 20 test files ok, new lock/log/--since/stdin checks present and asserting; awaiting code re-review before Done.
