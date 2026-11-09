@@ -200,18 +200,19 @@ answer:
 | `5` | The sub-terminal opened but the command was not typed: prints `bash -l <launcher>` to run in it, keeps the launcher, exits 5. No window. |
 | any other | Fails with that code and opens nothing. |
 
-Before that, `bin/work` checks that this ADE has `ade open` with `ade help`: `"$ADE_HOOK_BIN" help` must print `usage: ade open`. An
-older ADE build (one without the CLI, such as v0.22.0) would take `ade open` as a hook event and do nothing, so there
-`bin/work` prints one `work:` line and opens a Terminal window, as outside ADE.
+Before that, `bin/work` checks with `ade help` that this ADE can type the command: `"$ADE_HOOK_BIN" help` (stdin from
+`/dev/null`, at most 5 seconds) must print a line starting `capabilities:` with the word `command`, such as
+`capabilities: command` or `capabilities: command split`. Otherwise it prints one `work:` line and opens a Terminal
+window, as outside ADE. That covers an ADE build without `ade open` (such as v0.22.0, which would take `ade open` as a
+hook event and do nothing) and one with `ade open` but without typed commands (story 9), which would refuse with exit 1.
 
 `AGENT_TERMINAL=terminal` or `AGENT_TERMINAL=iterm` always opens a window. `AGENT_TERMINAL=ade` always uses ADE: it never
-falls back (exits 3 and 4 are returned as they are), and outside ADE or on an ADE build without `ade open` it is exit 2. `WORK_DRY=1` also prints the ADE
+falls back (exits 3 and 4 are returned as they are), and outside ADE or on an ADE without `capabilities: command` it is exit 2. `WORK_DRY=1` also prints the ADE
 command it would run. Outside ADE nothing changes.
 
 The sub-terminal needs ADE's `ade open` on the ADE build (stories 4a and 4c in `better-agentic-ide`) and its typed
-command (`ade open -- COMMAND`, story 9). Until story 9 is on your build, ADE answers the typed command with
-"not supported yet" (exit 1), so `bin/work` exits 1 with the hint; run `AGENT_TERMINAL=terminal bin/work <folder>`
-for a window meanwhile.
+command (`ade open -- COMMAND`, story 9). Until story 9 is on your build, `ade help` has no `capabilities: command`
+line, so `bin/work` opens a Terminal window with one `work:` line.
 
 ## Upgrading a hub made before auto sync
 

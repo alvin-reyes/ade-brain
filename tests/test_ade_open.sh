@@ -11,16 +11,23 @@ S="$(mktemp -d)"; mkdir -p "$S/tmp" "$S/home"; export TMPDIR="$S/tmp" HOME="$S/h
 trap 'rm -rf "$S" "$(dirname "$HUB")" "$CLAUDE_HOME" "$(dirname "$AGENT_SYNC_LOG")" "$(dirname "$AGENT_SYNC_LOCK")"' EXIT
 CUR=""; fail() { echo "FAIL: ${CUR:-setup}: $*" >&2; exit 1; }
 CAP="$S/cap"; KEY="sk-W1TEST-$RANDOM$RANDOM-c0ffee"; export CAP W1_KEY="$KEY" W1_ROOT="$S"
-# the fake ADE helper. ADE_FAKE_MODE=cli (default) is story 4c's CLI: `help` prints its usage. =hook is an ADE build
-# without `ade open`: every call is hook mode, which prints {} and exits 0. An `open` call records its argv, a copy of
-# the launcher (its last word) and answers with ADE_FAKE_RC
+# the fake ADE helper. ADE_FAKE_MODE=cli (default) is an ADE with story 9: `help` prints the usage and the line
+# `capabilities: command`; =cli-split prints `capabilities: command split` (a later build). =cli-4c is stories 4a/4c
+# without 9: the usage only. =cli-near prints only near misses (`capabilities: commands split`, an indented copy). =hook is a build without `ade open`: every
+# call is hook mode, which reads stdin to its end, prints {} and exits 0. =hang: `help` never answers. An `open` call
+# records its argv, a copy of the launcher (its last word) and answers with ADE_FAKE_RC
 cat > "$S/ade-hook" <<'STUB'
 #!/bin/bash
 mkdir -p "$CAP"
+M="${ADE_FAKE_MODE:-cli}"
+if [ "$M" = hook ]; then [ "${1:-}" = help ] && echo help >> "$CAP/ade.help" || echo call >> "$CAP/ade.calls"; cat > /dev/null; echo '{}'; exit 0; fi
 if [ "${1:-}" = help ]; then echo help >> "$CAP/ade.help"
-  if [ "${ADE_FAKE_MODE:-cli}" = cli ]; then echo "usage: ade open [--cwd DIR] [--split right|down] [--name NAME] [--focus] [-- COMMAND [ARG...]]"; else echo '{}'; fi
+  [ "$M" = hang ] && exec sleep 60
+  echo "usage: ade open [--cwd DIR] [--split right|down] [--name NAME] [--focus] [-- COMMAND [ARG...]]"; echo "       ade help"
+  case "$M" in cli) printf '%s\n' "" "capabilities: command" ;; cli-split) printf '%s\n' "" "capabilities: command split" ;;
+    cli-near) printf '%s\n' "" "capabilities: commands split" "  capabilities: command" ;; esac
   exit 0; fi
-echo call >> "$CAP/ade.calls"; [ "${ADE_FAKE_MODE:-cli}" = cli ] || { echo '{}'; exit 0; }
+echo call >> "$CAP/ade.calls"
 printf '%s\n' "$@" > "$CAP/ade.argv"
 last="${@: -1}"; [ -f "$last" ] && cp "$last" "$CAP/ade.launcher"
 # the contract's word rule (printable ASCII): anything else is 422, which the CLI reports as exit 1
@@ -161,20 +168,27 @@ exit_3_4_fall_back_to_one_window_with_one_warning_line() {
   done
   clean_tmp
 }
-# C18: an ADE build without `ade open` (hook mode answers {} and 0 to anything): the window path, never a silent no-op
-an_ade_without_ade_open_uses_the_window() {
-  local L
-  work inade env ADE_FAKE_MODE=hook bin/work projects/demo; assert_eq "$rc" 0 "exit"
-  assert_eq "$(n ade)" 0 "open was called on a hook-mode helper"; assert_eq "$(n osa)" 1 "one window"
-  L="$(osa_L)"; assert_eq "$(cat "$CAP/osa.argv")" "$(osa_terminal "$L")" "the window argv"
-  assert_eq "$(lines "$S/err")" 1 "one info line ($(cat "$S/err"))"; grep -q '^work: ' "$S/err" || fail "the line does not start with work:"
-  clean_tmp
-  work inade env ADE_FAKE_MODE=hook AGENT_TERMINAL=ade bin/work projects/demo; assert_eq "$rc" 2 "forced ade: exit"
-  assert_eq "$(n ade)" 0 "forced ade: open called"; assert_eq "$(n osa)" 0 "forced ade: a window opened"
-  grep -qF "ade open" "$S/err" || fail "forced ade: the message does not name ade open"
-  no_leftovers "forced ade on an old ADE"
-  # the CLI helper takes the ADE path (C2 checks the argv)
-  work inade bin/work projects/demo; assert_eq "$(n ade)" 1 "CLI helper: open called"; assert_eq "$(n osa)" 0 "CLI helper: window"
+# C18: ADE takes the sub-terminal only when its `help` has a line starting `capabilities:` with the word `command`
+# (story 9); hook mode (no `ade open`), 4a/4c without 9, near misses and a helper that never answers get the window
+an_ade_without_typed_commands_uses_the_window() {
+  local m L t0
+  for m in hook cli-4c cli-near hang; do
+    t0=$SECONDS; work inade env ADE_FAKE_MODE=$m bin/work projects/demo; assert_eq "$rc" 0 "$m: exit ($(cat "$S/err"))"
+    [ $((SECONDS - t0)) -lt 15 ] || fail "$m: the probe took $((SECONDS - t0))s"
+    assert_eq "$(n ade)" 0 "$m: open was called"; assert_eq "$(n osa)" 1 "$m: one window"
+    assert_eq "$(cat "$CAP/ade.help" | grep -c .)" 1 "$m: one help probe"
+    L="$(osa_L)"; assert_eq "$(cat "$CAP/osa.argv")" "$(osa_terminal "$L")" "$m: the window argv"
+    assert_eq "$(lines "$S/err")" 1 "$m: one info line ($(cat "$S/err"))"; grep -q '^work: ' "$S/err" || fail "$m: the line does not start with work:"
+    clean_tmp
+    work inade env ADE_FAKE_MODE=$m AGENT_TERMINAL=ade bin/work projects/demo; assert_eq "$rc" 2 "$m, forced ade: exit"
+    assert_eq "$(n ade)" 0 "$m, forced ade: open called"; assert_eq "$(n osa)" 0 "$m, forced ade: a window opened"
+    grep -qF "capabilities:" "$S/err" || fail "$m, forced ade: the message does not name the capability"
+    no_leftovers "$m, forced ade"
+  done
+  for m in cli cli-split; do
+    work inade env ADE_FAKE_MODE=$m bin/work projects/demo; assert_eq "$rc" 0 "$m: exit"
+    assert_eq "$(n ade)" 1 "$m: open called"; assert_eq "$(n osa)" 0 "$m: a window opened"
+  done
   clean_tmp
 }
 # C7
@@ -302,6 +316,7 @@ readme_documents_the_ade_path() {
   printf '%s\n' "$rows" | grep -q '^| `1` .*AGENT_TERMINAL=terminal bin/work' || fail "no row for 1 with the hint"
   printf '%s\n' "$rows" | grep -q '^| `3`, `4` ' || fail "no row for 3, 4"
   printf '%s\n' "$sec" | grep -qF 'ade help' || fail "the section does not explain the ade help probe"
+  printf '%s\n' "$sec" | grep -qF 'capabilities: command' || fail "the section does not name the capability line"
   printf '%s\n' "$rows" | grep -q '^| `2` ' || fail "no row for 2"
   printf '%s\n' "$rows" | grep -q '^| `5` ' || fail "no row for 5"
   printf '%s\n' "$rows" | grep -q '^| any other ' || fail "no row for any other code"
@@ -310,7 +325,7 @@ readme_documents_the_ade_path() {
 ALL="ade_is_detected_only_with_all_four inside_ade_opens_one_sub_terminal_and_no_window name_is_the_folder_and_cwd_is_the_checkout
 ade_and_window_launchers_are_identical exit_0_keeps_the_launcher_until_the_shell_runs_it
 exit_1_refuses_with_a_hint_and_opens_no_window exit_3_4_fall_back_to_one_window_with_one_warning_line
-an_ade_without_ade_open_uses_the_window exit_5_prints_the_command_and_keeps_the_launcher
+an_ade_without_typed_commands_uses_the_window exit_5_prints_the_command_and_keeps_the_launcher
 exit_2_fails_and_opens_nothing a_forced_window_never_calls_ade forced_ade_never_falls_back forced_ade_outside_ade_is_exit_2
 outside_ade_is_the_window_path_unchanged dry_run_inside_ade_calls_nothing provider_session_under_ade_passes_only_the_launcher_path
 runs_from_a_non_interactive_shell_without_a_tty prompt_stays_out_of_the_typed_command the_checks_use_only_stubs
