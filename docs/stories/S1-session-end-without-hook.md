@@ -1,6 +1,6 @@
 # S1: bin/session-end without a hook
 
-Status: Done (2026-11-09): QA re-verification green; adversarial code re-review PASS.md`, section "S1: `bin/session-end` without a hook".
+Status: Done (2026-11-09): QA re-verification green; adversarial code re-review PASS. Source: `docs/plans/2026-11-09-other-ai-cli-agents.md`, section "S1: `bin/session-end` without a hook".
 Verification command: `bash tests/run.sh` (architecture verification command, `docs/architecture.md`).
 
 ## Goal
