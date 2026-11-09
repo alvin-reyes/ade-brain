@@ -147,7 +147,7 @@ A focus session can run Claude Code against DeepSeek instead of Anthropic. The C
   other terminals changed since the last prompt (STATE.md updates, new journal entries with their text, new or updated
   memory files with their description); in deep work Stop asks for a STATE update after new commits, and SessionEnd
   journals the commits, commits the folder and starts `bin/sync --auto`, which pushes.
-- **Deep work**: `bin/work <folder>` opens a Terminal in the folder's repo checkout with its context and hooks (a folder with no repo, such as an ops watcher, opens in the hub folder itself). `--prompt "<task>"` starts that session with its first message. Every session starts with Remote Control on, named after the folder, so you can follow it from your phone; `--no-remote` turns that off (use it with an API-key wrapper such as an OpenRouter or Ollama one: Remote Control needs a claude.ai login).
+- **Deep work**: `bin/work <folder>` opens a Terminal in the folder's repo checkout with its context and hooks (a folder with no repo, such as an ops watcher, opens in the hub folder itself). `--prompt "<task>"` starts that session with its first message. Every session starts with Remote Control on, named after the folder, so you can follow it from your phone; `--no-remote` turns that off (use it with an API-key wrapper such as an OpenRouter or Ollama one: Remote Control needs a claude.ai login). Inside ADE it opens a sub-terminal of your tab instead (see "Deep work inside ADE").
 - **Scheduled jobs** (`bin/schedule install`, launchd): the weekday morning briefing (`bin/briefing`, Haiku, read-only);
   `bin/monitor` every 30 minutes; and `bin/sync --auto` every 30 minutes.
 - **Auto sync**: `bin/sync --auto` commits and pushes the hub's files unattended: one run at a time, skipped while git
@@ -175,6 +175,37 @@ folder's `.claude/settings.json` (the hook commands), `HUB_CLAUDE_CONFIG_DIR` in
 `_bmad/config.toml`. Use the same user name and folder. Otherwise fix those values: move each folder's
 `.claude/settings.json` aside and run `bin/new <folder>` again, edit `hub.conf` and `_bmad/config.toml`, then run
 `bin/setup` and `bin/schedule install`.
+
+## Deep work inside ADE
+
+Run from an ADE terminal (or a Claude Code session in one), `bin/work <folder>` opens the session as a sub-terminal of
+that tab instead of a Terminal window; the session you ran it from keeps running. Inside ADE means all four of
+`ADE_HOOK_BIN` (an executable file), `ADE_HOOK_PORT`, `ADE_HOOK_TOKEN` and `ADE_PTY_ID` are set, as ADE sets them in
+every terminal. `bin/work` then runs
+
+```
+"$ADE_HOOK_BIN" open --cwd <checkout> --name <folder> --focus -- bash -l <launcher>
+```
+
+The launcher is the same file the Terminal path runs, so the prompt, the agents and any provider settings stay in it,
+never on ADE's command line. `--focus` shows the new sub-terminal and its tab. What `bin/work` does with `ade open`'s
+answer:
+
+| Exit | `bin/work` |
+|---|---|
+| `0` | Done: the sub-terminal runs the launcher, which removes itself. |
+| `1`, `3`, `4` | One `work:` warning line, then a Terminal window (ADE refused or failed, ADE is gone, or this is not an ADE terminal). |
+| `2` | Fails with exit 2 and opens nothing (a usage error is a bug to fix, not to hide). |
+| `5` | The sub-terminal opened but the command was not typed: prints `bash -l <launcher>` to run in it, keeps the launcher, exits 5. No window. |
+| any other | Fails with that code and opens nothing. |
+
+`AGENT_TERMINAL=terminal` or `AGENT_TERMINAL=iterm` always opens a window. `AGENT_TERMINAL=ade` always uses ADE: it never
+falls back (exits 1, 3 and 4 are returned as they are), and outside ADE it is exit 2. `WORK_DRY=1` also prints the ADE
+command it would run. Outside ADE nothing changes.
+
+The sub-terminal needs ADE's `ade open` on the ADE build (stories 4a and 4c in `better-agentic-ide`) and its typed
+command (`ade open -- COMMAND`, story 9). Until story 9 is on your build, ADE answers the typed command with
+"not supported yet" (exit 1), so `bin/work` opens a Terminal window with one warning line.
 
 ## Upgrading a hub made before auto sync
 

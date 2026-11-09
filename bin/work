@@ -8,10 +8,14 @@
 # .ade/context/providers.md): only providers in hub.conf's HUB_PROVIDERS_ALLOWED; plain claude; no Remote Control, no resume;
 # its own config dir; a merged settings file whose apiKeyHelper reads the key (the key is checked once, never written).
 # --agent-model / --agent-effort (repeatable) set the folder's specialist agents: a bare value sets all, name=value one (it wins). WORK_DRY=1 only prints the command. AGENT_TERMINAL=iterm uses iTerm.
+# Inside an ADE terminal (ADE_HOOK_BIN executable; ADE_HOOK_PORT, ADE_HOOK_TOKEN, ADE_PTY_ID set) the session opens as a
+# sub-terminal of the caller's tab: "$ADE_HOOK_BIN" open --cwd <checkout> --name <folder> --focus -- bash -l <launcher>
+# (story W1). ADE's exit 5 prints the command to run there; 1, 3 and 4 fall back to a window; 2 fails.
+# AGENT_TERMINAL=terminal|iterm forces a window; AGENT_TERMINAL=ade forces ADE, with no fallback.
 set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"
 # temp files (merged settings, launcher) go on any exit until the launcher is handed off; the launcher then removes them
 MS=""; L=""; trap '[ -z "$MS" ] || rm -f "$MS"; [ -z "$L" ] || rm -f "$L"' EXIT
-USAGE="usage: bin/work [--provider P] [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--no-remote] [--agent-model [name=]M] [--agent-effort [name=]E] <projects|ops>/<name> [repo]"
+USAGE="usage: bin/work [--provider P] [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--no-remote] [--agent-model [name=]M] [--agent-effort [name=]E] <projects|ops>/<name> [repo]  (AGENT_TERMINAL=terminal|iterm|ade)"
 MODEL=""; EFFORT=""; PROMPT=""; REMOTE=1; CL="$(claude_cmd)"; POS=(); ASET=""; PROV="${HUB_PROVIDER:-anthropic}"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -31,6 +35,15 @@ done
 [[ "$CL" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "work: bad claude command '$CL'" >&2; exit 2; }
 [ -z "$MODEL" ] || [[ "$MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
 case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
+# where the session opens: a sub-terminal in ADE (all four ADE variables set) or a Terminal/iTerm window
+in_ade() { [ -n "${ADE_HOOK_BIN:-}" ] && [ -f "$ADE_HOOK_BIN" ] && [ -x "$ADE_HOOK_BIN" ] && [ -n "${ADE_HOOK_PORT:-}" ] &&
+  [ -n "${ADE_HOOK_TOKEN:-}" ] && [ -n "${ADE_PTY_ID:-}" ]; }
+case "${AGENT_TERMINAL:-}" in
+  terminal|iterm) OPEN=window ;;
+  ade) in_ade || { echo "work: AGENT_TERMINAL=ade needs an ADE terminal (ADE_HOOK_BIN, ADE_HOOK_PORT, ADE_HOOK_TOKEN and ADE_PTY_ID set)" >&2; exit 2; }
+    OPEN=ade ;;
+  *) if in_ade; then OPEN=ade; else OPEN=window; fi ;;
+esac
 # hub.conf defaults (HUB_MODEL, HUB_EFFORT, HUB_AGENT_MODEL); the command line wins
 # (a provider session never takes HUB_MODEL, which may be a full Anthropic id)
 [ -n "$MODEL" ] || [ "$PROV" != anthropic ] || MODEL="${HUB_MODEL:-}"; [ -n "$EFFORT" ] || EFFORT="${HUB_EFFORT:-}"
@@ -192,7 +205,10 @@ fi
 [ -n "$PROMPT" ] && cmd="$cmd -- $(printf %q "$PROMPT")"
 echo "$cmd"
 # a dry run shows the merged settings instead of keeping the file (the EXIT trap removes it)
-if [ "${WORK_DRY:-}" = 1 ]; then [ -z "$MS" ] || { cat "$MS"; echo; } 2>/dev/null; exit 0; fi
+if [ "${WORK_DRY:-}" = 1 ]; then
+  [ "$OPEN" = window ] || echo "work: in ADE this runs: $ADE_HOOK_BIN open --cwd $dir --name ${F##*/} --focus -- bash -l <launcher>" >&2
+  [ -z "$MS" ] || { cat "$MS"; echo; } 2>/dev/null; exit 0
+fi
 if [ "$PROV" != anthropic ]; then   # the memory links bin/setup makes, inside the provider's config dir
   plink() { local m="$CD/projects/$(encode_path "$1")/memory"; mkdir -p "$2" "$(dirname "$m")"
     [ -L "$m" ] && [ "$(readlink "$m")" = "$2" ] && return 0
@@ -202,6 +218,19 @@ if [ "$PROV" != anthropic ]; then   # the memory links bin/setup makes, inside t
 fi
 # the command (it may hold quotes from the agents JSON) runs from a launcher script, so no AppleScript escaping is needed
 L=$(mktemp "${TMPDIR:-/tmp}/agent-work.XXXXXX"); printf '#!/bin/bash\ntrap %s EXIT\n%s\n' "$(sq "$TRAP")" "$cmd" > "$L"; chmod +x "$L"
+if [ "$OPEN" = ade ]; then
+  # only the launcher's path goes to ADE; its stdout is dropped, the first line of its stderr is the reason
+  why=$("$ADE_HOOK_BIN" open --cwd "$dir" --name "${F##*/}" --focus -- bash -l "$L" 2>&1 >/dev/null); rc=$?
+  why="${why%%$'\n'*}"; why="${why:-no message}"
+  case "$rc" in
+    0) MS=""; L=""; exit 0 ;;   # typed into the new sub-terminal: its shell runs the launcher, which removes both
+    5) echo "work: ADE opened the sub-terminal but did not type the command ($why); run it there: bash -l $(printf %q "$L")" >&2
+      MS=""; L=""; exit 5 ;;    # handed to the user: kept for that run, no second session
+    1|3|4) [ "${AGENT_TERMINAL:-}" != ade ] || { echo "work: ade open failed (exit $rc): $why" >&2; exit "$rc"; }
+      echo "work: ade open failed (exit $rc: $why); opening a Terminal window instead" >&2 ;;
+    *) echo "work: ade open failed (exit $rc): $why" >&2; exit "$rc" ;;   # 2 (usage) or outside the contract: no fallback
+  esac
+fi
 if [ "${AGENT_TERMINAL:-terminal}" = iterm ]; then
   osascript -e "tell application \"iTerm\" to create window with default profile command \"bash -l $L\""
 else
