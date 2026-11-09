@@ -10,7 +10,8 @@
 # --agent-model / --agent-effort (repeatable) set the folder's specialist agents: a bare value sets all, name=value one (it wins). WORK_DRY=1 only prints the command. AGENT_TERMINAL=iterm uses iTerm.
 # Inside an ADE terminal (ADE_HOOK_BIN executable; ADE_HOOK_PORT, ADE_HOOK_TOKEN, ADE_PTY_ID set) the session opens as a
 # sub-terminal of the caller's tab: "$ADE_HOOK_BIN" open --cwd <checkout> --name <folder> --focus -- bash -l <launcher>
-# (story W1). ADE's exit 5 prints the command to run there; 1, 3 and 4 fall back to a window; 2 fails.
+# (story W1). ADE's exit 5 prints the command to run there; 1 (refused) fails with a hint; 3 and 4 (unreachable) fall
+# back to a window; 2 fails.
 # AGENT_TERMINAL=terminal|iterm forces a window; AGENT_TERMINAL=ade forces ADE, with no fallback.
 set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"
 # temp files (merged settings, launcher) go on any exit until the launcher is handed off; the launcher then removes them
@@ -38,11 +39,16 @@ case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be
 # where the session opens: a sub-terminal in ADE (all four ADE variables set) or a Terminal/iTerm window
 in_ade() { [ -n "${ADE_HOOK_BIN:-}" ] && [ -f "$ADE_HOOK_BIN" ] && [ -x "$ADE_HOOK_BIN" ] && [ -n "${ADE_HOOK_PORT:-}" ] &&
   [ -n "${ADE_HOOK_TOKEN:-}" ] && [ -n "${ADE_PTY_ID:-}" ]; }
+# an ADE build without `ade open` runs the helper in hook mode, which answers {} and 0 to anything (a silent no-op):
+# its CLI's `help` prints "usage: ade open"; a dry run never calls the helper
+ade_cli() { [ "${WORK_DRY:-}" = 1 ] || "$ADE_HOOK_BIN" help </dev/null 2>/dev/null | grep -q '^usage: ade open'; }
 case "${AGENT_TERMINAL:-}" in
   terminal|iterm) OPEN=window ;;
   ade) in_ade || { echo "work: AGENT_TERMINAL=ade needs an ADE terminal (ADE_HOOK_BIN, ADE_HOOK_PORT, ADE_HOOK_TOKEN and ADE_PTY_ID set)" >&2; exit 2; }
+    ade_cli || { echo "work: AGENT_TERMINAL=ade needs ADE's ade open, which this ADE build does not have (update ADE)" >&2; exit 2; }
     OPEN=ade ;;
-  *) if in_ade; then OPEN=ade; else OPEN=window; fi ;;
+  *) OPEN=window
+    if in_ade; then if ade_cli; then OPEN=ade; else echo "work: this ADE build has no ade open; opening a Terminal window" >&2; fi; fi ;;
 esac
 # hub.conf defaults (HUB_MODEL, HUB_EFFORT, HUB_AGENT_MODEL); the command line wins
 # (a provider session never takes HUB_MODEL, which may be a full Anthropic id)
@@ -226,8 +232,10 @@ if [ "$OPEN" = ade ]; then
     0) MS=""; L=""; exit 0 ;;   # typed into the new sub-terminal: its shell runs the launcher, which removes both
     5) echo "work: ADE opened the sub-terminal but did not type the command ($why); run it there: bash -l $(printf %q "$L")" >&2
       MS=""; L=""; exit 5 ;;    # handed to the user: kept for that run, no second session
-    1|3|4) [ "${AGENT_TERMINAL:-}" != ade ] || { echo "work: ade open failed (exit $rc): $why" >&2; exit "$rc"; }
-      echo "work: ade open failed (exit $rc: $why); opening a Terminal window instead" >&2 ;;
+    1) echo "work: ADE refused the sub-terminal ($why); to open a window instead run: AGENT_TERMINAL=terminal bin/work $F" >&2
+      exit 1 ;;                 # ADE answered no: never a window outside ADE (owner, 2026-11-09)
+    3|4) [ "${AGENT_TERMINAL:-}" != ade ] || { echo "work: ade open failed (exit $rc): $why" >&2; exit "$rc"; }
+      echo "work: ADE is unreachable (exit $rc: $why); opening a Terminal window instead" >&2 ;;
     *) echo "work: ade open failed (exit $rc): $why" >&2; exit "$rc" ;;   # 2 (usage) or outside the contract: no fallback
   esac
 fi

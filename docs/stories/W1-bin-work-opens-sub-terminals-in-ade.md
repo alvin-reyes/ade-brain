@@ -19,7 +19,7 @@ The session is started by the same launcher file `bin/work` writes today. Inside
 ## Dependencies (none blocks the build)
 
 - **Build and tests:** none. Every test uses a fake `$ADE_HOOK_BIN` on `PATH` that records its argv and returns the exit code the test sets. Real ADE, real `claude`, real `osascript` and the real Keychain are never run.
-- **Live flow:** needs ADE's `ade open` on the ADE build, from stories 4a and 4c (PRs #96 and #97 in `better-agentic-ide`, still open on 2026-11-09), and the typed command from story 9 (`ade open -- COMMAND`, in refinement). Until story 9 is on the build, `ade open -- …` answers 422 "not supported yet", which is exit 1, so `bin/work` falls back to a Terminal window (criterion C6). The fallback is the intended behaviour for that build, not a failure.
+- **Live flow:** needs ADE's `ade open` on the ADE build, from stories 4a and 4c (PRs #96 and #97 in `better-agentic-ide`, still open on 2026-11-09), and the typed command from story 9 (`ade open -- COMMAND`, in refinement). Until story 9 is on the build, `ade open -- …` answers 422 "not supported yet", which is exit 1, so `bin/work` exits 1 with the hint `AGENT_TERMINAL=terminal bin/work <folder>` (criterion C6a, owner decision 2026-11-09). On a build without `ade open` at all, `bin/work` opens a window (C18).
 
 ## Decisions (made here, reviewable)
 
@@ -29,9 +29,12 @@ The session is started by the same launcher file `bin/work` writes today. Inside
 - **Exit codes from `ade open`.** Per the contract in ADE's `.ade/context/terminal-open.md`:
   - **0** (opened, command typed): done. `bin/work` exits 0 and the new shell runs the launcher.
   - **5** (opened, not typed): **no fallback.** A shell is already open, so a second session would duplicate it. `bin/work` prints the one command the user runs in the new sub-terminal, `bash -l <launcher>`, and exits 5. The launcher is kept for that run.
-  - **1, 3, 4** (ADE refused or failed; ADE gone; not an ADE terminal): **fall back** to the Terminal window, with one warning line. Reasons: the user asked for a session, not for ADE; the contract says these answers open nothing (1 and 4 refuse before any terminal is made, and the window closes any late addition, so there is no duplicate); a one-line warning keeps the fallback visible.
+  - **1** (ADE refused: an error, the sub-terminal cap, an ADE too old, or no answer in time): **no window** (owner decision, 2026-11-09: inside ADE, `bin/work` never opens a window outside ADE because ADE refused). `bin/work` prints ADE's error and the hint `AGENT_TERMINAL=terminal bin/work <folder>` to open a window instead, and exits 1. The EXIT trap removes the launcher.
+  - **3, 4** (ADE unreachable: stale variables, for example under tmux; connection refused; the terminal is gone): **fall back** to the Terminal window, with one warning line. The contract says these answers open nothing, so there is no duplicate.
+  - **Any other code** (outside the contract): fail with that code, no window.
+- **An ADE build without `ade open`** (owner decision, 2026-11-09). On such a build (for example v0.22.0) the helper runs in hook mode and answers `{}` and exit 0 to anything, so `open` would silently do nothing. Before `open`, `bin/work` runs `"$ADE_HOOK_BIN" help </dev/null` and requires stdout to contain a line starting `usage: ade open` (story 4c's usage text). If it does not, `bin/work` behaves as outside ADE: one `work:` info line, then a window. With `AGENT_TERMINAL=ade` it is exit 2. A dry run does not probe.
   - **2** (usage: our own argument or a bad `--cwd`): **fail**, exit 2, nothing opened. Falling back would hide a bug in `bin/work`.
-- **Forced values.** `AGENT_TERMINAL=terminal` and `=iterm` always use a window, even inside ADE. `AGENT_TERMINAL=ade` always uses ADE: inside ADE it never falls back (exit 1, 3 or 4 is returned as is); outside ADE it is exit 2 with a message. An unset or unrecognised value is "auto": ADE inside ADE, a window outside (an unrecognised value used to mean a window; inside ADE it is now auto, and this is the only change of behaviour outside a forced value).
+- **Forced values.** `AGENT_TERMINAL=terminal` and `=iterm` always use a window, even inside ADE. `AGENT_TERMINAL=ade` always uses ADE: inside ADE it never falls back (exit 1, 3 or 4 is returned as is); outside ADE, or on an ADE build without `ade open` (C18), it is exit 2 with a message. An unset or unrecognised value is "auto": ADE inside ADE, a window outside (an unrecognised value used to mean a window; inside ADE it is now auto, and this is the only change of behaviour outside a forced value).
 - **Launcher lifetime.** `bin/work`'s EXIT trap removes the launcher and the merged settings file (`MS`) unless they were handed off. A hand-off happens when ADE has typed the command (exit 0) or when the user has been told to run it (exit 5). After a hand-off, `bin/work` never deletes them, because the new shell still needs them. The launcher removes itself when it exits, as today.
 - **Nothing sensitive on the command line.** The typed command is `bash -l <path>`. The prompt, the agents JSON, the `claude` arguments and the provider settings stay inside the launcher file (as today), never in ADE's argv or the typed line.
 
@@ -46,7 +49,8 @@ All checks live in `tests/test_ade_open.sh` (new), using `make_hub` from `tests/
 | C3 | `--name` is the folder basename, also for a trailing slash (`projects/demo/` → `demo`). `--cwd` is the repo checkout, or the hub folder for a folder with no repo. | `name_is_the_folder_and_cwd_is_the_checkout` |
 | C4 | The launcher written inside ADE is byte-identical to the one written for a window, for the same arguments (the osascript stub copies it). It passes `bash -n` and starts with `#!/bin/bash` and the same `trap`. | `ade_and_window_launchers_are_identical` |
 | C5 | Exit 0: `bin/work` exits 0, does not delete the launcher or the merged settings file (provider case), and running the launcher (`bash "$L"`, with the fake `claude` first on `PATH`) runs the fake and then removes both files. | `exit_0_keeps_the_launcher_until_the_shell_runs_it` |
-| C6 | Exit 1, 3 and 4 each open a Terminal window (`osascript` called once with `do script "bash -l <launcher>"`, then `activate`), print exactly one stderr line starting `work: `, and exit 0. A TMPDIR with a non-ASCII character gives 422 from ADE, which is exit 1, and also falls back. | `exit_1_3_4_fall_back_to_one_window_with_one_warning_line` |
+| C6a | Exit 1: `bin/work` exits 1, never calls `osascript`, and prints exactly one stderr line starting `work: ` with ADE's error and the hint `AGENT_TERMINAL=terminal bin/work <folder>`. No launcher is left. A TMPDIR with a non-ASCII character gives 422 from ADE, which is exit 1, with the same result. | `exit_1_refuses_with_a_hint_and_opens_no_window` |
+| C6b | Exit 3 and 4 each open a Terminal window (`osascript` called once with `do script "bash -l <launcher>"`, then `activate`), print exactly one stderr line starting `work: `, and exit 0. | `exit_3_4_fall_back_to_one_window_with_one_warning_line` |
 | C7 | Exit 5: `bin/work` exits 5, prints on stderr one line naming the reason and the command `bash -l <launcher>` to run in the new sub-terminal, keeps the launcher and the settings file, and opens no window. | `exit_5_prints_the_command_and_keeps_the_launcher` |
 | C8 | Exit 2: `bin/work` exits 2, opens no window and leaves no launcher or settings file (the EXIT trap removes them). | `exit_2_fails_and_opens_nothing` |
 | C9 | `AGENT_TERMINAL=terminal` and `AGENT_TERMINAL=iterm` open a window even inside ADE, and the fake helper is never called. | `a_forced_window_never_calls_ade` |
@@ -57,7 +61,8 @@ All checks live in `tests/test_ade_open.sh` (new), using `make_hub` from `tests/
 | C14 | A non-interactive run: `bin/work` under `bash --noprofile --norc`, stdin from `/dev/null`, stdout to a pipe, no TTY, inside ADE, exits 0 on exit 0. (This is the owner's case: a Claude Code Bash tool calls `bin/work`.) | `runs_from_a_non_interactive_shell_without_a_tty` |
 | C15 | `--prompt` is not in the helper's argv: a prompt containing spaces, quotes, `$`, backticks and a newline appears in the launcher file, and nowhere else in the helper's argv or the test's captured output. | `prompt_stays_out_of_the_typed_command` |
 | C16 | Hermetic: the test checks that `command -v osascript`, `command -v security` and `command -v claude` resolve to the stubs, and that `ADE_HOOK_BIN` is the fake. | `the_checks_use_only_stubs` |
-| C17 | README: a section "Deep work inside ADE" lists the detection rule, the four exit codes and what each does, `AGENT_TERMINAL=ade`, and that the sub-terminal needs ADE's `ade open` (and its typed command) on the ADE build. The section's exit-code table is checked for its five rows. | `readme_documents_the_ade_path` |
+| C18 | An ADE build without `ade open` (a fake helper in hook mode: `{}` and exit 0 to anything): `bin/work` never calls `open`, opens one window, prints one `work:` line and exits 0. With `AGENT_TERMINAL=ade` it exits 2 with a message naming `ade open`, and opens nothing. A CLI helper (whose `help` prints `usage: ade open ...`) takes the ADE path, after exactly one `help` probe (C2). | `an_ade_without_ade_open_uses_the_window` |
+| C17 | README: a section "Deep work inside ADE" lists the detection rule, the four exit codes and what each does, `AGENT_TERMINAL=ade`, and that the sub-terminal needs ADE's `ade open` (and its typed command) on the ADE build. The section's exit-code table is checked for its six rows (`0`; `1` with the hint; `3`, `4`; `2`; `5`; any other), and the section explains the `ade help` probe. | `readme_documents_the_ade_path` |
 
 ## Test notes (TDD order)
 
@@ -92,9 +97,9 @@ Not touched: `bin/lib.sh`, `bin/monitor`, `bin/briefing` (their `osascript` noti
 
 ## Open before Done
 
-1. Owner: confirm the fallback rule for exit 1, 3 and 4 (a window, with one warning line) and the `--focus` default. Both are the Decisions above; the build follows them unless the owner changes them.
+1. Owner: confirm the `--focus` default. (The fallback rule was decided on 2026-11-09: exit 1 gives no window; 3 and 4 fall back.) Both are the Decisions above; the build follows them unless the owner changes them.
 2. Live check on the owner's Mac, once ADE has story 9 on its build: from a Claude Code session in an ADE terminal, `bin/work projects/<folder>` opens a sub-terminal in the tab, the session starts in it, and the caller session keeps running. This is a manual check and does not gate Done.
-3. The ADE team's build with story 9 is the one that makes the live flow work; until it is installed, the live run falls back to a window (C6), which is the expected result.
+3. The ADE team's build with story 9 is the one that makes the live flow work; until it is installed, the live run exits 1 with the `AGENT_TERMINAL=terminal` hint (C6a), which is the expected result.
 
 ## Verification
 

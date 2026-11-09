@@ -194,18 +194,24 @@ answer:
 | Exit | `bin/work` |
 |---|---|
 | `0` | Done: the sub-terminal runs the launcher, which removes itself. |
-| `1`, `3`, `4` | One `work:` warning line, then a Terminal window (ADE refused or failed, ADE is gone, or this is not an ADE terminal). |
+| `1` | ADE refused (an error, the sub-terminal cap, an ADE too old, or no answer in time): prints ADE's reason and the hint `AGENT_TERMINAL=terminal bin/work <folder>`, exits 1, opens no window. |
+| `3`, `4` | ADE is unreachable (stale variables, for example under tmux, or the connection refused): one `work:` warning line, then a Terminal window. |
 | `2` | Fails with exit 2 and opens nothing (a usage error is a bug to fix, not to hide). |
 | `5` | The sub-terminal opened but the command was not typed: prints `bash -l <launcher>` to run in it, keeps the launcher, exits 5. No window. |
 | any other | Fails with that code and opens nothing. |
 
+Before that, `bin/work` checks that this ADE has `ade open` with `ade help`: `"$ADE_HOOK_BIN" help` must print `usage: ade open`. An
+older ADE build (one without the CLI, such as v0.22.0) would take `ade open` as a hook event and do nothing, so there
+`bin/work` prints one `work:` line and opens a Terminal window, as outside ADE.
+
 `AGENT_TERMINAL=terminal` or `AGENT_TERMINAL=iterm` always opens a window. `AGENT_TERMINAL=ade` always uses ADE: it never
-falls back (exits 1, 3 and 4 are returned as they are), and outside ADE it is exit 2. `WORK_DRY=1` also prints the ADE
+falls back (exits 3 and 4 are returned as they are), and outside ADE or on an ADE build without `ade open` it is exit 2. `WORK_DRY=1` also prints the ADE
 command it would run. Outside ADE nothing changes.
 
 The sub-terminal needs ADE's `ade open` on the ADE build (stories 4a and 4c in `better-agentic-ide`) and its typed
 command (`ade open -- COMMAND`, story 9). Until story 9 is on your build, ADE answers the typed command with
-"not supported yet" (exit 1), so `bin/work` opens a Terminal window with one warning line.
+"not supported yet" (exit 1), so `bin/work` exits 1 with the hint; run `AGENT_TERMINAL=terminal bin/work <folder>`
+for a window meanwhile.
 
 ## Upgrading a hub made before auto sync
 
