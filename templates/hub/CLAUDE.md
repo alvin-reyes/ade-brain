@@ -38,7 +38,8 @@ never here.
    folder name, ops folders `ops-<name>`). Give it the task, not the history; it loads its own context.
 4. Never do a folder's work without its context: spawn its agent, or first read its CLAUDE.md, ACCESS.md and STATE.md.
 5. After agents finish, confirm their STATE.md and journal entries, then report to {{OWNER}} in a few lines.
-6. "Deep work on <folder>" means `bin/work <folder>`: a Terminal in the folder's repo checkout with its context and hooks.
+6. "Deep work on <folder>" means `bin/work <folder>`: a session in the folder's repo checkout with its context and hooks,
+   in a sub-terminal under this one inside ADE, a Terminal window otherwise.
 
 ## Git boundaries
 - The hub repo holds only hub files. Nothing under `repos/` is ever committed here (a pre-commit hook refuses it).
