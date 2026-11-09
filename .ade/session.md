@@ -1,0 +1,19 @@
+# Session journal
+
+- 2026-11-09: owner approved the plan for agents on other AI CLIs (docs/plans/2026-11-09-other-ai-cli-agents.md): engines opt-in per hub, default claude; persona agent stays on Claude. Adversarial review before S1.
+- 2026-11-09: adversarial review blocked the plan (3 blockers, 12 majors); revision 2 answers every finding and goes back to the owner for re-approval.
+- 2026-11-09: re-review blocked revision 2 (orphaned engine on caller timeout, untestable stdin/HUP design, auth vs cleared env); revision 3 adds the hub inbox, moves the launcher to S2 and answers every finding.
+- 2026-11-09: review 3 blocked revision 3 (launcher failed under a real pty, inbox races); owner kept full scope; revision 4: Python launcher behind a pty proof gate, per-launch inbox, version gate, write snapshots, S2/S3 split into five stories.
+- 2026-11-09: review 4 blocked revision 4 (session end lost on window close; inbox, watchdog, gate and passthrough gaps) but confirmed the Python launcher by prototype; revision 5 answers every finding.
+- 2026-11-09: review 5 passed everything except S3b (busy-checkout check, .git/config denylist); revision 6 fixes both and carries the minors into stories.
+- 2026-11-09: revision 6 passed the adversarial review (follow-up); its three S3b minors folded in (push URLs reverted, owner-only HUB_WRITE_UNCHECKED fallback, hand-started sessions documented). Awaiting owner re-approval.
+- 2026-11-09: owner approved revision 6 of the other-AI-CLI plan. Next: S0 spike.
+- 2026-11-09: owner: Claude only for now; Codex and Gemini testing paused. S0 limited to Claude items; S1 and Claude-only S3a can proceed.
+- 2026-11-09: owner asked for DeepSeek and GLM; revision 7 adds them as providers behind Claude Code (story SP, S0 item 21). Needs review and approval.
+- 2026-11-09: owner approved revision 7 (subject to its review) and added Meta Muse; priority: S0 item 21 and SP (DeepSeek, GLM, Muse) first, S1 alongside.
+- 2026-11-09: provider review blocked (Remote Control claim, fail-open key read, key in child env, non-hermetic test); fixed in revision 7.
+- 2026-11-09: provider review addendum (Muse): enforced per-provider go/no-go, behavioural canary checks, Meta values marked unconfirmed, provider id renamed to meta.
+- 2026-11-09: provider review addendum (Muse): enforced per-provider go/no-go, behavioural canary checks, Meta values marked unconfirmed, provider id renamed to meta.
+- 2026-11-09: providers section passed review; owner approval of revision 7 is now effective; five review minors folded in.
+- 2026-11-09: sharded S1 (docs/stories/S1-session-end-without-hook.md, 18 ACs): bounded stdin read, --since, sync lock for session-end and sync --yes, log; the held-pipe-under-script test verified to hang on today's code.
+- 2026-11-09: sharded SP (docs/stories/SP-providers.md, 24 ACs, blocked on S0 item 21): providers deepseek, glm, meta; fail-closed key read, merged settings, go/no-go, wrapper refusal, name-only doctor rows. bin/agent parts left to S3a.
