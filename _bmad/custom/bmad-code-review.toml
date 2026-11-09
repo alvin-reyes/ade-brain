@@ -1,0 +1,5 @@
+# Token trim (Alvin, 9 Nov 2026): reviewer subagents run on Sonnet; gathering, triage and presenting stay on the session's model.
+[workflow]
+persistent_facts = [
+  "Every review-lens subagent this workflow launches (quick or thorough: Blind Hunter, Edge Case Hunter, Verification Gap and the rest) runs on the Sonnet model: pass model \"sonnet\" to the Agent tool for each one. Triage and presentation stay in this session. Exception: when the user asks for an Opus review, launch the lenses on \"opus\" instead.",
+]

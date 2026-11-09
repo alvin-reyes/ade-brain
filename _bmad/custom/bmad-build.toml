@@ -1,0 +1,21 @@
+# Token trim + code on Opus (Alvin, 9 Nov 2026): build in-session up to 200 lines (BMAD default 100);
+# code is written only by Opus (5.5 or later); reviewers may run cheaper (see bmad-code-review.toml).
+[workflow]
+persistent_facts = [
+  "Code is written only by an Opus model (Opus 5.5 or later). If this session is not running on Opus, take route full whatever the size, so the Opus implementation subagent writes the code.",
+]
+route_selection = """
+Decide whether to use a coding subagent (full) or implement directly (oneshot).
+If this session is not running on Opus, choose full.
+Otherwise, using the information already gathered, with no further reading and minimal
+extra reasoning, estimate the lines of code to add or modify.
+200 lines or fewer: oneshot. Otherwise: full.
+If the change touches more than five files and is not simple or mechanical,
+consider upgrading to full.
+"""
+implementation_handoff = """
+Launch a subagent on the Opus model (pass model "opus" to the Agent tool) with no prior conversation context, with this prompt:
+> Read {plan_file} fully and implement it — the plan is the sole source of truth. Load every file listed in its frontmatter `context:` before you start.
+>
+> When done, report what you changed, how you verified it, and anything left incomplete or risky.
+"""
