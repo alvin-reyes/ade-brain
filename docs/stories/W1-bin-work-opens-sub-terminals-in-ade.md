@@ -1,6 +1,6 @@
 # W1: bin/work opens sub-terminals in ADE
 
-Status: **built; in review** (PR #11, branch `w1-bin-work-ade`). Owner's intent (2026-11-09): "when the developer uses ADE, it starts a claude code session. On the claude code session, developer can spawn focus work using our ai-agent template `bin/work` … terminals should spawn INSIDE ADE … it needs to open a sub tab with the main persona open too … `bin/work` starts the session in it."
+Status: **Done (2026-11-09): QA green; code review blocker settled by the owner** (PR #11, branch `w1-bin-work-ade`). Owner's intent (2026-11-09): "when the developer uses ADE, it starts a claude code session. On the claude code session, developer can spawn focus work using our ai-agent template `bin/work` … terminals should spawn INSIDE ADE … it needs to open a sub tab with the main persona open too … `bin/work` starts the session in it."
 
 Verification command: `bash tests/run.sh` (`docs/architecture.md`, "Verification command"). Changing it needs the owner's approval.
 
@@ -115,4 +115,37 @@ Plus: every check named in C1 to C19 appears by name in the output of `tests/tes
 
 ## Verification (QA)
 
-_Empty until QA runs the verification command against the story's work. QA records the real output here._
+QA, 2026-11-09, at f3e8b9b (branch `w1-bin-work-ade`). Command run hermetically: `env -i PATH="$PATH" HOME="$S/home" TMPDIR="$S/tmp" LANG=C bash tests/run.sh` with `S=$(mktemp -d /tmp/w1q.XXXX)`. No real ADE, osascript or claude. `shasum` of `~/.claude-caiden/settings.json` (5f36b2ea...) and `~/.claude/settings.json` (7d2a7b7e...) was identical before and after.
+
+Real output (exit 0):
+
+```
+ok    test_ade_open.sh
+ok    test_brain.sh
+ok    test_briefing.sh
+ok    test_changes.sh
+ok    test_context.sh
+ok    test_doctor.sh
+ok    test_init.sh
+ok    test_lib.sh
+ok    test_models.sh
+ok    test_monitor.sh
+ok    test_new.sh
+ok    test_precommit.sh
+ok    test_providers.sh
+ok    test_remote.sh
+ok    test_report.sh
+ok    test_root.sh
+ok    test_schedule.sh
+ok    test_secret.sh
+ok    test_session_end.sh
+ok    test_setup.sh
+ok    test_sync.sh
+ok    test_work.sh
+```
+
+Criteria mapping (read in `tests/test_ade_open.sh`; each named check asserts its criterion, none is empty): C1 `ade_is_detected_only_with_all_four`; C2 `inside_ade_opens_one_sub_terminal_and_no_window`; C3 `name_is_the_folder_and_cwd_is_the_checkout`; C4 `ade_and_window_launchers_are_identical`; C5 `exit_0_keeps_the_launcher_until_the_shell_runs_it`; C6a `exit_1_refuses_with_a_hint_and_opens_no_window`; C6b `exit_3_4_fall_back_to_one_window_with_one_warning_line`; C7 `exit_5_prints_the_command_and_keeps_the_launcher`; C8 `exit_2_fails_and_opens_nothing`; C9 `a_forced_window_never_calls_ade`, `an_unrecognised_value_inside_ade_is_auto`; C10 `forced_ade_never_falls_back`, `forced_ade_outside_ade_is_exit_2`; C11 `outside_ade_is_the_window_path_unchanged`; C12 `dry_run_inside_ade_calls_nothing`; C13 `provider_session_under_ade_passes_only_the_launcher_path`; C14 `runs_from_a_non_interactive_shell_without_a_tty`; C15 `prompt_stays_out_of_the_typed_command` (helper argv and stderr; stdout echo deliberately unchecked, owner decision); C16 `the_checks_use_only_stubs`; C17 `readme_documents_the_ade_path`; C18 `an_ade_without_typed_commands_uses_the_window`; C19 `a_bad_folder_fails_before_the_probe`. All 19 names are in the file's `ALL` list and `run.sh` reports the file ok.
+
+`git diff origin/main -- tests/test_work.sh tests/test_providers.sh` is empty (both unchanged), and both pass.
+
+Verdict: PASS. Notes: `run.sh` prints one line per file, so per-check pass lines were not in this output; coverage was confirmed by reading the checks. The live flow (story 9 on the ADE build, PR #100) is a manual check that does not gate Done.
