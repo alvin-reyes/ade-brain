@@ -70,3 +70,11 @@ If any is false, the story is not Done: no exceptions, no overrides by assertion
 `.ade/archive/` holds earlier BMAD versions of this project. It is
 read-only history: never treat it as current documents, never write to it,
 and read it only when a person asks about the earlier work.
+
+## 5. Lean mode (default)
+The full flow above is heavy for most projects' pace and cost, so lean mode is on by default. The owner can switch back to the full flow by deleting this section.
+- **Kept, non-negotiable:** test-first work, and the verification command deciding Done (§3 items 1-3). QA runs the gate; no agent certifies its own work.
+- **Planning:** one short design note per feature, written by the developer who builds it (or the product-manager for a new feature), instead of separate PRD, architecture and UX documents. Shared contracts still go in `.ade/context/` (§2 "Respect the Context Store").
+- **Adversarial review is not mandatory** (this suspends §1's per-artifact review and §2's "Adversarial review is mandatory"). The coordinator may ask for one review on a risky change; there are no multi-round review loops.
+- **Decisions:** the coordinator applies sensible defaults and lists them in one line each for the owner, rather than asking.
+- **Cost:** one or two agents at a time, the smaller model for routine work, and no status replies for "still running".
