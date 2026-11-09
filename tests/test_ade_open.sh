@@ -1,9 +1,11 @@
 #!/bin/bash
-# Story W1: bin/work opens sub-terminals in ADE (docs/stories/W1-bin-work-opens-sub-terminals-in-ade.md). One function
+# Stories W1 and W1b: bin/work opens sub-terminals in ADE, and inside ADE never a window
+# (docs/stories/W1-bin-work-opens-sub-terminals-in-ade.md, docs/stories/W1b-inside-ade-never-a-window.md). One function
 # per acceptance check; bash tests/test_ade_open.sh [check ...] runs only the named checks (all of them by default).
 # Hermetic: a fake $ADE_HOOK_BIN (records its argv, answers with ADE_FAKE_RC), and stub `osascript` (records its argv,
 # never runs the launcher), `security` and `claude` sit first on PATH. Real ADE, osascript, claude and the Keychain
-# are never reached.
+# are never reached. The osascript stub also logs every call made inside ADE (all four ADE variables set) to
+# $S/osa.inade, and every check fails if that file exists afterwards (W1b: inside ADE, never a window).
 . "$(dirname "$0")/helpers.sh"
 make_hub; cd "$HUB"
 unset CLAUDE_CONFIG_DIR HUB_CLAUDE_CONFIG_DIR AGENT_TERMINAL ADE_HOOK_BIN ADE_HOOK_PORT ADE_HOOK_TOKEN ADE_PTY_ID
@@ -13,9 +15,10 @@ CUR=""; fail() { echo "FAIL: ${CUR:-setup}: $*" >&2; exit 1; }
 CAP="$S/cap"; KEY="sk-W1TEST-$RANDOM$RANDOM-c0ffee"; export CAP W1_KEY="$KEY" W1_ROOT="$S"
 # the fake ADE helper. ADE_FAKE_MODE=cli (default) is an ADE with story 9: `help` prints the usage and the line
 # `capabilities: command`; =cli-split prints `capabilities: command split` (a later build). =cli-4c is stories 4a/4c
-# without 9: the usage only. =cli-near prints only near misses (`capabilities: commands split`, an indented copy). =hook is a build without `ade open`: every
-# call is hook mode, which reads stdin to its end, prints {} and exits 0. =hang: `help` never answers. An `open` call
-# records its argv, a copy of the launcher (its last word) and answers with ADE_FAKE_RC
+# without 9 (ADE v0.23.0): the usage only, and an `open` with `-- COMMAND` is exit 1. =cli-near prints the usage and
+# only near misses (`capabilities: commands split`, an indented copy), and refuses a command like cli-4c. =hook is a
+# build without `ade open`: every call is hook mode, which reads stdin to its end, prints {} and exits 0. =hang: `help`
+# never answers. An `open` call records its argv, a copy of the launcher (its last word) and answers with ADE_FAKE_RC
 cat > "$S/ade-hook" <<'STUB'
 #!/bin/bash
 mkdir -p "$CAP"
@@ -32,13 +35,18 @@ printf '%s\n' "$@" > "$CAP/ade.argv"
 last="${@: -1}"; [ -f "$last" ] && cp "$last" "$CAP/ade.launcher"
 # the contract's word rule (printable ASCII): anything else is 422, which the CLI reports as exit 1
 if printf '%s' "$*" | LC_ALL=C grep -q '[^ -~]'; then echo "ade: command words must be printable ASCII" >&2; exit 1; fi
+# an ADE without story 9 cannot type a command: `-- COMMAND` is 422 "not supported yet", exit 1
+case "$M" in cli-4c|cli-near) for a in "$@"; do [ "$a" != -- ] || { echo "ade: a command is not supported yet" >&2; exit 1; }; done ;; esac
 # like the real CLI: the reason on the first stderr line, then a usage block (bin/work keeps only the first line)
 [ -z "${ADE_FAKE_MSG:-}" ] || printf '%s\n' "ade: $ADE_FAKE_MSG" "usage: ade open [--cwd DIR] [--name NAME] [--focus] [-- COMMAND [ARG...]]" "       ade help" >&2
 exit "${ADE_FAKE_RC:-0}"
 STUB
-# stub osascript: records its argv (one per line, then a separator) and the launcher it names; never runs it
+# stub osascript: records its argv (one per line, then a separator) and the launcher it names; never runs it. Called
+# inside ADE (the same four-variable rule as bin/work), it also logs to $W1_ROOT/osa.inade, which fails every check (W1b)
 cat > "$S/osascript" <<'STUB'
 #!/bin/bash
+if [ -n "${ADE_HOOK_BIN:-}" ] && [ -f "$ADE_HOOK_BIN" ] && [ -x "$ADE_HOOK_BIN" ] && [ -n "${ADE_HOOK_PORT:-}" ] &&
+  [ -n "${ADE_HOOK_TOKEN:-}" ] && [ -n "${ADE_PTY_ID:-}" ]; then { printf '%s\n' "$@"; echo ---; } >> "$W1_ROOT/osa.inade"; fi
 mkdir -p "$CAP"; echo call >> "$CAP/osa.calls"; { printf '%s\n' "$@"; echo ---; } >> "$CAP/osa.argv"
 L=$(printf '%s\n' "$@" | grep -o 'bash -l [^"]*' | head -1); L="${L#bash -l }"
 [ -f "$L" ] && cp "$L" "$CAP/osa.launcher"
@@ -81,6 +89,13 @@ only_reason() { assert_eq "$(lines "$1")" 1 "$2: stderr lines ($(cat "$1"))"; gr
   grep -qF "usage: ade" "$1" && fail "$2: ADE's usage block was printed: $(cat "$1")"; grep -qF "ade help" "$1" && fail "$2: ADE's usage block was printed"; return 0; }
 no_leftovers() { [ -z "$(ls "$TMPDIR" | grep -E '^agent-(work|settings)\.')" ] || fail "$1: left $(ls "$TMPDIR")"; }
 clean_tmp() { rm -f "$TMPDIR"/agent-work.* "$TMPDIR"/agent-settings.*; }
+# the stopgap (W1b): the bare open's argv, and the launcher named in bin/work's paste line, unquoted with set (never run)
+bare_argv() { printf '%s\n' open --cwd "$1" --name "$2" --focus; }
+PASTE="paste this there to start the session: "
+pasted_L() { local c; c="$(grep -F "$PASTE" "$1" | head -1)"; c="${c#*"$PASTE"}"; eval "set -- $c"; [ "$1 $2" = "bash -l" ] && [ $# = 3 ] && echo "$3"; }
+# no_window_hint FILE WHAT: a failure inside ADE points at a terminal outside ADE, never at AGENT_TERMINAL=terminal
+no_window_hint() { grep -qF "outside ADE" "$1" || fail "$2: no outside-ADE hint: $(cat "$1")"
+  grep -qF "AGENT_TERMINAL=terminal" "$1" && fail "$2: the hint names AGENT_TERMINAL=terminal, refused inside ADE"; return 0; }
 
 # C1
 ade_is_detected_only_with_all_four() {
@@ -147,7 +162,7 @@ exit_1_refuses_with_a_hint_and_opens_no_window() {
   assert_eq "$rc" 1 "exit"; assert_eq "$(n ade)" 1 "helper called once"; assert_eq "$(n osa)" 0 "osascript called"
   only_reason "$S/err" "exit 1"
   grep -qF "refused 1" "$S/err" || fail "the line does not carry ADE's error"
-  grep -qF "AGENT_TERMINAL=terminal bin/work projects/demo" "$S/err" || fail "no window hint: $(cat "$S/err")"
+  no_window_hint "$S/err" "exit 1"
   no_leftovers "exit 1"
   # a non-ASCII TMPDIR: ADE answers 422 (exit 1), so bin/work refuses too, with no window
   local T="$S/tmp/caf"$'\xc3\xa9'; mkdir -p "$T"
@@ -156,37 +171,41 @@ exit_1_refuses_with_a_hint_and_opens_no_window() {
   assert_eq "$(lines "$S/err")" 1 "non-ASCII TMPDIR: one line"
   rm -rf "$T"
 }
-# C6b: ADE unreachable (stale variables, connection refused): one warning line and a window
-exit_3_4_fall_back_to_one_window_with_one_warning_line() {
+# C6b (W1b, owner 2026-11-09: inside ADE, never a window): ADE unreachable (stale variables, connection refused)
+# fails with ADE's exit code and message, removes the launcher and opens no window
+exit_3_4_fail_and_open_no_window() {
   local c L
   for c in 3 4; do
-    work inade env ADE_FAKE_RC=$c ADE_FAKE_MSG="refused $c" bin/work projects/demo
-    assert_eq "$rc" 0 "exit $c: bin/work exit"; assert_eq "$(n ade)" 1 "exit $c: helper called once"
-    assert_eq "$(n osa)" 1 "exit $c: one window"; L="$(argv_L)"
-    assert_eq "$(cat "$CAP/osa.argv")" "$(osa_terminal "$L")" "exit $c: the window runs the same launcher"
+    work inade env ADE_FAKE_RC=$c ADE_FAKE_MSG="unreachable $c" bin/work --provider deepseek projects/demo
+    assert_eq "$rc" "$c" "exit $c: bin/work exit"; assert_eq "$(n ade)" 1 "exit $c: helper called once"
+    assert_eq "$(n osa)" 0 "exit $c: a window opened"; L="$(argv_L)"
     only_reason "$S/err" "exit $c"
-    grep -qF "refused $c" "$S/err" || fail "exit $c: the warning does not carry ADE's reason"
-    [ -f "$L" ] || fail "exit $c: the launcher handed to the window was deleted"
+    grep -qF "unreachable $c" "$S/err" || fail "exit $c: the line does not carry ADE's reason"
+    no_window_hint "$S/err" "exit $c"
+    [ ! -e "$L" ] || fail "exit $c: the launcher was left behind"; no_leftovers "exit $c"
   done
-  clean_tmp
 }
-# C18: ADE takes the sub-terminal only when its `help` has a line starting `capabilities:` with the word `command`
-# (story 9); hook mode (no `ade open`), 4a/4c without 9, near misses and a helper that never answers get the window
-an_ade_without_typed_commands_uses_the_window() {
-  local m L t0
-  for m in hook cli-4c cli-near hang; do
-    t0=$SECONDS; work inade env ADE_FAKE_MODE=$m bin/work projects/demo; assert_eq "$rc" 0 "$m: exit ($(cat "$S/err"))"
-    [ $((SECONDS - t0)) -lt 15 ] || fail "$m: the probe took $((SECONDS - t0))s"
-    assert_eq "$(n ade)" 0 "$m: open was called"; assert_eq "$(n osa)" 1 "$m: one window"
-    assert_eq "$(cat "$CAP/ade.help" | grep -c .)" 1 "$m: one help probe"
-    L="$(osa_L)"; assert_eq "$(cat "$CAP/osa.argv")" "$(osa_terminal "$L")" "$m: the window argv"
-    assert_eq "$(lines "$S/err")" 1 "$m: one info line ($(cat "$S/err"))"; grep -q '^work: ' "$S/err" || fail "$m: the line does not start with work:"
+# C18 (W1b): ADE types the command only when its `help` has a line starting `capabilities:` with the word `command`
+# (story 9). 4a/4c without 9 (v0.23.0) and near misses show `usage: ade open`: they get the stopgap, a bare sub-terminal
+# (C20). Hook mode (no `ade open`) and a helper that never answers cannot open one: exit 1, nothing opened, no window
+an_ade_without_typed_commands_never_uses_a_window() {
+  local m L t0 f
+  for m in cli-4c cli-near; do for f in "" AGENT_TERMINAL=ade; do
+    work inade env $f ADE_FAKE_MODE=$m bin/work projects/demo; assert_eq "$rc" 0 "$m ${f:-auto}: exit ($(cat "$S/err"))"
+    assert_eq "$(n ade)" 1 "$m ${f:-auto}: one open"; assert_eq "$(n osa)" 0 "$m ${f:-auto}: a window opened"
+    assert_eq "$(cat "$CAP/ade.help" | grep -c .)" 1 "$m ${f:-auto}: one help probe"
+    assert_eq "$(cat "$CAP/ade.argv")" "$(bare_argv "$R" demo)" "$m ${f:-auto}: the bare open argv"
+    assert_eq "$(lines "$S/err")" 1 "$m ${f:-auto}: one line ($(cat "$S/err"))"; grep -q '^work: ' "$S/err" || fail "$m: the line does not start with work:"
     clean_tmp
-    work inade env ADE_FAKE_MODE=$m AGENT_TERMINAL=ade bin/work projects/demo; assert_eq "$rc" 2 "$m, forced ade: exit"
-    assert_eq "$(n ade)" 0 "$m, forced ade: open called"; assert_eq "$(n osa)" 0 "$m, forced ade: a window opened"
-    grep -qF "capabilities:" "$S/err" || fail "$m, forced ade: the message does not name the capability"
-    no_leftovers "$m, forced ade"
-  done
+  done; done
+  for m in hook hang; do for f in "" AGENT_TERMINAL=ade; do
+    t0=$SECONDS; work inade env $f ADE_FAKE_MODE=$m bin/work projects/demo; assert_eq "$rc" 1 "$m ${f:-auto}: exit ($(cat "$S/err"))"
+    [ $((SECONDS - t0)) -lt 15 ] || fail "$m: the probe took $((SECONDS - t0))s"
+    assert_eq "$(n ade)" 0 "$m ${f:-auto}: open was called"; assert_eq "$(n osa)" 0 "$m ${f:-auto}: a window opened"
+    assert_eq "$(cat "$CAP/ade.help" | grep -c .)" 1 "$m ${f:-auto}: one help probe"
+    only_reason "$S/err" "$m ${f:-auto}"; grep -qF "ade open" "$S/err" || fail "$m: the line does not name ade open"
+    no_window_hint "$S/err" "$m ${f:-auto}"; no_leftovers "$m ${f:-auto}"
+  done; done
   for m in cli cli-split; do
     work inade env ADE_FAKE_MODE=$m bin/work projects/demo; assert_eq "$rc" 0 "$m: exit"
     assert_eq "$(n ade)" 1 "$m: open called"; assert_eq "$(n osa)" 0 "$m: a window opened"
@@ -202,10 +221,55 @@ an_ade_without_typed_commands_uses_the_window() {
   local p=$! i=0; while [ ! -s "$S/w.res" ] && [ $i -lt 150 ]; do sleep 0.1; i=$((i + 1)); done
   kill "$(cat "$S/w.pid")" 2>/dev/null; wait "$p" 2>/dev/null
   [ -s "$S/w.res" ] || fail "hook on an open pipe: bin/work had not finished after 15s"
-  set -- $(cat "$S/w.res"); assert_eq "$1" 0 "hook on an open pipe: exit ($(cat "$S/err"))"
+  set -- $(cat "$S/w.res"); assert_eq "$1" 1 "hook on an open pipe: exit ($(cat "$S/err"))"
   [ "$2" -lt 4 ] || fail "hook on an open pipe: the probe took ${2}s (it read bin/work's stdin)"
-  assert_eq "$(n ade)" 0 "hook on an open pipe: open was called"; assert_eq "$(n osa)" 1 "hook on an open pipe: one window"
+  assert_eq "$(n ade)" 0 "hook on an open pipe: open was called"; assert_eq "$(n osa)" 0 "hook on an open pipe: a window opened"
   clean_tmp
+}
+# C20 (W1b stopgap): on an ADE without `capabilities: command`, bin/work opens a bare sub-terminal (no command), keeps
+# the launcher, prints one line with the quoted command to paste there, and exits 0. Nothing secret is in that line
+the_stopgap_opens_a_bare_sub_terminal_and_prints_the_command() {
+  local L M T
+  work inade env ADE_FAKE_MODE=cli-4c bin/work --provider deepseek projects/demo --prompt "secret W1-MARK plan"
+  assert_eq "$rc" 0 "exit ($(cat "$S/err"))"; assert_eq "$(n osa)" 0 "a window opened"
+  assert_eq "$(cat "$CAP/ade.argv")" "$(bare_argv "$R" demo)" "the bare open argv"
+  assert_eq "$(lines "$S/err")" 1 "one stderr line ($(cat "$S/err"))"
+  grep -qF "work: opened sub-terminal 'demo' in ADE; $PASTE" "$S/err" || fail "the paste line: $(cat "$S/err")"
+  L="$(pasted_L "$S/err")"; case "$L" in "$TMPDIR"/agent-work.*) ;; *) fail "the pasted launcher is not bin/work's: [$L]" ;; esac
+  M="$(settings_in "$L")"; [ -f "$L" ] && [ -n "$M" ] && [ -f "$M" ] || fail "the stopgap deleted the launcher [$L] or the settings [$M]"
+  grep -qF -- W1-MARK "$S/err" "$CAP/ade.argv" && fail "the prompt is in the paste line or the helper argv"
+  grep -qF -- "$KEY" "$L" "$M" "$S/out" "$S/err" && fail "the key was written or printed"
+  rm -f "$CAP/claude.ran"; bash "$L" > /dev/null 2>&1; [ -f "$CAP/claude.ran" ] || fail "the pasted launcher did not run the fake claude"
+  [ ! -e "$L" ] && [ ! -e "$M" ] || fail "the launcher left itself or the settings behind"
+  no_leftovers "after the pasted launcher ran"
+  # a TMPDIR with a quote and a space: the paste line quotes the path, so it is still one word
+  T="$S/tmp/it's here"; mkdir -p "$T"
+  work inade env TMPDIR="$T" ADE_FAKE_MODE=cli-4c bin/work projects/bare; assert_eq "$rc" 0 "quoted TMPDIR: exit ($(cat "$S/err"))"
+  assert_eq "$(cat "$CAP/ade.argv")" "$(bare_argv "$HUB/projects/bare" bare)" "quoted TMPDIR: the bare open argv"
+  L="$(pasted_L "$S/err")"; case "$L" in "$T"/agent-work.*) ;; *) fail "quoted TMPDIR: the pasted launcher [$L]" ;; esac
+  [ -f "$L" ] || fail "quoted TMPDIR: the launcher is gone"; rm -rf "$T"
+}
+# C21 (W1b): any `ade open` failure in the stopgap fails with ADE's code and message, removes the launcher, no window
+stopgap_open_failures_never_open_a_window() {
+  local c
+  for c in 1 2 3 4 5 7; do
+    work inade env ADE_FAKE_MODE=cli-4c ADE_FAKE_RC=$c ADE_FAKE_MSG="bare refused $c" bin/work --provider deepseek projects/demo
+    assert_eq "$rc" "$c" "exit $c"; assert_eq "$(n ade)" 1 "exit $c: one open"; assert_eq "$(n osa)" 0 "exit $c: a window opened"
+    only_reason "$S/err" "exit $c"; grep -qF "bare refused $c" "$S/err" || fail "exit $c: no ADE message: $(cat "$S/err")"
+    grep -qF "$PASTE" "$S/err" && fail "exit $c: a paste line after a failure"
+    no_window_hint "$S/err" "exit $c"; no_leftovers "exit $c"
+  done
+}
+# C22 (W1b): inside ADE, osascript never runs, whatever ADE answers, whichever AGENT_TERMINAL value is set
+osascript_never_runs_inside_ade() {
+  local m c t
+  for m in cli cli-4c hook; do for c in 0 1 3 5; do for t in "" ade terminal iterm other; do
+    work inade env ADE_FAKE_MODE=$m ADE_FAKE_RC=$c AGENT_TERMINAL=$t bin/work projects/demo
+    assert_eq "$(n osa)" 0 "$m, exit $c, AGENT_TERMINAL=$t: osascript ran"
+    work inade env WORK_DRY=1 ADE_FAKE_MODE=$m ADE_FAKE_RC=$c AGENT_TERMINAL=$t bin/work projects/demo
+    assert_eq "$(n osa)" 0 "dry, $m, exit $c, AGENT_TERMINAL=$t: osascript ran"; assert_eq "$(n ade)" 0 "dry: open called"
+    clean_tmp
+  done; done; done
 }
 # C19: the probe runs only after the folder is checked, so a typo'd folder fails at once (a helper that never answers
 # would cost the full 5 s), forced ADE or not
@@ -242,13 +306,20 @@ exit_2_fails_and_opens_nothing() {
   work inade env ADE_FAKE_RC=7 ADE_FAKE_MSG="odd" bin/work projects/demo
   assert_eq "$rc" 7 "unknown code: exit"; only_reason "$S/err" "unknown code"; assert_eq "$(n osa)" 0 "unknown code: no window"; no_leftovers "unknown code"
 }
-# C9
-a_forced_window_never_calls_ade() {
-  local L
-  work inade env AGENT_TERMINAL=terminal bin/work projects/demo; assert_eq "$rc" 0 "terminal: exit"
-  assert_eq "$(n ade)" 0 "terminal: helper called"; L="$(osa_L)"; assert_eq "$(cat "$CAP/osa.argv")" "$(osa_terminal "$L")" "terminal argv"
-  work inade env AGENT_TERMINAL=iterm bin/work projects/demo; assert_eq "$rc" 0 "iterm: exit"
-  assert_eq "$(n ade)" 0 "iterm: helper called"; L="$(osa_L)"; assert_eq "$(cat "$CAP/osa.argv")" "$(osa_iterm "$L")" "iterm argv"
+# C9 (W1b): AGENT_TERMINAL=terminal|iterm inside ADE is refused (exit 2) before any probe; outside ADE they open windows
+a_forced_window_inside_ade_is_refused() {
+  local t d L
+  for t in terminal iterm; do for d in "" WORK_DRY=1; do
+    work inade env $d AGENT_TERMINAL=$t bin/work projects/demo; assert_eq "$rc" 2 "$t ${d:-}: exit"
+    assert_eq "$(n ade)" 0 "$t: helper open called"; assert_eq "$(n osa)" 0 "$t: a window opened"
+    [ ! -e "$CAP/ade.help" ] || fail "$t: the helper was probed"
+    only_reason "$S/err" "$t"; grep -qF "inside ADE every session opens in ADE" "$S/err" || fail "$t: the message: $(cat "$S/err")"
+    grep -qF "outside ADE" "$S/err" || fail "$t: no outside-ADE hint"; no_leftovers "$t"
+  done; done
+  work env AGENT_TERMINAL=terminal bin/work projects/demo; assert_eq "$rc" 0 "terminal outside ADE: exit"
+  L="$(osa_L)"; assert_eq "$(cat "$CAP/osa.argv")" "$(osa_terminal "$L")" "terminal outside ADE: argv"
+  work env AGENT_TERMINAL=iterm bin/work projects/demo; assert_eq "$rc" 0 "iterm outside ADE: exit"
+  L="$(osa_L)"; assert_eq "$(cat "$CAP/osa.argv")" "$(osa_iterm "$L")" "iterm outside ADE: argv"
   clean_tmp
 }
 # C9b: an unrecognised AGENT_TERMINAL value inside ADE is auto, so the ADE path
@@ -293,6 +364,8 @@ dry_run_inside_ade_calls_nothing() {
   assert_eq "$(n ade)" 0 "helper called"; assert_eq "$(n osa)" 0 "osascript called"
   [ ! -e "$CAP/ade.help" ] || fail "a dry run probed the helper"
   grep -qF -- "work: if this ADE lists capabilities: command, this runs: $S/ade-hook open --cwd $R --name demo --focus -- bash -l " "$S/err" || fail "the ADE argv is not shown: $(cat "$S/err")"
+  grep -qF -- "work: if it does not, this runs: $S/ade-hook open --cwd $R --name demo --focus (no command) and prints the command to paste there: bash -l " "$S/err" || fail "the stopgap argv is not shown: $(cat "$S/err")"
+  grep -qF -- "window" "$S/err" && fail "a dry run inside ADE mentions a window: $(cat "$S/err")"
   no_leftovers "dry run"
 }
 # C13
@@ -340,6 +413,9 @@ the_checks_use_only_stubs() {
     bash -c '. "$1/tests/helpers.sh"; make_hub; rm -rf "$(dirname "$HUB")" "$CLAUDE_HOME" "$(dirname "$AGENT_SYNC_LOG")" "$(dirname "$AGENT_SYNC_LOCK")"
     echo "${ADE_HOOK_BIN-}|${ADE_HOOK_PORT-}|${ADE_HOOK_TOKEN-}|${ADE_PTY_ID-}|${AGENT_TERMINAL-}"' _ "$REPO")"
   assert_eq "$got" "||||" "make_hub clears the ADE variables and AGENT_TERMINAL"
+  # the inside-ADE guard in the osascript stub fires (then is reset), and stays quiet outside ADE
+  rm -rf "$CAP"; mkdir -p "$CAP"; osascript -e x; [ ! -e "$S/osa.inade" ] || fail "the guard fired outside ADE"
+  inade osascript -e x; [ -s "$S/osa.inade" ] || fail "the osascript stub does not log a call inside ADE"; rm -f "$S/osa.inade"
 }
 # C17
 readme_documents_the_ade_path() {
@@ -350,8 +426,12 @@ readme_documents_the_ade_path() {
   local rows; rows="$(printf '%s\n' "$sec" | grep -E '^\| (`[0-9]|any other )')"
   assert_eq "$(printf '%s\n' "$rows" | grep -c .)" 6 "exit-code rows"
   printf '%s\n' "$rows" | grep -q '^| `0` ' || fail "no row for 0"
-  printf '%s\n' "$rows" | grep -q '^| `1` .*AGENT_TERMINAL=terminal bin/work' || fail "no row for 1 with the hint"
-  printf '%s\n' "$rows" | grep -q '^| `3`, `4` ' || fail "no row for 3, 4"
+  printf '%s\n' "$rows" | grep -q '^| `1` .*outside ADE' || fail "no row for 1 with the outside-ADE hint"
+  printf '%s\n' "$rows" | grep -q '^| `3`, `4` .*no window' || fail "no row for 3, 4 with no window"
+  printf '%s\n' "$rows" | grep -qF 'AGENT_TERMINAL=terminal bin/work' && fail "a row still hints AGENT_TERMINAL=terminal inside ADE"
+  # W1b: the no-window rule, the stopgap and the refused forced window
+  for w in "never opens a Terminal or iTerm window" "$PASTE" "inside ADE every session opens in ADE" "usage: ade open"; do
+    printf '%s\n' "$sec" | grep -qF -- "$w" || fail "the section does not mention: $w"; done
   printf '%s\n' "$sec" | grep -qF 'ade help' || fail "the section does not explain the ade help probe"
   printf '%s\n' "$sec" | grep -qF 'capabilities: command' || fail "the section does not name the capability line"
   printf '%s\n' "$rows" | grep -q '^| `2` ' || fail "no row for 2"
@@ -361,12 +441,15 @@ readme_documents_the_ade_path() {
 
 ALL="ade_is_detected_only_with_all_four inside_ade_opens_one_sub_terminal_and_no_window name_is_the_folder_and_cwd_is_the_checkout
 ade_and_window_launchers_are_identical exit_0_keeps_the_launcher_until_the_shell_runs_it
-exit_1_refuses_with_a_hint_and_opens_no_window exit_3_4_fall_back_to_one_window_with_one_warning_line
-an_ade_without_typed_commands_uses_the_window exit_5_prints_the_command_and_keeps_the_launcher
-exit_2_fails_and_opens_nothing a_forced_window_never_calls_ade an_unrecognised_value_inside_ade_is_auto
+exit_1_refuses_with_a_hint_and_opens_no_window exit_3_4_fail_and_open_no_window
+an_ade_without_typed_commands_never_uses_a_window exit_5_prints_the_command_and_keeps_the_launcher
+the_stopgap_opens_a_bare_sub_terminal_and_prints_the_command stopgap_open_failures_never_open_a_window
+osascript_never_runs_inside_ade
+exit_2_fails_and_opens_nothing a_forced_window_inside_ade_is_refused an_unrecognised_value_inside_ade_is_auto
 a_bad_folder_fails_before_the_probe forced_ade_never_falls_back forced_ade_outside_ade_is_exit_2
 outside_ade_is_the_window_path_unchanged dry_run_inside_ade_calls_nothing provider_session_under_ade_passes_only_the_launcher_path
 runs_from_a_non_interactive_shell_without_a_tty prompt_stays_out_of_the_typed_command the_checks_use_only_stubs
 readme_documents_the_ade_path"
-for c in ${*:-$ALL}; do CUR="$c"; "$c"; echo "pass: $c"; done
+for c in ${*:-$ALL}; do CUR="$c"; "$c"
+  [ ! -e "$S/osa.inade" ] || fail "osascript ran inside ADE (W1b): $(cat "$S/osa.inade")"; echo "pass: $c"; done
 echo ok

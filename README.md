@@ -147,7 +147,7 @@ A focus session can run Claude Code against DeepSeek instead of Anthropic. The C
   other terminals changed since the last prompt (STATE.md updates, new journal entries with their text, new or updated
   memory files with their description); in deep work Stop asks for a STATE update after new commits, and SessionEnd
   journals the commits, commits the folder and starts `bin/sync --auto`, which pushes.
-- **Deep work**: `bin/work <folder>` opens a Terminal in the folder's repo checkout with its context and hooks (a folder with no repo, such as an ops watcher, opens in the hub folder itself). `--prompt "<task>"` starts that session with its first message. Every session starts with Remote Control on, named after the folder, so you can follow it from your phone; `--no-remote` turns that off (use it with an API-key wrapper such as an OpenRouter or Ollama one: Remote Control needs a claude.ai login). Inside ADE it opens a sub-terminal of your tab instead (see "Deep work inside ADE").
+- **Deep work**: `bin/work <folder>` opens a Terminal in the folder's repo checkout with its context and hooks (a folder with no repo, such as an ops watcher, opens in the hub folder itself). `--prompt "<task>"` starts that session with its first message. Every session starts with Remote Control on, named after the folder, so you can follow it from your phone; `--no-remote` turns that off (use it with an API-key wrapper such as an OpenRouter or Ollama one: Remote Control needs a claude.ai login). Inside ADE it opens a sub-terminal of your tab instead, never a window (see "Deep work inside ADE").
 - **Scheduled jobs** (`bin/schedule install`, launchd): the weekday morning briefing (`bin/briefing`, Haiku, read-only);
   `bin/monitor` every 30 minutes; and `bin/sync --auto` every 30 minutes.
 - **Auto sync**: `bin/sync --auto` commits and pushes the hub's files unattended: one run at a time, skipped while git
@@ -179,53 +179,63 @@ folder's `.claude/settings.json` (the hook commands), `HUB_CLAUDE_CONFIG_DIR` in
 ## Deep work inside ADE
 
 Run from an ADE terminal (or a Claude Code session in one), `bin/work <folder>` opens the session as a sub-terminal of
-that tab instead of a Terminal window; the session you ran it from keeps running. Inside ADE means all four of
-`ADE_HOOK_BIN` (an executable file), `ADE_HOOK_PORT`, `ADE_HOOK_TOKEN` and `ADE_PTY_ID` are set, as ADE sets them in
-every terminal. `bin/work` then runs
+that tab; the session you ran it from keeps running. **Inside ADE, `bin/work` never opens a Terminal or iTerm window**
+(owner rule, 2026-11-09, story W1b): every session opens in ADE, and when ADE cannot open one, `bin/work` fails with
+ADE's message instead of falling back to a window. Inside ADE means all four of `ADE_HOOK_BIN` (an executable file),
+`ADE_HOOK_PORT`, `ADE_HOOK_TOKEN` and `ADE_PTY_ID` are set, as ADE sets them in every terminal.
 
-```
-"$ADE_HOOK_BIN" open --cwd <checkout> --name <folder> --focus -- bash -l <launcher>
-```
+First `bin/work` asks the helper what this ADE can do with `ade help`: `"$ADE_HOOK_BIN" help` (stdin from `/dev/null`, at most 5
+seconds, stdout only). The probe asks the helper on disk, not the running app: after updating ADE, restart the app if
+`ade open` says it is too old. It runs only once the arguments and the folder are checked, so a typo'd folder fails at once.
+
+- **A line starting `capabilities:` with the word `command`** (`capabilities: command`, or `capabilities: command split`
+  on a later build; ADE story 9). ADE types the command into the new sub-terminal:
+
+  ```
+  "$ADE_HOOK_BIN" open --cwd <checkout> --name <folder> --focus -- bash -l <launcher>
+  ```
+
+- **No such line, but a line starting `usage: ade open`** (ADE stories 4a and 4c without story 9, such as v0.23.0): the
+  stopgap. `bin/work` opens the sub-terminal with no command (`"$ADE_HOOK_BIN" open --cwd <checkout> --name <folder>
+  --focus`), keeps the launcher, prints one line such as
+  `work: opened sub-terminal 'acme' in ADE; paste this there to start the session: bash -l '/tmp/agent-work.XXXXXX'`,
+  and exits 0. Paste that command into the new sub-terminal to start the session.
+- **Neither** (a build without `ade open`, such as v0.22.0, which would take `ade open` as a hook event and do nothing,
+  or a helper that did not answer): exit 1 with one `work:` line, nothing opened, no window.
 
 The launcher is the same file the Terminal path runs, so the prompt, the agents and any provider settings stay in it,
-never on ADE's command line. `--focus` is always passed, and ADE honours it only when the caller's tab is the active
-tab: it shows the new sub-terminal there, but it never switches tabs, and `ade open` exits 0 either way. What `bin/work` does with `ade open`'s
-answer:
+never on ADE's command line or in the paste line. `--focus` is always passed, and ADE honours it only when the caller's
+tab is the active tab: it shows the new sub-terminal there, but it never switches tabs, and `ade open` exits 0 either
+way. What `bin/work` does with `ade open`'s answer:
 
 | Exit | `bin/work` |
 |---|---|
-| `0` | Done: the sub-terminal runs the launcher, which removes itself. |
-| `1` | ADE refused (an error, the sub-terminal cap, an ADE too old, or no answer in time): prints ADE's reason and the hint `AGENT_TERMINAL=terminal bin/work <folder>`, exits 1, opens no window. |
-| `3`, `4` | ADE is unreachable (stale variables, for example under tmux, or the connection refused): one `work:` warning line, then a Terminal window. |
+| `0` | Done: with a typed command the sub-terminal runs the launcher, which removes itself; in the stopgap `bin/work` prints the command to paste there and keeps the launcher. |
+| `1` | ADE refused (an error, the sub-terminal cap, an ADE too old, or no answer in time): prints ADE's reason and that a window needs a terminal outside ADE, exits 1, opens no window. |
+| `3`, `4` | ADE is unreachable (stale variables, for example under tmux, or the connection refused): prints ADE's reason, exits 3 or 4, no window. |
 | `2` | Fails with exit 2 and opens nothing (a usage error is a bug to fix, not to hide). |
-| `5` | The sub-terminal opened but the command was not typed: prints `bash -l <launcher>` to run in it, keeps the launcher, exits 5. No window. |
+| `5` | The sub-terminal opened but the command was not typed: prints `bash -l <launcher>` to run in it, keeps the launcher, exits 5. No window. (In the stopgap, which sends no command, `5` is a failure like the rows below.) |
 | any other | Fails with that code and opens nothing. |
 
-Before that, `bin/work` checks with `ade help` that this ADE can type the command: `"$ADE_HOOK_BIN" help` (stdin from
-`/dev/null`, at most 5 seconds) must print a line starting `capabilities:` with the word `command`, such as
-`capabilities: command` or `capabilities: command split`. Otherwise it prints one `work:` line and opens a Terminal
-window, as outside ADE. That covers an ADE build without `ade open` (such as v0.22.0, which would take `ade open` as a
-hook event and do nothing) and one with `ade open` but without typed commands (story 9), which would refuse with exit 1.
-The probe asks the helper on disk (`$ADE_HOOK_BIN`), not the running app: after updating ADE, restart the app if
-`ade open` says it is too old. The probe runs only once the arguments and the folder are checked, so a typo'd folder
-fails at once.
+On every failure the launcher is removed and the line ends with the hint to run `bin/work <folder>` from a terminal
+outside ADE for a window.
 
-`AGENT_TERMINAL=terminal` or `AGENT_TERMINAL=iterm` always opens a window. `AGENT_TERMINAL=ade` always uses ADE: it never
-falls back (exits 3 and 4 are returned as they are), and outside ADE or on an ADE without `capabilities: command` it is exit 2. Any other value
-inside ADE counts as unset (auto: the ADE path). `WORK_DRY=1` also prints the ADE command it would run, if this ADE lists
-`capabilities: command`. Outside ADE nothing changes, except that the usage line names `AGENT_TERMINAL=terminal|iterm|ade`
-and `AGENT_TERMINAL=ade` is exit 2 with a message.
+`AGENT_TERMINAL=terminal` or `AGENT_TERMINAL=iterm` inside ADE is refused with exit 2:
+"inside ADE every session opens in ADE; run bin/work from a terminal outside ADE for a window".
+Outside ADE they open a Terminal or iTerm window as always. `AGENT_TERMINAL=ade` inside ADE is the same as unset; outside ADE it is exit 2 with a message naming the four
+variables. Any other value counts as unset. `WORK_DRY=1` inside ADE prints both ADE commands it could run (with
+`capabilities: command`, and the stopgap) and never calls the helper. Outside ADE nothing changes, except that the
+usage line names `AGENT_TERMINAL=terminal|iterm|ade`.
 
 Live but foreign `ADE_*` variables: a shell that inherited them from an ADE terminal but is not in one (tmux attached
 from another terminal, an app launched from an ADE shell) still reaches that ADE, so the session opens as a sub-terminal
-of that ADE tab. Run `AGENT_TERMINAL=terminal bin/work <folder>` there to get a window.
+of that ADE tab. For a window, unset the four variables there (`env -u ADE_HOOK_BIN bin/work <folder>`).
 
 Interrupting `bin/work` (Ctrl-C) while `ade open` runs removes the launcher, but ADE may already have typed the command:
 the new sub-terminal then prints a harmless `No such file or directory`. Close it and run `bin/work` again.
 
-The sub-terminal needs ADE's `ade open` on the ADE build (stories 4a and 4c in `better-agentic-ide`) and its typed
-command (`ade open -- COMMAND`, story 9). Until story 9 is on your build, `ade help` has no `capabilities: command`
-line, so `bin/work` opens a Terminal window with one `work:` line.
+The sub-terminal needs ADE's `ade open` on the ADE build (stories 4a and 4c in `better-agentic-ide`). The typed command
+(`ade open -- COMMAND`, story 9) makes it one step; until story 9 is on your build, `bin/work` uses the stopgap above.
 
 ## Upgrading a hub made before auto sync
 

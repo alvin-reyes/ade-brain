@@ -2,6 +2,8 @@
 
 Status: **Done (2026-11-09): QA green; code review blocker settled by the owner** (PR #11, branch `w1-bin-work-ade`). Owner's intent (2026-11-09): "when the developer uses ADE, it starts a claude code session. On the claude code session, developer can spawn focus work using our ai-agent template `bin/work` … terminals should spawn INSIDE ADE … it needs to open a sub tab with the main persona open too … `bin/work` starts the session in it."
 
+**Superseded in part by W1b (2026-11-09)** (`docs/stories/W1b-inside-ade-never-a-window.md`): inside ADE, `bin/work` never opens a Terminal or iTerm window. Exits 3 and 4 no longer fall back to a window; an ADE without `capabilities: command` gets a bare sub-terminal and a command to paste (the stopgap) instead of a window; `AGENT_TERMINAL=terminal|iterm` inside ADE is exit 2; the exit-1 hint points at a terminal outside ADE. The decisions and criteria below that say otherwise (C6a hint, C6b, C9, C18) are replaced there.
+
 Verification command: `bash tests/run.sh` (`docs/architecture.md`, "Verification command"). Changing it needs the owner's approval.
 
 ## Goal
