@@ -1,6 +1,9 @@
 # SP: DeepSeek behind Claude Code (GLM disabled, Meta left out)
 
-Status: **UNBLOCKED for DeepSeek** (2026-11-09). S0 item 21 answered for `deepseek` in `.ade/context/engines.md`: focus session,
+Status: **approved by the owner 2026-11-09; in build.** Owner rule added the same day: DeepSeek only in the owner's own hubs
+(AC31 to AC34).
+
+Earlier status: **UNBLOCKED for DeepSeek** (2026-11-09). S0 item 21 answered for `deepseek` in `.ade/context/engines.md`: focus session,
 `--agents`, delegation and `--effort` are go. `glm` ships disabled (no-go in the table, refused with the S0 reason). `meta` is
 left out of SP (plan AC18: no feature has a go). The build can start now. Open owner items are listed under "Open before Done".
 
@@ -213,7 +216,7 @@ Hermetic rules:
 | AC18 | `meta` is absent: no `meta` row in the `lib.sh` provider table, and no `meta` provider entry in the README provider section (the word may appear only in a sentence saying it is not offered). | `meta_row_only_with_a_go` |
 | AC19 | Tool restriction: **skipped** with the recorded reason "none needed for DeepSeek (engines.md, Tool restriction)". The test asserts that line exists in engines.md. | `allowed_tools_applied` (skip) |
 | AC20 | Static: `README.md` provider section contains `--provider`, `bin/secret --set deepseek-api-key`, that Remote Control is off, the data-sharing note, and the exposure statement for option 1. | `readme_provider_section` |
-| AC21 | Static: ADR 0002 exists and its provider section has headings for the credential option (option 1, with the helper and the scrub variable), the per-hub data-sharing decision (marked OPEN until the owner records it) and the vendors' API-terms note (DeepSeek marked not yet reviewed). | `adr_0002_provider_section` |
+| AC21 | Static: ADR 0002 exists and its provider section has headings for the credential option (option 1, with the helper and the scrub variable), the per-hub data-sharing decision (the owner rule of 2026-11-09, `HUB_OWNED_BY_OWNER=1`) and the vendors' API-terms note (DeepSeek reviewed 2026-11-09: Terms of Use §4.3 with its URL, storage in the People's Republic of China). | `adr_0002_provider_section` |
 | AC22 | Scope guard: `bin/briefing` is unchanged (`git diff --quiet <base> -- bin/briefing`, base = `origin/s0-providers`), and `bin/agent` does not exist. | `scope_guard_briefing_and_agent` |
 | AC23 | Hermetic guard: every provider check asserts the fake `claude` was the engine that ran (marker present and written by the fake), and no provider test runs a `claude` other than the fake on PATH. | `hermetic_fake_engine_only` |
 | AC24 | Existing suites still pass: `tests/test_work.sh`, `tests/test_doctor.sh`, `tests/test_secret.sh`, `tests/test_models.sh`, `tests/test_briefing.sh`, unchanged. | existing files, run by `tests/run.sh` |
@@ -222,6 +225,10 @@ Hermetic rules:
 | AC27 | Resume refused: `bin/work --provider deepseek projects/demo --resume`, `--continue`, `-r` and `-c` each exit 2 and name the rule. | `provider_resume_refused` |
 | AC28 | Provider layer flags: the merged settings file has `skipWebFetchPreflight` `true` (top level) and `env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` `"1"`; neither the file nor the command contains `CLAUDE_CODE_SUBAGENT_MODEL`. | `provider_layer_flags` |
 | AC29 | Anthropic path unchanged: `bin/work --provider anthropic projects/demo` prints a command identical to `bin/work projects/demo`, with no `CLAUDE_CONFIG_DIR` prefix and no merged settings file (`--settings` names the folder's own `settings.json`). | `anthropic_path_unchanged` |
+| AC31 | Owner rule (2026-11-09): in a client hub (no `HUB_OWNED_BY_OWNER=1` in hub.conf), `bin/work --provider deepseek` and `HUB_PROVIDER=deepseek` exit 2 even when `HUB_PROVIDERS_ALLOWED` lists deepseek, naming `HUB_OWNED_BY_OWNER`, ADR 0002 and the reason (training on API data, storage in China); no key is read and the engine does not run. Anthropic sessions still run. | `deepseek_client_hub_refused` |
+| AC32 | In an owned hub (`HUB_OWNED_BY_OWNER=1` in hub.conf) deepseek is allowed, by `--provider` and by `HUB_PROVIDER`. | `deepseek_owned_hub_allowed` |
+| AC33 | `HUB_OWNED_BY_OWNER=1` exported in the environment is ignored (unset before sourcing hub.conf), by `bin/work` and `bin/doctor`. | `owned_by_owner_env_not_trusted` |
+| AC34 | `DOCTOR_OFFLINE=1 bin/doctor` prints a `MISSING  client hub` row when the allowlist of a client hub lists deepseek, and none in an owned hub or a hub without deepseek. | `doctor_flags_client_hub_deepseek` |
 | AC30 | The only key read `bin/work` performs is the pre-check (AC6), and no file or argv value it writes holds a key: the launcher file, the merged settings file and the engine argv are all key-free. Mapped to the existing tests rather than a new one. | `key_checked_once_before_launch`, `launcher_file_holds_no_key`, `engine_argv_holds_no_key` |
 
 Not tested in `tests/run.sh` (they belong to S0 item 21 and S3a): the canary behaviour and the real `claude` against a fake
@@ -272,7 +279,8 @@ Not touched: `bin/agent` (S3a), `bin/briefing`, `bin/session-end`, `bin/sync`, `
 
 ## Open before Done
 
-1. Owner: the per-hub data-sharing decision for DeepSeek, and someone reads DeepSeek's API terms on training and retention (ADR 0002).
+1. Done in the build: the owner's rule (DeepSeek only in the owner's own hubs, 2026-11-09) and DeepSeek's terms (reviewed
+   2026-11-09) are recorded in ADR 0002, which stays Proposed until the owner accepts it.
 2. Owner: a live check on the owner's Mac that the Keychain-stored Anthropic login is not sent to `api.deepseek.com` when the helper
    is set (S0 item 15/21 gap).
 3. First live use: the first run of a provider session may show Claude Code's first-run prompts (expected, once per provider dir).
