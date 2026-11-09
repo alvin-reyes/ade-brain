@@ -36,23 +36,6 @@ done
 [[ "$CL" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "work: bad claude command '$CL'" >&2; exit 2; }
 [ -z "$MODEL" ] || [[ "$MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
 case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
-# where the session opens: a sub-terminal in ADE (all four ADE variables set) or a Terminal/iTerm window
-in_ade() { [ -n "${ADE_HOOK_BIN:-}" ] && [ -f "$ADE_HOOK_BIN" ] && [ -x "$ADE_HOOK_BIN" ] && [ -n "${ADE_HOOK_PORT:-}" ] &&
-  [ -n "${ADE_HOOK_TOKEN:-}" ] && [ -n "${ADE_PTY_ID:-}" ]; }
-# ADE takes the session only when it can type a command (story 9): its `help` prints a line starting "capabilities:"
-# with the word "command". A build without `ade open` runs the helper in hook mode ({} and exit 0 to anything, reading
-# stdin to its end, hence </dev/null); 4a/4c without 9 answer the typed command with exit 1. Both get a window. The exit
-# status is ignored; a dry run never calls the helper
-ade_cli() { [ "${WORK_DRY:-}" = 1 ] || timeout 5 "$ADE_HOOK_BIN" help </dev/null 2>/dev/null |
-  grep -Eq '^capabilities:.*[[:space:]]command([[:space:]]|$)'; }
-case "${AGENT_TERMINAL:-}" in
-  terminal|iterm) OPEN=window ;;
-  ade) in_ade || { echo "work: AGENT_TERMINAL=ade needs an ADE terminal (ADE_HOOK_BIN, ADE_HOOK_PORT, ADE_HOOK_TOKEN and ADE_PTY_ID set)" >&2; exit 2; }
-    ade_cli || { echo "work: AGENT_TERMINAL=ade needs an ADE that types commands into a sub-terminal ('ade help' lists capabilities: command); update ADE" >&2; exit 2; }
-    OPEN=ade ;;
-  *) OPEN=window
-    if in_ade; then if ade_cli; then OPEN=ade; else echo "work: this ADE cannot type a command into a sub-terminal yet (no 'capabilities: command' in ade help); opening a Terminal window" >&2; fi; fi ;;
-esac
 # hub.conf defaults (HUB_MODEL, HUB_EFFORT, HUB_AGENT_MODEL); the command line wins
 # (a provider session never takes HUB_MODEL, which may be a full Anthropic id)
 [ -n "$MODEL" ] || [ "$PROV" != anthropic ] || MODEL="${HUB_MODEL:-}"; [ -n "$EFFORT" ] || EFFORT="${HUB_EFFORT:-}"
@@ -82,6 +65,24 @@ if [ "$PROV" != anthropic ]; then
 fi
 F="${POS[0]:-}"; F="${F%/}"; WANT="${POS[1]:-}"   # projects/x/ (tab completion) = projects/x
 [ -n "$F" ] && [ -d "$H/$F" ] && [ -f "$H/$F/ACCESS.md" ] || { echo "$USAGE" >&2; exit 2; }
+# where the session opens: a sub-terminal in ADE (all four ADE variables set) or a Terminal/iTerm window; decided once
+# the arguments and the folder are checked, so a typo fails without probing ADE
+in_ade() { [ -n "${ADE_HOOK_BIN:-}" ] && [ -f "$ADE_HOOK_BIN" ] && [ -x "$ADE_HOOK_BIN" ] && [ -n "${ADE_HOOK_PORT:-}" ] &&
+  [ -n "${ADE_HOOK_TOKEN:-}" ] && [ -n "${ADE_PTY_ID:-}" ]; }
+# ADE takes the session only when it can type a command (story 9): its `help` prints a line starting "capabilities:"
+# with the word "command". A build without `ade open` runs the helper in hook mode ({} and exit 0 to anything, reading
+# stdin to its end, hence </dev/null); 4a/4c without 9 answer the typed command with exit 1. Both get a window. The exit
+# status is ignored; a dry run never calls the helper
+ade_cli() { [ "${WORK_DRY:-}" = 1 ] || timeout 5 "$ADE_HOOK_BIN" help </dev/null 2>/dev/null |
+  grep -Eq '^capabilities:.*[[:space:]]command([[:space:]]|$)'; }
+case "${AGENT_TERMINAL:-}" in
+  terminal|iterm) OPEN=window ;;
+  ade) in_ade || { echo "work: AGENT_TERMINAL=ade needs an ADE terminal (ADE_HOOK_BIN, ADE_HOOK_PORT, ADE_HOOK_TOKEN and ADE_PTY_ID set)" >&2; exit 2; }
+    ade_cli || { echo "work: AGENT_TERMINAL=ade needs an ADE that types commands into a sub-terminal ('ade help' lists capabilities: command); update ADE" >&2; exit 2; }
+    OPEN=ade ;;
+  *) OPEN=window
+    if in_ade; then if ade_cli; then OPEN=ade; else echo "work: this ADE cannot type a command into a sub-terminal yet (no 'capabilities: command' in ade help); opening a Terminal window" >&2; fi; fi ;;
+esac
 A="$H/$F/ACCESS.md"
 # Code table rows (or rows appended later with an absolute checkout) as "<repo>|<checkout>" (first = default)
 rows=$(awk -F'|' '/^## /{c=($0=="## Code")} /^\|/{n=$2; k=$3; gsub(/^[ \t]+|[ \t]+$/,"",n); gsub(/^[ \t]+|[ \t]+$/,"",k);
@@ -215,7 +216,7 @@ fi
 echo "$cmd"
 # a dry run shows the merged settings instead of keeping the file (the EXIT trap removes it)
 if [ "${WORK_DRY:-}" = 1 ]; then
-  [ "$OPEN" = window ] || echo "work: in ADE this runs: $ADE_HOOK_BIN open --cwd $dir --name ${F##*/} --focus -- bash -l <launcher>" >&2
+  [ "$OPEN" = window ] || echo "work: if this ADE lists capabilities: command, this runs: $ADE_HOOK_BIN open --cwd $dir --name ${F##*/} --focus -- bash -l <launcher>" >&2
   [ -z "$MS" ] || { cat "$MS"; echo; } 2>/dev/null; exit 0
 fi
 if [ "$PROV" != anthropic ]; then   # the memory links bin/setup makes, inside the provider's config dir

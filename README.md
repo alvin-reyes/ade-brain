@@ -188,7 +188,8 @@ every terminal. `bin/work` then runs
 ```
 
 The launcher is the same file the Terminal path runs, so the prompt, the agents and any provider settings stay in it,
-never on ADE's command line. `--focus` shows the new sub-terminal and its tab. What `bin/work` does with `ade open`'s
+never on ADE's command line. `--focus` is always passed, and ADE honours it only when the caller's tab is the active
+tab: it shows the new sub-terminal there, but it never switches tabs, and `ade open` exits 0 either way. What `bin/work` does with `ade open`'s
 answer:
 
 | Exit | `bin/work` |
@@ -205,10 +206,22 @@ Before that, `bin/work` checks with `ade help` that this ADE can type the comman
 `capabilities: command` or `capabilities: command split`. Otherwise it prints one `work:` line and opens a Terminal
 window, as outside ADE. That covers an ADE build without `ade open` (such as v0.22.0, which would take `ade open` as a
 hook event and do nothing) and one with `ade open` but without typed commands (story 9), which would refuse with exit 1.
+The probe asks the helper on disk (`$ADE_HOOK_BIN`), not the running app: after updating ADE, restart the app if
+`ade open` says it is too old. The probe runs only once the arguments and the folder are checked, so a typo'd folder
+fails at once.
 
 `AGENT_TERMINAL=terminal` or `AGENT_TERMINAL=iterm` always opens a window. `AGENT_TERMINAL=ade` always uses ADE: it never
-falls back (exits 3 and 4 are returned as they are), and outside ADE or on an ADE without `capabilities: command` it is exit 2. `WORK_DRY=1` also prints the ADE
-command it would run. Outside ADE nothing changes.
+falls back (exits 3 and 4 are returned as they are), and outside ADE or on an ADE without `capabilities: command` it is exit 2. Any other value
+inside ADE counts as unset (auto: the ADE path). `WORK_DRY=1` also prints the ADE command it would run, if this ADE lists
+`capabilities: command`. Outside ADE nothing changes, except that the usage line names `AGENT_TERMINAL=terminal|iterm|ade`
+and `AGENT_TERMINAL=ade` is exit 2 with a message.
+
+Live but foreign `ADE_*` variables: a shell that inherited them from an ADE terminal but is not in one (tmux attached
+from another terminal, an app launched from an ADE shell) still reaches that ADE, so the session opens as a sub-terminal
+of that ADE tab. Run `AGENT_TERMINAL=terminal bin/work <folder>` there to get a window.
+
+Interrupting `bin/work` (Ctrl-C) while `ade open` runs removes the launcher, but ADE may already have typed the command:
+the new sub-terminal then prints a harmless `No such file or directory`. Close it and run `bin/work` again.
 
 The sub-terminal needs ADE's `ade open` on the ADE build (stories 4a and 4c in `better-agentic-ide`) and its typed
 command (`ade open -- COMMAND`, story 9). Until story 9 is on your build, `ade help` has no `capabilities: command`
