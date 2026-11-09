@@ -1,6 +1,7 @@
 # SP: DeepSeek behind Claude Code (GLM disabled, Meta left out)
 
-Status: **QA passed, awaiting code review (2026-11-09); not Done.** Earlier: approved by the owner 2026-11-09, in build. Owner rule added the same day: DeepSeek only in the owner's own hubs
+Status: **Done (2026-11-09): QA verification green; adversarial code re-review PASS.** Earlier: approved by the owner 2026-11-09, in build.
+Two owner items remain outside Done: acceptance of ADR 0002 (it stays Proposed) and the live Keychain-login check (Open before Done, item 2). Owner rule added the same day: DeepSeek only in the owner's own hubs
 (AC31 to AC34).
 
 Earlier status: **UNBLOCKED for DeepSeek** (2026-11-09). S0 item 21 answered for `deepseek` in `.ade/context/engines.md`: focus session,
@@ -301,9 +302,81 @@ Not touched: `bin/agent` (S3a), `bin/briefing`, `bin/session-end`, `bin/sync`, `
 
 Command: `bash tests/run.sh` (must print `ok    test_providers.sh` and every existing test file as `ok`, and exit 0).
 
+### Re-verification 2026-11-09 (QA, PR #9, branch sp-providers-main at 2569843)
+
+Verdict: **PASS.** Both hermetic runs green (exit 0, 21 of 21 files `ok`), AC1 to AC45 each map to a check that asserts it, AC22 is
+review-only, AC7 and AC19 are documented SKIPs. Review verdict: the adversarial code re-review PASSED at 2569843 (all prior findings
+closed; minors n1 to n4 below).
+
+Run 1 (hermetic): `S=$(mktemp -d); mkdir -p "$S/home" "$S/tmp"; env -i PATH="$PATH" HOME="$S/home" TMPDIR="$S/tmp" LANG=C bash tests/run.sh`
+(no `CLAUDE_CONFIG_DIR`). Exit 0. Tail:
+
+```
+ok    test_secret.sh
+ok    test_session_end.sh
+ok    test_setup.sh
+ok    test_sync.sh
+ok    test_work.sh
+exit=0
+```
+(all 21 files printed `ok`, including `test_providers.sh`)
+
+Run 2: the same command with `ANTHROPIC_API_KEY=sk-ant-FAKE ANTHROPIC_AUTH_TOKEN=fake` added inside the `env -i`. Exit 0. Tail:
+
+```
+ok    test_secret.sh
+ok    test_session_end.sh
+ok    test_setup.sh
+ok    test_sync.sh
+ok    test_work.sh
+exit=0
+```
+(all 21 files `ok`)
+
+SKIP lines, from `bash tests/test_providers.sh` alone (same hermetic env, exit 0, last line `ok`):
+
+```
+SKIP AC7 checkout_base_url_conflict_refused: S0 item 21: the provider layer's env wins over checkout and user settings (engines.md, Settings precedence)
+SKIP AC19 allowed_tools_applied: none needed for DeepSeek (engines.md, Tool restriction)
+```
+
+Safety: `shasum ~/.claude-caiden/settings.json ~/.claude/settings.json` before and after both runs and the SKIP run:
+`5f36b2ea290645ee34d943220a14b54ee5ea5be5` and `7d2a7b7e46a865b6ab9d9df66ce960111331333d`, unchanged.
+
+AC map (each check name has one definition and is called in `tests/test_providers.sh`; QA read the bodies of AC35 to AC45, which
+use `assert_eq`, `assert_contains` and `fail` on real outcomes, not only exit codes): AC1 `provider_rows_static`; AC2
+`dry_run_deepseek`; AC3 `launcher_file_holds_no_key`; AC4 `engine_argv_holds_no_key`; AC5 `fail_closed_on_missing_key`,
+`fail_closed_on_empty_key`; AC6 `key_checked_once_before_launch`, `single_merged_settings_keeps_hooks`; AC7 SKIP
+`checkout_base_url_conflict_refused`; AC8 `provider_implies_no_remote`; AC9 `provider_rejects_wrapper_from_each_source`; AC10
+`provider_model_rules`, `hub_model_not_passed`; AC11 `provider_effort_accepted`, `provider_effort_refused`; AC12
+`hub_provider_model_override`, `hub_provider_model_checked`; AC13 `no_base_url_override`; AC14 `provider_env_not_trusted`,
+`provider_not_allowed`; AC15 `no_go_pair_refused_by_work`; AC16 `agents_provider_check`; AC17 `doctor_provider_rows_name_only`;
+AC18 `meta_row_only_with_a_go`; AC19 SKIP `allowed_tools_applied`; AC20 `readme_provider_section`; AC21
+`adr_0002_provider_section`; AC22 review only (not in `tests/run.sh`); AC23 `hermetic_fake_engine_only`; AC24 the existing suites,
+all `ok` in both runs; AC25 `provider_config_dir_isolated`; AC26 `provider_memory_linked`; AC27 `provider_resume_refused`; AC28
+`provider_layer_flags`; AC29 `anthropic_path_unchanged`; AC30 `key_checked_once_before_launch`, `launcher_file_holds_no_key`,
+`engine_argv_holds_no_key`; AC31 `deepseek_client_hub_refused`; AC32 `deepseek_owned_hub_allowed`; AC33
+`owned_by_owner_env_not_trusted`; AC34 `doctor_flags_client_hub_deepseek`; AC35 `provider_env_creds_scrubbed`; AC36
+`folder_env_creds_dropped`; AC37 `checkout_env_creds_refused`; AC38 `helper_pins_hub_and_service`; AC39
+`merged_settings_removed_after_launch`; AC40 `agents_no_go_refused`; AC41 `no_settings_left_behind`; AC42
+`hub_env_mismatch_refused`; AC43 `owner_only_default_refuses`; AC44 `config_dir_symlink_refused`; AC45
+`suite_hermetic_and_clean`.
+
+Follow-ups carried from the code re-review (not blocking Done):
+- n1: no test for the "not readable JSON" checkout refusal.
+- n2: the credential scrub list is fixed-name; re-check it on Claude Code updates.
+- n3: documented, not blocked: a provider-dir user settings `env`, managed settings, and deeper symlinks under `projects/`.
+- n4: the earlier Verification section was stale (replaced by this entry).
+
+Outside Done (owner): acceptance of ADR 0002 (stays Proposed) and the live Keychain-login check.
+
+### Superseded record (stale; kept for history, replaced by the 2026-11-09 re-verification above it)
+
+Command: `bash tests/run.sh` (must print `ok    test_providers.sh` and every existing test file as `ok`, and exit 0).
+
 Real output recorded by QA:
 
-Status: **QA passed, awaiting code review** (2026-11-09). Not Done: the adversarial code review is still open.
+Superseded status: **QA passed, awaiting code review** (2026-11-09). Not Done: the adversarial code review is still open.
 
 Run (hermetic, as required): `S=$(mktemp -d); mkdir -p "$S/home" "$S/tmp"; env -i PATH="$PATH" HOME="$S/home" TMPDIR="$S/tmp" LANG=C bash tests/run.sh`
 (no `CLAUDE_CONFIG_DIR` / `HUB_CLAUDE_CONFIG_DIR`). Exit 0. Real output:
