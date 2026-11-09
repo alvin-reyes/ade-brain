@@ -1,6 +1,6 @@
 # S1: bin/session-end without a hook
 
-Status: ready (2026-11-09). Source: `docs/plans/2026-11-09-other-ai-cli-agents.md`, section "S1: `bin/session-end` without a hook".
+Status: Done (2026-11-09, QA). Source: `docs/plans/2026-11-09-other-ai-cli-agents.md`, section "S1: `bin/session-end` without a hook".
 Verification command: `bash tests/run.sh` (architecture verification command, `docs/architecture.md`).
 
 ## Goal
@@ -125,4 +125,38 @@ Command: `bash tests/run.sh` (must print `ok    test_session_end.sh` and `ok    
 
 Real output recorded by QA:
 
-_(empty; QA fills this in. Dev agents do not write here.)_
+QA run 2026-11-09, branch s1-session-end, `bash tests/run.sh`, exit 0:
+
+```
+ok    test_brain.sh
+ok    test_briefing.sh
+ok    test_changes.sh
+ok    test_context.sh
+ok    test_doctor.sh
+ok    test_init.sh
+ok    test_lib.sh
+ok    test_models.sh
+ok    test_monitor.sh
+ok    test_new.sh
+ok    test_precommit.sh
+ok    test_remote.sh
+ok    test_report.sh
+ok    test_root.sh
+ok    test_schedule.sh
+ok    test_secret.sh
+ok    test_session_end.sh
+ok    test_setup.sh
+ok    test_sync.sh
+ok    test_work.sh
+EXIT 0
+```
+
+AC coverage (tests read, not just the exit code): AC1-AC16 each map to the named check (`CHECK=` in
+`tests/test_session_end.sh`; AC11-AC13 in `tests/test_sync.sh`) and each asserts the criterion (exit code, commit or no
+commit, journal line, lock dir/pid, log lines). AC17 and AC18 are covered by `test_changes.sh` and `test_sync.sh` passing;
+`bin/changes` is untouched (the deadline read was copied into `bin/session-end`).
+Slice: diff vs origin/other-ai-clis touches bin/lib.sh (functions added only), bin/session-end, bin/sync, the two test
+files and `.ade/knowledge/developer.md` (a Dev note, harmless). No `--launch` option added (it is only refused).
+Minor, not blocking: AC1's pre-change red state was not re-run by QA; the check does use the verified `script` probe shape.
+
+Verdict: PASS. Done.
