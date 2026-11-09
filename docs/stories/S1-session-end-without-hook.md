@@ -1,6 +1,6 @@
 # S1: bin/session-end without a hook
 
-Status: ready (2026-11-09). Source: `docs/plans/2026-11-09-other-ai-cli-agents.md`, section "S1: `bin/session-end` without a hook".
+Status: Done (2026-11-09): QA re-verification green; adversarial code re-review PASS. Source: `docs/plans/2026-11-09-other-ai-cli-agents.md`, section "S1: `bin/session-end` without a hook".
 Verification command: `bash tests/run.sh` (architecture verification command, `docs/architecture.md`).
 
 ## Goal
@@ -125,4 +125,83 @@ Command: `bash tests/run.sh` (must print `ok    test_session_end.sh` and `ok    
 
 Real output recorded by QA:
 
-_(empty; QA fills this in. Dev agents do not write here.)_
+QA run 2026-11-09, branch s1-session-end, `bash tests/run.sh`, exit 0:
+
+```
+ok    test_brain.sh
+ok    test_briefing.sh
+ok    test_changes.sh
+ok    test_context.sh
+ok    test_doctor.sh
+ok    test_init.sh
+ok    test_lib.sh
+ok    test_models.sh
+ok    test_monitor.sh
+ok    test_new.sh
+ok    test_precommit.sh
+ok    test_remote.sh
+ok    test_report.sh
+ok    test_root.sh
+ok    test_schedule.sh
+ok    test_secret.sh
+ok    test_session_end.sh
+ok    test_setup.sh
+ok    test_sync.sh
+ok    test_work.sh
+EXIT 0
+```
+
+AC coverage (tests read, not just the exit code): AC1-AC16 each map to the named check (`CHECK=` in
+`tests/test_session_end.sh`; AC11-AC13 in `tests/test_sync.sh`) and each asserts the criterion (exit code, commit or no
+commit, journal line, lock dir/pid, log lines). AC17 and AC18 are covered by `test_changes.sh` and `test_sync.sh` passing;
+`bin/changes` is untouched (the deadline read was copied into `bin/session-end`).
+Slice: diff vs origin/other-ai-clis touches bin/lib.sh (functions added only), bin/session-end, bin/sync, the two test
+files and `.ade/knowledge/developer.md` (a Dev note, harmless). No `--launch` option added (it is only refused).
+Minor, not blocking: AC1's pre-change red state was not re-run by QA; the check does use the verified `script` probe shape.
+
+Verdict: PASS. Done.
+
+### QA re-verification 2026-11-09 (after reopen; fixes in bccbd79), branch s1-session-end, `bash tests/run.sh`
+
+Real output (the run was piped through `tail`, so the shell exit code shown is tail's; every one of the 20 files printed
+`ok` and no FAIL line appeared):
+
+```
+ok    test_brain.sh
+ok    test_briefing.sh
+ok    test_changes.sh
+ok    test_context.sh
+ok    test_doctor.sh
+ok    test_init.sh
+ok    test_lib.sh
+ok    test_models.sh
+ok    test_monitor.sh
+ok    test_new.sh
+ok    test_precommit.sh
+ok    test_remote.sh
+ok    test_report.sh
+ok    test_root.sh
+ok    test_schedule.sh
+ok    test_secret.sh
+ok    test_session_end.sh
+ok    test_setup.sh
+ok    test_sync.sh
+ok    test_work.sh
+```
+
+New checks read, not just run; each exists and asserts what it claims:
+- `stale_takeover_one_holder` (test_session_end.sh): 40 rounds of 4 concurrent takers on a dead-pid lock; asserts exactly one "won" and no "lost" per round, plus an expired takeover guard (`.gc`) does not block the lock.
+- `release_before_auto_sync`: brain stub records whether the lock dir exists when the step before auto_sync runs; asserts "free" and that the follow-on sync did not log "another sync is running" and did sync.
+- `only_owner_releases_lock`: pre-commit hook writes another live pid into the pid file; asserts the lock dir survives and still names that pid.
+- `sync_yes_only_owner_releases` (test_sync.sh): same shape for `bin/sync --yes`.
+- `lock_wait_is_at_least_w`: `date +%s` is faked to tick at x.9 s; asserts a busy lock is waited on >= 2000 ms and never taken.
+- `refused_commit_logged`: refusing pre-commit hook; asserts exit 0, last log line ends "failed: commit refused", hook path exit 0.
+- `since_digit_count`: 8 and 12 digits exit 2 with no commit; 9 digits accepted.
+- `since_not_echoed_into_log`: `evil` and a newline-forged value; asserts one log line per run, neither string in the log, both logged as "refused:".
+- `stdin_read_capped`: `yes |` flood; asserts committed and elapsed <= 5 s.
+
+AC1-AC18 still each map to a named check as in the first verification (AC11-AC13 in test_sync.sh; AC17/AC18 via
+test_changes.sh and test_sync.sh green). Not proven by QA: the new checks' red state against the pre-fix code was not
+re-run (the race check is probabilistic by design, 40 rounds).
+
+Verdict (QA): PASS on re-verification. Status is NOT Done: awaiting the adversarial code re-review.
