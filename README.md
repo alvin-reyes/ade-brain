@@ -104,6 +104,38 @@ memory and skills into the right place wherever you run it, and `bin/doctor` say
 
 Other providers (OpenRouter, Ollama, a second account) work through a wrapper command passed as `--claude`.
 
+## Providers behind Claude Code
+
+A focus session can run Claude Code against DeepSeek instead of Anthropic. The CLI stays Claude Code, so hooks,
+`--agents` and session end work as before; only the endpoint and models change. Rows live in `bin/lib.sh`
+(contract: `.ade/context/providers.md`).
+
+- **Choose it in `hub.conf` only:** `HUB_PROVIDERS_ALLOWED="anthropic deepseek"` (default `anthropic`) and, for every
+  session, `HUB_PROVIDER=deepseek`; or one session with `bin/work --provider deepseek <folder>`. Both are ignored when
+  set in the environment.
+- **Owner's own hubs only.** DeepSeek's terms allow training on API data and store it in the People's Republic of
+  China, so it is refused unless `hub.conf` has `HUB_OWNED_BY_OWNER=1` (never set it in a client hub). `bin/doctor`
+  flags a client hub whose allowlist lists deepseek. See ADR 0002.
+- **The key:** `bin/secret --set deepseek-api-key`. `bin/doctor` shows whether it is stored, never its value. With no
+  key, `bin/work` stops before Claude Code starts.
+- **Exposure (credential option 1):** the key is read by Claude Code's `apiKeyHelper` (`bin/secret deepseek-api-key`)
+  only, so it is never in the environment, argv or a file; hooks and tool commands cannot see it.
+- **No Anthropic credential reaches DeepSeek:** `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY` and the other names in
+  `provider_scrub_vars` (`bin/lib.sh`) would beat the helper, so the session starts without them and drops them from the
+  folder's settings; a checkout whose `.claude/settings.json` or `settings.local.json` sets one in `env` is refused.
+- **Models:** `--model` is a slot alias (`opus`, `sonnet`, `haiku`) or a row id (`deepseek-flash`, `deepseek-v4-pro`);
+  `HUB_DEEPSEEK_MODEL` and `HUB_DEEPSEEK_SMALL_MODEL` change the defaults. `HUB_MODEL` and `HUB_AGENT_MODEL` are not
+  used (they may be Anthropic ids). There is no base URL override.
+- **Remote Control is off** for a provider session (it needs a claude.ai login), and `--resume`/`--continue` are
+  refused: resuming would send an earlier session's history to the new provider.
+- **Wrappers:** a provider session needs plain `claude`; `--claude`, `HUB_CLAUDE` or `AGENT_CLAUDE` naming anything else
+  is refused.
+- **Own config dir:** the session runs with `CLAUDE_CONFIG_DIR=.local/providers/deepseek`, so `/model` cannot change
+  your Anthropic default. Claude Code's first-run prompts may show once there.
+- **Data sharing:** everything the session reads goes to DeepSeek (code, notes, tool output). That is the owner's
+  decision per hub, recorded in ADR 0002; do not use it for client work.
+- GLM is disabled until it passes the same checks as DeepSeek. Meta is not offered.
+
 ## What a hub has
 
 - **The persona** in `CLAUDE.md` and `.claude/agents/<persona>.md`, with shared rules: verified not vibed, secrets never

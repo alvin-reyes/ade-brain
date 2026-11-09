@@ -1,6 +1,10 @@
 # SP: DeepSeek behind Claude Code (GLM disabled, Meta left out)
 
-Status: **UNBLOCKED for DeepSeek** (2026-11-09). S0 item 21 answered for `deepseek` in `.ade/context/engines.md`: focus session,
+Status: **Done (2026-11-09): QA verification green; adversarial code re-review PASS.** Earlier: approved by the owner 2026-11-09, in build.
+Two owner items remain outside Done: acceptance of ADR 0002 (it stays Proposed) and the live Keychain-login check (Open before Done, item 2). Owner rule added the same day: DeepSeek only in the owner's own hubs
+(AC31 to AC34).
+
+Earlier status: **UNBLOCKED for DeepSeek** (2026-11-09). S0 item 21 answered for `deepseek` in `.ade/context/engines.md`: focus session,
 `--agents`, delegation and `--effort` are go. `glm` ships disabled (no-go in the table, refused with the S0 reason). `meta` is
 left out of SP (plan AC18: no feature has a go). The build can start now. Open owner items are listed under "Open before Done".
 
@@ -194,11 +198,11 @@ Hermetic rules:
 | AC | Criterion | Automated test |
 |---|---|---|
 | AC1 | Static, over **every** row in the table (deepseek, glm): base URL is `https://`, has no trailing `/` and does not end in `/v1`; every row has a Keychain secret name. | `provider_rows_static` |
-| AC2 | `WORK_DRY=1 bin/work --provider deepseek projects/demo` (with `HUB_PROVIDERS_ALLOWED="anthropic deepseek"`) prints a command with `CLAUDE_CONFIG_DIR` set to `$H/.local/providers/deepseek` and no `--remote-control`. The merged settings file it names contains the base URL exactly, `https://api.deepseek.com/anthropic`, the five model variables with the values in scope 1, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` `"1"`, and no `CLAUDE_CODE_SUBAGENT_MODEL`. No key value appears in the output or the file (the stub's value is absent). | `dry_run_deepseek` |
+| AC2 | `WORK_DRY=1 bin/work --provider deepseek projects/demo` (with `HUB_PROVIDERS_ALLOWED="anthropic deepseek"`) prints a command with `CLAUDE_CONFIG_DIR` set to `$H/.local/providers/deepseek` and no `--remote-control`. The dry run keeps no merged settings file: it prints the JSON after the command (story SP review, m1), and that JSON contains the base URL exactly, `https://api.deepseek.com/anthropic`, the five model variables with the values in scope 1, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` `"1"`, and no `CLAUDE_CODE_SUBAGENT_MODEL`. No key value appears in the output or the JSON (the stub's value is absent). A non-dry run's merged settings file is mode 600. | `dry_run_deepseek` |
 | AC3 | A non-dry run (osascript stub) captures a launcher file and a merged settings file. Neither contains the stub's key value nor `ANTHROPIC_AUTH_TOKEN=`. | `launcher_file_holds_no_key` |
 | AC4 | The fake engine's argv contains no key value. | `engine_argv_holds_no_key` |
 | AC5 | Fail closed: with a `bin/secret` stub that exits 1, and another that prints nothing, `bin/work --provider deepseek` exits 1, prints `bin/secret --set deepseek-api-key`, and the fake engine's marker is absent. | `fail_closed_on_missing_key`, `fail_closed_on_empty_key` |
-| AC6 | The key is read once, before the launch: the `bin/secret` stub's call count is exactly 1, and the call happened before the osascript stub ran. The merged settings file's `apiKeyHelper` is `'<H>/bin/secret' deepseek-api-key` (hub path single-quoted) and the file still contains the folder's hook entries from `projects/demo/.claude/settings.json`. | `key_checked_once_before_launch`, `single_merged_settings_keeps_hooks` |
+| AC6 | The key is read once, before the launch: the `bin/secret` stub's call count is exactly 1, and the call happened before the osascript stub ran. The merged settings file's `apiKeyHelper` is `HUB='<H>' AGENT_KEYCHAIN_SERVICE='<svc>' '<H>/bin/secret' deepseek-api-key` (each value single-quoted; AC38) and the file still contains the folder's hook entries from `projects/demo/.claude/settings.json`. | `key_checked_once_before_launch`, `single_merged_settings_keeps_hooks` |
 | AC7 | Settings precedence: **skipped** with the recorded reason "S0 item 21: the provider layer's `env` wins over checkout and user settings (engines.md, Settings precedence)". The test prints the skip and asserts that engines.md still records `wins`. | `checkout_base_url_conflict_refused` (skip) |
 | AC8 | `--provider deepseek` implies `--no-remote`: the dry-run command has no `--remote-control`. | `provider_implies_no_remote` |
 | AC9 | Wrapper refusal from each source: `--claude mywrap`, `HUB_CLAUDE=mywrap` (in hub.conf) and `AGENT_CLAUDE=mywrap` each with `--provider deepseek` exit 2. `AGENT_CLAUDE=claude` (plain, from each source) is accepted. | `provider_rejects_wrapper_from_each_source` |
@@ -213,8 +217,8 @@ Hermetic rules:
 | AC18 | `meta` is absent: no `meta` row in the `lib.sh` provider table, and no `meta` provider entry in the README provider section (the word may appear only in a sentence saying it is not offered). | `meta_row_only_with_a_go` |
 | AC19 | Tool restriction: **skipped** with the recorded reason "none needed for DeepSeek (engines.md, Tool restriction)". The test asserts that line exists in engines.md. | `allowed_tools_applied` (skip) |
 | AC20 | Static: `README.md` provider section contains `--provider`, `bin/secret --set deepseek-api-key`, that Remote Control is off, the data-sharing note, and the exposure statement for option 1. | `readme_provider_section` |
-| AC21 | Static: ADR 0002 exists and its provider section has headings for the credential option (option 1, with the helper and the scrub variable), the per-hub data-sharing decision (marked OPEN until the owner records it) and the vendors' API-terms note (DeepSeek marked not yet reviewed). | `adr_0002_provider_section` |
-| AC22 | Scope guard: `bin/briefing` is unchanged (`git diff --quiet <base> -- bin/briefing`, base = `origin/s0-providers`), and `bin/agent` does not exist. | `scope_guard_briefing_and_agent` |
+| AC21 | Static: ADR 0002 exists and its provider section has headings for the credential option (option 1, with the helper and the scrub variable), the per-hub data-sharing decision (the owner rule of 2026-11-09, `HUB_OWNED_BY_OWNER=1`) and the vendors' API-terms note (DeepSeek reviewed 2026-11-09: Terms of Use §4.3 with its URL, storage in the People's Republic of China). | `adr_0002_provider_section` |
+| AC22 | Scope guard: `bin/briefing` is unchanged and `bin/agent` does not exist. Checked in review (`git diff --stat main...` on the PR), **not** in `tests/run.sh`: the permanent suite must pass on a fresh shallow clone, which has no base ref (code review M2, 2026-11-09). | review only (removed from `tests/test_providers.sh`) |
 | AC23 | Hermetic guard: every provider check asserts the fake `claude` was the engine that ran (marker present and written by the fake), and no provider test runs a `claude` other than the fake on PATH. | `hermetic_fake_engine_only` |
 | AC24 | Existing suites still pass: `tests/test_work.sh`, `tests/test_doctor.sh`, `tests/test_secret.sh`, `tests/test_models.sh`, `tests/test_briefing.sh`, unchanged. | existing files, run by `tests/run.sh` |
 | AC25 | `/model` leak closed: the fake engine writes `{"model":"deepseek-v4-pro"}` to `$CLAUDE_CONFIG_DIR/settings.json`. After the run, `$CLAUDE_HOME/settings.json` is absent or unchanged, and the write landed in `$H/.local/providers/deepseek/settings.json`. | `provider_config_dir_isolated` |
@@ -222,7 +226,22 @@ Hermetic rules:
 | AC27 | Resume refused: `bin/work --provider deepseek projects/demo --resume`, `--continue`, `-r` and `-c` each exit 2 and name the rule. | `provider_resume_refused` |
 | AC28 | Provider layer flags: the merged settings file has `skipWebFetchPreflight` `true` (top level) and `env.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` `"1"`; neither the file nor the command contains `CLAUDE_CODE_SUBAGENT_MODEL`. | `provider_layer_flags` |
 | AC29 | Anthropic path unchanged: `bin/work --provider anthropic projects/demo` prints a command identical to `bin/work projects/demo`, with no `CLAUDE_CONFIG_DIR` prefix and no merged settings file (`--settings` names the folder's own `settings.json`). | `anthropic_path_unchanged` |
+| AC31 | Owner rule (2026-11-09): in a client hub (no `HUB_OWNED_BY_OWNER=1` in hub.conf), `bin/work --provider deepseek` and `HUB_PROVIDER=deepseek` exit 2 even when `HUB_PROVIDERS_ALLOWED` lists deepseek, naming `HUB_OWNED_BY_OWNER`, ADR 0002 and the reason (training on API data, storage in China); no key is read and the engine does not run. Anthropic sessions still run. | `deepseek_client_hub_refused` |
+| AC32 | In an owned hub (`HUB_OWNED_BY_OWNER=1` in hub.conf) deepseek is allowed, by `--provider` and by `HUB_PROVIDER`. | `deepseek_owned_hub_allowed` |
+| AC33 | `HUB_OWNED_BY_OWNER=1` exported in the environment is ignored (unset before sourcing hub.conf), by `bin/work` and `bin/doctor`. | `owned_by_owner_env_not_trusted` |
+| AC34 | `DOCTOR_OFFLINE=1 bin/doctor` prints a `MISSING  client hub` row when the allowlist of a client hub lists deepseek, and none in an owned hub or a hub without deepseek. | `doctor_flags_client_hub_deepseek` |
 | AC30 | The only key read `bin/work` performs is the pre-check (AC6), and no file or argv value it writes holds a key: the launcher file, the merged settings file and the engine argv are all key-free. Mapped to the existing tests rather than a new one. | `key_checked_once_before_launch`, `launcher_file_holds_no_key`, `engine_argv_holds_no_key` |
+| AC35 | (Review B1) Claude Code's auth order is `ANTHROPIC_AUTH_TOKEN` > `ANTHROPIC_API_KEY` > `apiKeyHelper` > OAuth, and the launcher is `bash -l`. With every `provider_scrub_vars` name (`ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`, `ANTHROPIC_CUSTOM_HEADERS`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`, `CLAUDE_CODE_OAUTH_TOKEN`) planted with fake values in the launching environment, a provider launch runs, the launcher runs `claude` through `env -u <name>` for each, and the fake engine's environment, argv and settings hold none of them. The anthropic command is unchanged. | `provider_env_creds_scrubbed` |
+| AC36 | (B1) Each of those names planted in the folder's `.claude/settings.json` `env` is absent from the merged settings (dry-run JSON and the launched file); other folder env keys are kept. | `folder_env_creds_dropped` |
+| AC37 | (B1) The checkout's `.claude/settings.json` or `.claude/settings.local.json` setting any of those names in `env` (checked for each name and each file) is refused before the key is read: exit 2, naming the file and the key, never the value; the engine does not run. A no-repo folder works in its own folder, so a name in its own settings is refused too. A checkout env without them is accepted; the anthropic path does not check. | `checkout_env_creds_refused` |
+| AC38 | (M1) `apiKeyHelper` pins the hub and the Keychain service the pre-check used: `HUB='<H>' AGENT_KEYCHAIN_SERVICE='<svc>' '<H>/bin/secret' deepseek-api-key`, for a service from `hub.conf` (`HUB_KEYCHAIN_SERVICE`) and from `AGENT_KEYCHAIN_SERVICE`. The pre-check's `bin/secret` saw the same hub and service, and the helper run by `/bin/sh` from a bare environment reads the same. | `helper_pins_hub_and_service` |
+| AC39 | (M3) After the (stub) launcher exits, the merged settings file it named and the launcher file are gone. | `merged_settings_removed_after_launch` |
+| AC40 | (M3) In a hub copy whose `lib.sh` marks deepseek `agents` no-go, a folder with agents exits 2 naming S0 item 21; a folder without agents still runs. | `agents_no_go_refused` |
+| AC41 | (m1) No `agent-settings.*` file is left by a dry run, and no `agent-settings.*` or `agent-work.*` file is left when the hand-off (osascript) fails, for a provider and an anthropic session. | `no_settings_left_behind` |
+| AC42 | (m2) A provider session exits 2, naming `HUB=`, when `HUB` in the environment is another hub than the script's own; the same hub by its real path, and `HUB` unset, run. | `hub_env_mismatch_refused` |
+| AC43 | (m3) glm is `owner_only` 1 (z.ai is China-based). A row with no `owner_only` value is refused in a client hub (naming `HUB_OWNED_BY_OWNER`) and runs in an owned hub. | `owner_only_default_refuses` |
+| AC44 | (m4) The provider config dir, its `projects/`, or the hub's `.local` symlinked to a temp "fake ~/.claude" is refused (exit 2, before the key read, engine not run), and nothing is written there; a real config dir runs. | `config_dir_symlink_refused` |
+| AC45 | (m5) The suite uses a temp `HOME`, never inherits `ANTHROPIC_*`, `CLAUDE_CODE_USE_*` or `CLAUDE_CODE_OAUTH_TOKEN` from the tester's shell (`make_hub` unsets them), and removes every temp dir it made: a child run of the suite, given planted fake values, reports a temp `HOME` and a clean environment, leaves its listed temp dirs gone and its given `HOME` and `TMPDIR` empty. | `suite_hermetic_and_clean` |
 
 Not tested in `tests/run.sh` (they belong to S0 item 21 and S3a): the canary behaviour and the real `claude` against a fake
 Anthropic-compatible server, the `apiKeyHelper` failure after startup, the Keychain-login live check (OPEN above), and `bin/agent`'s
@@ -248,6 +267,7 @@ fail-closed read and no-go check.
 - `.ade/context/decisions/0002-*.md`: provider section (created here only if S2a has not landed).
 - `.ade/context/providers.md`: new, the provider contract (scope 12).
 - `tests/test_providers.sh`: new.
+- `tests/helpers.sh`: `make_hub` unsets `ANTHROPIC_*`, `CLAUDE_CODE_USE_*` and `CLAUDE_CODE_OAUTH_TOKEN` (review B1).
 - `docs/stories/SP-providers.md`: this file. The Verification section is filled by QA only.
 
 Not touched: `bin/agent` (S3a), `bin/briefing`, `bin/session-end`, `bin/sync`, `bin/changes`, `tests/run.sh`, `.ade/context/engines.md`.
@@ -272,7 +292,8 @@ Not touched: `bin/agent` (S3a), `bin/briefing`, `bin/session-end`, `bin/sync`, `
 
 ## Open before Done
 
-1. Owner: the per-hub data-sharing decision for DeepSeek, and someone reads DeepSeek's API terms on training and retention (ADR 0002).
+1. Done in the build: the owner's rule (DeepSeek only in the owner's own hubs, 2026-11-09) and DeepSeek's terms (reviewed
+   2026-11-09) are recorded in ADR 0002, which stays Proposed until the owner accepts it.
 2. Owner: a live check on the owner's Mac that the Keychain-stored Anthropic login is not sent to `api.deepseek.com` when the helper
    is set (S0 item 15/21 gap).
 3. First live use: the first run of a provider session may show Claude Code's first-run prompts (expected, once per provider dir).
@@ -281,6 +302,137 @@ Not touched: `bin/agent` (S3a), `bin/briefing`, `bin/session-end`, `bin/sync`, `
 
 Command: `bash tests/run.sh` (must print `ok    test_providers.sh` and every existing test file as `ok`, and exit 0).
 
+### Re-verification 2026-11-09 (QA, PR #9, branch sp-providers-main at 2569843)
+
+Verdict: **PASS.** Both hermetic runs green (exit 0, 21 of 21 files `ok`), AC1 to AC45 each map to a check that asserts it, AC22 is
+review-only, AC7 and AC19 are documented SKIPs. Review verdict: the adversarial code re-review PASSED at 2569843 (all prior findings
+closed; minors n1 to n4 below).
+
+Run 1 (hermetic): `S=$(mktemp -d); mkdir -p "$S/home" "$S/tmp"; env -i PATH="$PATH" HOME="$S/home" TMPDIR="$S/tmp" LANG=C bash tests/run.sh`
+(no `CLAUDE_CONFIG_DIR`). Exit 0. Tail:
+
+```
+ok    test_secret.sh
+ok    test_session_end.sh
+ok    test_setup.sh
+ok    test_sync.sh
+ok    test_work.sh
+exit=0
+```
+(all 21 files printed `ok`, including `test_providers.sh`)
+
+Run 2: the same command with `ANTHROPIC_API_KEY=sk-ant-FAKE ANTHROPIC_AUTH_TOKEN=fake` added inside the `env -i`. Exit 0. Tail:
+
+```
+ok    test_secret.sh
+ok    test_session_end.sh
+ok    test_setup.sh
+ok    test_sync.sh
+ok    test_work.sh
+exit=0
+```
+(all 21 files `ok`)
+
+SKIP lines, from `bash tests/test_providers.sh` alone (same hermetic env, exit 0, last line `ok`):
+
+```
+SKIP AC7 checkout_base_url_conflict_refused: S0 item 21: the provider layer's env wins over checkout and user settings (engines.md, Settings precedence)
+SKIP AC19 allowed_tools_applied: none needed for DeepSeek (engines.md, Tool restriction)
+```
+
+Safety: `shasum ~/.claude-caiden/settings.json ~/.claude/settings.json` before and after both runs and the SKIP run:
+`5f36b2ea290645ee34d943220a14b54ee5ea5be5` and `7d2a7b7e46a865b6ab9d9df66ce960111331333d`, unchanged.
+
+AC map (each check name has one definition and is called in `tests/test_providers.sh`; QA read the bodies of AC35 to AC45, which
+use `assert_eq`, `assert_contains` and `fail` on real outcomes, not only exit codes): AC1 `provider_rows_static`; AC2
+`dry_run_deepseek`; AC3 `launcher_file_holds_no_key`; AC4 `engine_argv_holds_no_key`; AC5 `fail_closed_on_missing_key`,
+`fail_closed_on_empty_key`; AC6 `key_checked_once_before_launch`, `single_merged_settings_keeps_hooks`; AC7 SKIP
+`checkout_base_url_conflict_refused`; AC8 `provider_implies_no_remote`; AC9 `provider_rejects_wrapper_from_each_source`; AC10
+`provider_model_rules`, `hub_model_not_passed`; AC11 `provider_effort_accepted`, `provider_effort_refused`; AC12
+`hub_provider_model_override`, `hub_provider_model_checked`; AC13 `no_base_url_override`; AC14 `provider_env_not_trusted`,
+`provider_not_allowed`; AC15 `no_go_pair_refused_by_work`; AC16 `agents_provider_check`; AC17 `doctor_provider_rows_name_only`;
+AC18 `meta_row_only_with_a_go`; AC19 SKIP `allowed_tools_applied`; AC20 `readme_provider_section`; AC21
+`adr_0002_provider_section`; AC22 review only (not in `tests/run.sh`); AC23 `hermetic_fake_engine_only`; AC24 the existing suites,
+all `ok` in both runs; AC25 `provider_config_dir_isolated`; AC26 `provider_memory_linked`; AC27 `provider_resume_refused`; AC28
+`provider_layer_flags`; AC29 `anthropic_path_unchanged`; AC30 `key_checked_once_before_launch`, `launcher_file_holds_no_key`,
+`engine_argv_holds_no_key`; AC31 `deepseek_client_hub_refused`; AC32 `deepseek_owned_hub_allowed`; AC33
+`owned_by_owner_env_not_trusted`; AC34 `doctor_flags_client_hub_deepseek`; AC35 `provider_env_creds_scrubbed`; AC36
+`folder_env_creds_dropped`; AC37 `checkout_env_creds_refused`; AC38 `helper_pins_hub_and_service`; AC39
+`merged_settings_removed_after_launch`; AC40 `agents_no_go_refused`; AC41 `no_settings_left_behind`; AC42
+`hub_env_mismatch_refused`; AC43 `owner_only_default_refuses`; AC44 `config_dir_symlink_refused`; AC45
+`suite_hermetic_and_clean`.
+
+Follow-ups carried from the code re-review (not blocking Done):
+- n1: no test for the "not readable JSON" checkout refusal.
+- n2: the credential scrub list is fixed-name; re-check it on Claude Code updates.
+- n3: documented, not blocked: a provider-dir user settings `env`, managed settings, and deeper symlinks under `projects/`.
+- n4: the earlier Verification section was stale (replaced by this entry).
+
+Outside Done (owner): acceptance of ADR 0002 (stays Proposed) and the live Keychain-login check.
+
+### Superseded record (stale; kept for history, replaced by the 2026-11-09 re-verification above it)
+
+Command: `bash tests/run.sh` (must print `ok    test_providers.sh` and every existing test file as `ok`, and exit 0).
+
 Real output recorded by QA:
 
-_(empty; QA fills this in. Dev agents do not write here.)_
+Superseded status: **QA passed, awaiting code review** (2026-11-09). Not Done: the adversarial code review is still open.
+
+Run (hermetic, as required): `S=$(mktemp -d); mkdir -p "$S/home" "$S/tmp"; env -i PATH="$PATH" HOME="$S/home" TMPDIR="$S/tmp" LANG=C bash tests/run.sh`
+(no `CLAUDE_CONFIG_DIR` / `HUB_CLAUDE_CONFIG_DIR`). Exit 0. Real output:
+
+```
+ok    test_brain.sh
+ok    test_briefing.sh
+ok    test_changes.sh
+ok    test_context.sh
+ok    test_doctor.sh
+ok    test_init.sh
+ok    test_lib.sh
+ok    test_models.sh
+ok    test_monitor.sh
+ok    test_new.sh
+ok    test_precommit.sh
+ok    test_providers.sh
+ok    test_remote.sh
+ok    test_report.sh
+ok    test_root.sh
+ok    test_schedule.sh
+ok    test_secret.sh
+ok    test_session_end.sh
+ok    test_setup.sh
+ok    test_sync.sh
+ok    test_work.sh
+```
+
+`tests/run.sh` hides a passing suite's output, so the SKIP lines come from `bash tests/test_providers.sh` alone (same hermetic
+env, exit 0, last line `ok`):
+
+```
+SKIP AC7 checkout_base_url_conflict_refused: S0 item 21: the provider layer's env wins over checkout and user settings (engines.md, Settings precedence)
+SKIP AC19 allowed_tools_applied: none needed for DeepSeek (engines.md, Tool restriction)
+```
+
+Safety: `shasum ~/.claude-caiden/settings.json ~/.claude/settings.json` before and after the runs are identical
+(`5f36b2ea...` and `7d2a7b7e...`).
+
+Criteria map (QA read each check's body, not only the exit code): AC1 `provider_rows_static`; AC2 `dry_run_deepseek`; AC3
+`launcher_file_holds_no_key`; AC4 `engine_argv_holds_no_key`; AC5 `fail_closed_on_missing_key` and `fail_closed_on_empty_key`;
+AC6 `key_checked_once_before_launch` and `single_merged_settings_keeps_hooks`; AC8 `provider_implies_no_remote`; AC9
+`provider_rejects_wrapper_from_each_source`; AC10 `provider_model_rules` and `hub_model_not_passed`; AC11
+`provider_effort_accepted` and `provider_effort_refused`; AC12 `hub_provider_model_override` and `hub_provider_model_checked`;
+AC13 `no_base_url_override`; AC14 `provider_env_not_trusted` and `provider_not_allowed`; AC15 `no_go_pair_refused_by_work`; AC16
+`agents_provider_check`; AC17 `doctor_provider_rows_name_only`; AC18 `meta_row_only_with_a_go`; AC20 `readme_provider_section`;
+AC21 `adr_0002_provider_section`; AC22 `scope_guard_briefing_and_agent`; AC23 `hermetic_fake_engine_only`; AC25
+`provider_config_dir_isolated`; AC26 `provider_memory_linked`; AC27 `provider_resume_refused`; AC28 `provider_layer_flags`; AC29
+`anthropic_path_unchanged`; AC30 mapped to the AC3/AC4/AC6 checks; AC31 `deepseek_client_hub_refused`; AC32
+`deepseek_owned_hub_allowed`; AC33 `owned_by_owner_env_not_trusted`; AC34 `doctor_flags_client_hub_deepseek`. AC24: the five
+named suites are unchanged against `origin/s0-providers` (empty diff) and each printed `ok` above.
+
+SKIPs: AC7 and AC19 print the recorded reason and first assert the engines.md line (`The env block of the --settings layer
+**wins**`, and `Tool restriction (AC19): none needed for DeepSeek.`); both lines exist in `.ade/context/engines.md`, so the reasons
+match. Neither is a silent pass.
+
+Weak spots (not failures): AC22 depends on a local `origin/s0-providers` ref and fails with a clear message if it is absent
+(needs `git fetch`). AC23's "no other `claude` ran" is shown by the nonce marker plus PATH, not by tracing every process.
+
