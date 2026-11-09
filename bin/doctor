@@ -14,6 +14,11 @@ if [ -f "$H/.local/brain.db" ]; then st=$("$H/bin/brain" status 2>/dev/null | aw
   [ "${st:-1}" = 0 ] && line OK "brain index" "up to date" || line MISSING "brain index" "${st:-?} file(s) changed since indexing: bin/brain index"
 else line MISSING "brain index" "none yet: bin/brain index"; fi
 k="$(remote_key)"; [ -z "$k" ] || { [ -f "$k" ] && line OK "remote ssh key" "$k" || line MISSING "remote ssh key" "$k (ask the owner; never copy it into the hub)"; }
+# providers behind Claude Code (story SP): the key's name and whether it is stored, never its value
+for p in ${HUB_PROVIDERS_ALLOWED:-}; do s="$(provider_field "$p" secret)" || continue; l="$(provider_field "$p" label)"
+  "$H/bin/secret" --has "$s" && line OK "$l" "$s in the Keychain" || line MISSING "$l" "$s: bin/secret --set $s"
+  [ -z "$(provider_hub_refusal "$p")" ] || line MISSING "client hub" "HUB_PROVIDERS_ALLOWED lists $p, which needs HUB_OWNED_BY_OWNER=1 (owner's own hubs only, ADR 0002); remove it"
+done
 [ "${DOCTOR_OFFLINE:-}" = 1 ] && exit 0
 command -v gh >/dev/null && { gh auth status >/dev/null 2>&1 && line OK "github login" "$(gh api user --jq .login 2>/dev/null)" || line MISSING "github login" "gh auth login"; }
 for r in ${HUB_REPOS:-}; do gh api "repos/$r" >/dev/null 2>&1 && line OK "repo $r" "readable" || line MISSING "repo $r" "ask for access"; done

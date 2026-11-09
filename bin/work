@@ -1,17 +1,20 @@
 #!/bin/bash
-# bin/work [--claude CMD] [--model M] [--effort E] [--prompt TEXT] [--no-remote] [--agent-model [name=]M] [--agent-effort [name=]E] <folder> [repo]: deep work in a new Terminal, inside the project's checkout, with the folder's hooks.
+# bin/work [--provider P] [--claude CMD] [--model M] [--effort E] [--prompt TEXT] [--no-remote] [--agent-model [name=]M] [--agent-effort [name=]E] <folder> [repo]: deep work in a new Terminal, inside the project's checkout, with the folder's hooks.
 # A folder with no repo (none, or a "(none ...)" row) works in the hub folder itself. Clones a missing checkout (owner/name as given, else HUB_CODE_OWNER/<name>) to ${AGENT_CODE_DIR:-$HOME/Project}/<name> and records the path in ACCESS.md.
 # --claude picks the Claude install (default: claude_cmd in lib.sh). --model / --effort (anywhere in the arguments) pass through to claude for this session.
 # --prompt TEXT is the session's first message (passed last, after --, quoted for the launcher).
 # Remote Control is on for every session, named after the folder (projects/acme -> acme); --no-remote turns it off.
+# --provider P (default HUB_PROVIDER from hub.conf, else anthropic) runs Claude Code against another provider's endpoint (story SP,
+# .ade/context/providers.md): only providers in hub.conf's HUB_PROVIDERS_ALLOWED; plain claude; no Remote Control, no resume;
+# its own config dir; a merged settings file whose apiKeyHelper reads the key (the key is checked once, never written).
 # --agent-model / --agent-effort (repeatable) set the folder's specialist agents: a bare value sets all, name=value one (it wins). WORK_DRY=1 only prints the command. AGENT_TERMINAL=iterm uses iTerm.
 set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"
-USAGE="usage: bin/work [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--no-remote] [--agent-model [name=]M] [--agent-effort [name=]E] <projects|ops>/<name> [repo]"
-MODEL=""; EFFORT=""; PROMPT=""; REMOTE=1; CL="$(claude_cmd)"; POS=(); ASET=""
+USAGE="usage: bin/work [--provider P] [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--no-remote] [--agent-model [name=]M] [--agent-effort [name=]E] <projects|ops>/<name> [repo]"
+MODEL=""; EFFORT=""; PROMPT=""; REMOTE=1; CL="$(claude_cmd)"; POS=(); ASET=""; PROV="${HUB_PROVIDER:-anthropic}"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --model|--effort|--claude) [ $# -ge 2 ] || { echo "$USAGE" >&2; exit 2; }
-      case "$1" in --model) MODEL="$2" ;; --effort) EFFORT="$2" ;; *) CL="$2" ;; esac; shift 2 ;;
+    --model|--effort|--claude|--provider) [ $# -ge 2 ] || { echo "$USAGE" >&2; exit 2; }
+      case "$1" in --model) MODEL="$2" ;; --effort) EFFORT="$2" ;; --provider) PROV="$2" ;; *) CL="$2" ;; esac; shift 2 ;;
     --no-remote) REMOTE=0; shift ;;
     --prompt) [ $# -ge 2 ] && [ -n "$2" ] || { echo "$USAGE" >&2; exit 2; }; PROMPT="$2"; shift 2 ;;
     --agent-model|--agent-effort) [ $# -ge 2 ] || { echo "$USAGE" >&2; exit 2; }
@@ -27,9 +30,28 @@ done
 [ -z "$MODEL" ] || [[ "$MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
 case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
 # hub.conf defaults (HUB_MODEL, HUB_EFFORT, HUB_AGENT_MODEL); the command line wins
-[ -n "$MODEL" ] || MODEL="${HUB_MODEL:-}"; [ -n "$EFFORT" ] || EFFORT="${HUB_EFFORT:-}"
+# (a provider session never takes HUB_MODEL, which may be a full Anthropic id)
+[ -n "$MODEL" ] || [ "$PROV" != anthropic ] || MODEL="${HUB_MODEL:-}"; [ -n "$EFFORT" ] || EFFORT="${HUB_EFFORT:-}"
 [ -z "$MODEL" ] || [[ "$MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
 case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
+# the provider: allowed in hub.conf, permitted for this hub, plain claude, a go for each feature used, no resume, its own models
+[[ "$PROV" =~ ^[a-z0-9-]+$ ]] || { echo "work: bad provider name '$PROV'" >&2; exit 2; }
+case " ${HUB_PROVIDERS_ALLOWED:-anthropic} " in *" $PROV "*) ;; *) echo "work: provider $PROV is not in HUB_PROVIDERS_ALLOWED (hub.conf)" >&2; exit 2 ;; esac
+if [ "$PROV" != anthropic ]; then
+  provider_field "$PROV" base_url >/dev/null || { echo "work: no provider '$PROV' in bin/lib.sh" >&2; exit 2; }
+  why="$(provider_hub_refusal "$PROV")"; [ -z "$why" ] || { echo "work: $why" >&2; exit 2; }
+  [ "$CL" = claude ] || { echo "work: --provider $PROV needs plain claude, not '$CL' (a wrapper could send the session elsewhere)" >&2; exit 2; }
+  provider_feature_go "$PROV" focus || { echo "work: $(provider_no_go_reason "$PROV" focus)" >&2; exit 2; }
+  if [ -n "$EFFORT" ] || [[ "$ASET" == *"effort "* ]]; then provider_feature_go "$PROV" effort || { echo "work: $(provider_no_go_reason "$PROV" effort)" >&2; exit 2; }; fi
+  for a in ${POS[@]+"${POS[@]}"}; do case "$a" in --resume|--resume=*|--continue|-r|-c)
+    echo "work: a provider session does not resume history ($a would send it to $PROV); start a new session (--resume leak, .ade/context/engines.md)" >&2; exit 2 ;; esac; done
+  PMODELS="opus sonnet haiku $(for s in model opus sonnet haiku small; do provider_field "$PROV" "$s"; done | sort -u | tr '\n' ' ')"
+  [ -z "$MODEL" ] || provider_model_ok "$PROV" "$MODEL" || { echo "work: --model $MODEL is not a $PROV model ($PMODELS)" >&2; exit 2; }
+  PU="$(printf '%s' "$PROV" | tr 'a-z-' 'A-Z_')"; PM="HUB_${PU}_MODEL"; PS="HUB_${PU}_SMALL_MODEL"
+  for v in "$PM" "$PS"; do [ -z "${!v:-}" ] || provider_model_ok "$PROV" "${!v}" || { echo "work: $v=${!v} in hub.conf is not a $PROV model ($PMODELS)" >&2; exit 2; }; done
+  P_MAIN="$(provider_model_id "$PROV" "${!PM:-$(provider_field "$PROV" model)}")"; P_SMALL="$(provider_model_id "$PROV" "${!PS:-$(provider_field "$PROV" small)}")"
+  REMOTE=0
+fi
 F="${POS[0]:-}"; F="${F%/}"; WANT="${POS[1]:-}"   # projects/x/ (tab completion) = projects/x
 [ -n "$F" ] && [ -d "$H/$F" ] && [ -f "$H/$F/ACCESS.md" ] || { echo "$USAGE" >&2; exit 2; }
 A="$H/$F/ACCESS.md"
@@ -60,10 +82,12 @@ fi
 agents=""
 if ls "$H/$F/.claude/agents/"*.md >/dev/null 2>&1; then
   # the hub's agent model goes first, so any --agent-model on the command line overrides it
-  [ -n "${HUB_AGENT_MODEL:-}" ] && [[ "$HUB_AGENT_MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] && ASET="model  $HUB_AGENT_MODEL"$'\n'"$ASET"
-  agents=$(WORK_ASET="$ASET" python3 - "$H/$F/.claude/agents/"*.md <<'PY'
+  # (not in a provider session: HUB_AGENT_MODEL may be a full Anthropic id)
+  [ "$PROV" = anthropic ] && [ -n "${HUB_AGENT_MODEL:-}" ] && [[ "$HUB_AGENT_MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] && ASET="model  $HUB_AGENT_MODEL"$'\n'"$ASET"
+  agents=$(WORK_ASET="$ASET" WORK_PROVIDER="$PROV" WORK_MODELS="${PMODELS:-}" python3 - "$H/$F/.claude/agents/"*.md <<'PY'
 import json, sys, os
 out = {}
+prov = os.environ.get("WORK_PROVIDER", "anthropic")
 for p in sys.argv[1:]:
     t = open(p).read()
     if not t.startswith("---\n"): continue
@@ -72,22 +96,66 @@ for p in sys.argv[1:]:
     for l in head.splitlines():
         if ":" in l and not l.startswith((" ", "-")):
             k, _, v = l.partition(":"); fm[k.strip()] = v.strip()
+    name = fm.get("name") or os.path.basename(p)[:-3]
+    # one provider per Claude process: an agent naming another provider is left out (delegation is bin/agent's)
+    if (fm.get("provider") or prov) != prov:
+        print("work: delegatable (not in --agents): %s (provider %s)" % (name, fm["provider"]), file=sys.stderr); continue
     a = {"description": fm.get("description", ""), "prompt": body.strip()}
     if fm.get("tools"): a["tools"] = [x.strip() for x in fm["tools"].split(",")]
     if fm.get("model") and fm["model"] != "inherit": a["model"] = fm["model"]
-    out[fm.get("name") or os.path.basename(p)[:-3]] = a
+    out[name] = a
 # per-task overrides: "<model|effort> <name or empty> <value>"; bare values first, so name= wins
 sets = [l.split(" ") for l in os.environ.get("WORK_ASET", "").splitlines() if l]
 for k, n, v in sorted(sets, key=lambda s: s[1] != ""):
     if n and n not in out: sys.exit("work: no agent '%s' in this folder" % n)
     for name in ([n] if n else out): out[name][k] = v
+models = os.environ.get("WORK_MODELS", "").split()
+for name, a in out.items():
+    if models and "model" in a and a["model"] not in models:
+        sys.exit("work: agent %s model %s is not a %s model (%s)" % (name, a["model"], prov, " ".join(models)))
 print(json.dumps(out, separators=(",", ":")))
 PY
 ) || exit 2
 elif [ -n "$ASET" ]; then echo "work: $F has no specialist agents for --agent-model/--agent-effort" >&2; exit 2
 fi
+[ "$PROV" = anthropic ] || [ -z "$agents" ] || provider_feature_go "$PROV" agents || { echo "work: $(provider_no_go_reason "$PROV" agents)" >&2; exit 2; }
 sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }   # single-quoted for the launcher, a ' inside kept
-cmd="cd $(sq "$dir") && AGENT_FOLDER='$F' $CL --settings $(sq "$H/$F/.claude/settings.json")"
+TRAP='rm -f "$0"'
+if [ "$PROV" = anthropic ]; then
+  cmd="cd $(sq "$dir") && AGENT_FOLDER='$F' $CL --settings $(sq "$H/$F/.claude/settings.json")"
+else
+  SEC="$(provider_field "$PROV" secret)"; CD="$H/.local/providers/$PROV"
+  # fail closed: Claude Code never starts against another provider without its key (it would send the Anthropic login there).
+  # The key is read once into a subshell variable, checked and dropped; it is never printed, written or passed on.
+  if [ "${WORK_DRY:-}" != 1 ]; then
+    ( key="$("$H/bin/secret" "$SEC" 2>/dev/null)" && [ -n "$key" ]; r=$?; unset key; exit "$r" ) ||
+      { echo "work: no $(provider_field "$PROV" label) in the Keychain; store it with: bin/secret --set $SEC" >&2; exit 1; }
+  fi
+  # one settings file: the folder's (hooks kept) plus the provider layer, whose env wins; never a key value
+  [ -f "$H/$F/.claude/settings.json" ] || { echo "work: $F has no .claude/settings.json" >&2; exit 2; }
+  MS=$(mktemp "${TMPDIR:-/tmp}/agent-settings.XXXXXX") && chmod 600 "$MS" || exit 2
+  WORK_PENV="ANTHROPIC_BASE_URL=$(provider_field "$PROV" base_url)
+ANTHROPIC_MODEL=$P_MAIN
+ANTHROPIC_DEFAULT_OPUS_MODEL=$(provider_field "$PROV" opus)
+ANTHROPIC_DEFAULT_SONNET_MODEL=$(provider_field "$PROV" sonnet)
+ANTHROPIC_DEFAULT_HAIKU_MODEL=$(provider_field "$PROV" haiku)
+ANTHROPIC_SMALL_FAST_MODEL=$P_SMALL
+CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1" python3 - "$H/$F/.claude/settings.json" "$MS" "$(sq "$H/bin/secret") $SEC" <<'PY' || { rm -f "$MS"; exit 2; }
+import json, os, sys
+src, dst, helper = sys.argv[1:4]
+s = json.load(open(src))
+env = dict(s.get("env") or {})
+env.pop("CLAUDE_CODE_SUBAGENT_MODEL", None)   # agents' own model: values resolve through the slots
+for l in os.environ["WORK_PENV"].splitlines():
+    k, _, v = l.partition("="); env[k] = v
+s["env"] = env; s["apiKeyHelper"] = helper; s["skipWebFetchPreflight"] = True
+json.dump(s, open(dst, "w"), indent=2)
+PY
+  # its own config dir, so /model writes there and not to the owner's settings.json
+  cmd="cd $(sq "$dir") && AGENT_FOLDER='$F' CLAUDE_CONFIG_DIR=$(sq "$CD") $CL --settings $(sq "$MS")"
+  TRAP="rm -f \"\$0\" $(sq "$MS")"
+fi
 [ -n "$agents" ] && cmd="$cmd --agents $(printf %q "$agents")"
 [ -n "$MODEL" ] && cmd="$cmd --model $MODEL"
 [ -n "$EFFORT" ] && cmd="$cmd --effort $EFFORT"
@@ -95,8 +163,15 @@ cmd="cd $(sq "$dir") && AGENT_FOLDER='$F' $CL --settings $(sq "$H/$F/.claude/set
 [ -n "$PROMPT" ] && cmd="$cmd -- $(printf %q "$PROMPT")"
 echo "$cmd"
 [ "${WORK_DRY:-}" = 1 ] && exit 0
+if [ "$PROV" != anthropic ]; then   # the memory links bin/setup makes, inside the provider's config dir
+  plink() { local m="$CD/projects/$(encode_path "$1")/memory"; mkdir -p "$2" "$(dirname "$m")"
+    [ -L "$m" ] && [ "$(readlink "$m")" = "$2" ] && return 0
+    if [ -d "$m" ] && [ ! -L "$m" ]; then mv "$m" "$m.bak-$(date -u +%Y%m%dT%H%M%SZ)"; fi
+    rm -f "$m"; ln -s "$2" "$m"; }
+  plink "$H" "$H/memory"; plink "$dir" "$H/$F/memory"
+fi
 # the command (it may hold quotes from the agents JSON) runs from a launcher script, so no AppleScript escaping is needed
-L=$(mktemp "${TMPDIR:-/tmp}/agent-work.XXXXXX"); printf '#!/bin/bash\ntrap '"'"'rm -f "$0"'"'"' EXIT\n%s\n' "$cmd" > "$L"; chmod +x "$L"
+L=$(mktemp "${TMPDIR:-/tmp}/agent-work.XXXXXX"); printf '#!/bin/bash\ntrap %s EXIT\n%s\n' "$(sq "$TRAP")" "$cmd" > "$L"; chmod +x "$L"
 if [ "${AGENT_TERMINAL:-terminal}" = iterm ]; then
   osascript -e "tell application \"iTerm\" to create window with default profile command \"bash -l $L\""
 else
