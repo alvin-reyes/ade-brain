@@ -58,3 +58,25 @@ remote_dir() { echo "${AGENT_REMOTE_DIR:-${HUB_REMOTE_DIR:-}}"; }
 remote_target() { local u; u="$(remote_user)"; echo "${u:+$u@}$(remote_host)"; }
 staging_url() { echo "${AGENT_STAGING_URL:-${HUB_STAGING_URL:-}}"; }
 keychain_service() { echo "${AGENT_KEYCHAIN_SERVICE:-${HUB_KEYCHAIN_SERVICE:-$(hub_name)}}"; }
+# The sync lock: one bin/sync --yes/--auto run or session-end commit at a time. A directory holding its owner's pid.
+sync_lock_path() { echo "${AGENT_SYNC_LOCK:-$(state_dir)/sync.lock}"; }
+# seconds bin/sync --yes and bin/session-end wait for a busy lock (--auto never waits)
+sync_lock_wait() { echo "${AGENT_LOCK_WAIT:-30}"; }
+# sync_lock_take <lock> <wait-secs> [log-cmd]: take the lock, polling about once a second for up to <wait-secs>.
+# A stale lock (its owner pid is gone, or it is over 120 minutes old) is removed and `<log-cmd> removed stale lock` runs.
+# Returns 0 holding the lock (pid file = $$), 1 when a live owner still holds it.
+sync_lock_take() {
+  local k="$1" w="${2:-0}" lg="${3:-:}" op t0; t0=$(date +%s); mkdir -p "$(dirname "$k")" 2>/dev/null
+  while :; do
+    if [ -d "$k" ]; then
+      op=$(cat "$k/pid" 2>/dev/null)
+      if { [ -n "$op" ] && ! kill -0 "$op" 2>/dev/null; } || [ -n "$(find "$k" -maxdepth 0 -mmin +120 2>/dev/null)" ]; then
+        rm -rf "$k"; "$lg" "removed stale lock"; fi
+    fi
+    mkdir "$k" 2>/dev/null && { echo $$ > "$k/pid"; return 0; }
+    [ $(( $(date +%s) - t0 )) -lt "$w" ] || return 1
+    sleep 1
+  done
+}
+# sync_lock_release <lock>: removes the lock only when this process owns it
+sync_lock_release() { [ "$(cat "$1/pid" 2>/dev/null)" = "$$" ] && rm -rf "$1"; return 0; }

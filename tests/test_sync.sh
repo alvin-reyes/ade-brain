@@ -107,4 +107,22 @@ echo HUB_AUTO_SYNC=0 > hub.conf; echo f1 >> memory/MEMORY.md; h=$(git rev-parse 
 assert_eq "$(git rev-parse HEAD)" "$h" "auto sync off: no commit"; grep -q "skipped: auto sync is off" "$L" || fail "auto sync off logged"
 rm -f hub.conf
 export PATH="$P0"
+# --yes takes the same lock as --auto and waits for it (AGENT_LOCK_WAIT); review mode takes no lock
+make_hub; cd "$HUB"; git add -A >/dev/null 2>&1; git commit -q --no-verify -m base >/dev/null 2>&1
+export AGENT_LOCK_WAIT=3; K="$AGENT_SYNC_LOCK"; sleep 30 & sp=$!; trap 'kill $sp 2>/dev/null' EXIT
+CHECK=sync_yes_waits_for_lock
+mkdir "$K"; echo $sp > "$K/pid"; (sleep 2; date +%s > "$K.released"; rm -rf "$K") & r=$!
+echo y1 >> memory/MEMORY.md; bin/sync --yes >/dev/null; rc=$?; wait $r
+assert_eq "$rc" 0 "$CHECK: exit"; git log -1 --pretty=%s | grep -q "^sync " || fail "$CHECK: not committed"
+[ "$(git log -1 --format=%ct)" -ge "$(cat "$K.released")" ] || fail "$CHECK: committed before the lock was released"
+[ -d "$K" ] && fail "$CHECK: lock left behind"
+CHECK=sync_yes_busy_fails
+mkdir "$K"; echo $sp > "$K/pid"; echo y2 >> memory/MEMORY.md; h=$(git rev-parse HEAD)
+bin/sync --yes > /dev/null 2> "$K.err"; assert_eq "$?" 1 "$CHECK: exit"
+grep -q "another sync is running" "$K.err" || fail "$CHECK: no 'another sync is running' on stderr"
+assert_eq "$(git rev-parse HEAD)" "$h" "$CHECK: committed anyway"; [ -d "$K" ] || fail "$CHECK: other process's lock removed"
+git diff --cached --name-only | grep -qx memory/MEMORY.md && fail "$CHECK: files left staged"
+CHECK=sync_review_takes_no_lock
+out=$(bin/sync); assert_eq "$?" 0 "$CHECK: exit"; echo "$out" | grep -q "memory/MEMORY.md" || fail "$CHECK: pending change not listed"
+[ -d "$K" ] && [ "$(cat "$K/pid")" = "$sp" ] || fail "$CHECK: review touched the lock"
 echo ok

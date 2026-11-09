@@ -1,17 +1,50 @@
 #!/bin/bash
-# bin/session-end <folder>: SessionEnd hook (no model). Journals the commits made during the session, then
-# commits that folder's hub files and the journal to the hub (only those paths), then starts `bin/sync --auto` in the
-# background, which pushes (off: HUB_AUTO_SYNC=0 in hub.conf or AGENT_AUTO_SYNC=0; AGENT_SYNC_CMD replaces the command, for tests).
-# Reads the hook JSON on stdin; session start = first transcript line's timestamp, else the last 8 hours.
-# Writes nothing when no repo has commits since then. Always exits 0.
-. "$(dirname "$0")/lib.sh"; H="$(hub_root)"; F="${1:-.}"
-in=$(cat 2>/dev/null); now=$(date +%s)
+# bin/session-end [folder] [--since <epoch>]: SessionEnd hook (no model), also run by hand or by a launcher. Journals
+# the commits made during the session, then commits that folder's hub files and the journal to the hub (only those
+# paths) under the sync lock, releases it, then starts `bin/sync --auto` in the background, which pushes (off:
+# HUB_AUTO_SYNC=0 in hub.conf or AGENT_AUTO_SYNC=0; AGENT_SYNC_CMD replaces the command, for tests).
+# Reads the hook JSON on stdin for at most 2 s (a stdin that never closes, or a terminal, is not waited on).
+# Session start = --since, else the first transcript line's timestamp, else the last 8 hours.
+# The sync lock is waited on for up to AGENT_LOCK_WAIT seconds (default 30); still busy: nothing is committed and the
+# journal says so. With --since, one line per run goes to $AGENT_SESSION_END_LOG (default $(state_dir)/logs/session-end.log).
+# Writes nothing when no repo has commits since then. Exit 0; 2 = bad usage.
+. "$(dirname "$0")/lib.sh"; H="$(hub_root)"; F=""; SINCE=""; SINCE_GIVEN=0
+LOG="${AGENT_SESSION_END_LOG:-$(state_dir)/logs/session-end.log}"
+log() { mkdir -p "$(dirname "$LOG")" 2>/dev/null; echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') $*" >> "$LOG" 2>/dev/null; }
+outcome() { [ "$SINCE_GIVEN" = 1 ] && log "${F:-.} since=${SINCE:-?} $*"; return 0; }
+refuse() { echo "session-end: $*" >&2; outcome "refused: $*"; exit 2; }
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --since) SINCE_GIVEN=1; [ $# -ge 2 ] || refuse "--since needs an epoch"; SINCE="$2"; shift 2 ;;
+    -*) refuse "unknown argument: $1" ;;
+    *) [ -z "$F" ] || refuse "unknown argument: $1"; F="$1"; shift ;;
+  esac
+done
+F="${F:-.}"
+case "$SINCE_GIVEN$SINCE" in 1|1*[!0-9]*) refuse "--since must be an epoch (digits only), got '$SINCE'" ;; esac
+# stdin with a deadline (as bin/changes): a pipe that never closes must not hang the session end
+in=$(python3 -c '
+import json, os, select, sys, time
+raw = b""
+if not os.isatty(0):
+    end = time.time() + 2
+    while time.time() < end:
+        r, _, _ = select.select([0], [], [], max(0, end - time.time()))
+        if not r: break
+        b = os.read(0, 65536)
+        if not b: break
+        raw += b
+        try: json.loads(raw); break
+        except ValueError: pass
+sys.stdout.write(raw.decode("utf-8", "replace"))
+' 2>/dev/null); now=$(date +%s)
 tp=$(printf '%s' "$in" | sed -n 's/.*"transcript_path"[ ]*:[ ]*"\([^"]*\)".*/\1/p')
 start=""
 if [ -n "$tp" ] && [ -f "$tp" ]; then
   ts=$(head -1 "$tp" | sed -n 's/.*"timestamp"[ ]*:[ ]*"\([0-9T:-]*\).*/\1/p')
   [ -n "$ts" ] && start=$(date -j -u -f "%Y-%m-%dT%H:%M:%S" "$ts" +%s 2>/dev/null)
 fi
+[ "$SINCE_GIVEN" = 1 ] && start="$SINCE"
 [ -n "$start" ] || start=$((now - 8*3600))
 commits=""; pushed=""
 while IFS= read -r r; do
@@ -26,14 +59,16 @@ done <<EOR
 $(repos_of "$F")
 EOR
 commit_folder() {
+  RESULT="nothing to commit"
   [ "$F" = . ] && return 0
   cd "$H" || return 0
   [ -n "$(git status --porcelain -- "$F" journal 2>/dev/null)" ] || return 0
   git add -- "$F" journal 2>/dev/null
   local fs=(); while IFS= read -r x; do fs+=("$x"); done < <(git diff --cached --name-only -- "$F" journal)
-  [ ${#fs[@]} -gt 0 ] && git commit -q -m "session $F $(date -u '+%Y-%m-%d %H:%M')" -- "${fs[@]}" >/dev/null 2>&1
+  [ ${#fs[@]} -gt 0 ] && git commit -q -m "session $F $(date -u '+%Y-%m-%d %H:%M')" -- "${fs[@]}" >/dev/null 2>&1 && RESULT=committed
   return 0
 }
+pending() { [ "$F" != . ] && [ -n "$(cd "$H" && git status --porcelain -- "$F" journal 2>/dev/null)" ]; }
 refresh_brain() { [ -x "$H/bin/brain" ] && timeout 120 "$H/bin/brain" index >/dev/null 2>&1; return 0; }
 # then push the hub: bin/sync --auto, detached so the session never waits on it
 auto_sync() {
@@ -42,10 +77,25 @@ auto_sync() {
   else (cd "$H" && nohup "$H/bin/sync" --auto >/dev/null 2>&1 < /dev/null &) 2>/dev/null; fi
   return 0
 }
-[ -n "$commits" ] || { refresh_brain; commit_folder; auto_sync; exit 0; }
-files=$(find "$H/$F" -type f -not -path '*/.git/*' -mmin "-$(( (now - start) / 60 + 1 ))" 2>/dev/null | sed "s#^$H/$F/##" | head -10 | tr '\n' ',' | sed 's/,$//; s/,/, /g')
-"$(dirname "$0")/journal" "$F" "auto: session ended; commits: $commits${pushed:+; branches pushed: $pushed}; changed files in folder: ${files:-none}"
+line=""
+if [ -n "$commits" ]; then
+  files=$(find "$H/$F" -type f -not -path '*/.git/*' -mmin "-$(( (now - start) / 60 + 1 ))" 2>/dev/null | sed "s#^$H/$F/##" | head -10 | tr '\n' ',' | sed 's/,$//; s/,/, /g')
+  line="auto: session ended; commits: $commits${pushed:+; branches pushed: $pushed}; changed files in folder: ${files:-none}"
+fi
+# the journal line and the commit run under the sync lock, released before the follow-on sync needs it
+LOCK="$(sync_lock_path)"
+if sync_lock_take "$LOCK" "$(sync_lock_wait)" log; then
+  trap 'sync_lock_release "$LOCK"' EXIT
+  [ -n "$line" ] && "$(dirname "$0")/journal" "$F" "$line"
+  commit_folder
+  sync_lock_release "$LOCK"; trap - EXIT
+else
+  RESULT="skipped: sync lock busy"
+  if [ -n "$line" ] || pending; then
+    "$(dirname "$0")/journal" "$F" "${line:-auto: session ended; commits: none}; hub files not committed: sync lock busy"
+  fi
+fi
+outcome "$RESULT"
 refresh_brain
-commit_folder
 auto_sync
 exit 0
