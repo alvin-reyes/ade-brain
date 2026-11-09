@@ -76,8 +76,8 @@ bin/session-end projects/demo --launch x < /dev/null 2>&1 | grep -q -- "--launch
 assert_eq "$(git rev-parse HEAD)" "$h" "$CHECK: committed anyway"
 
 CHECK=waits_for_lock_then_commits; setup
-echo more >> projects/demo/STATE.md; hold_lock; (sleep 2; date +%s > "$AGENT_STATE/released"; rm -rf "$K") & r=$!
-hook projects/demo; rc=$?; wait $r
+echo more >> projects/demo/STATE.md; hold_lock; (sleep 1; date +%s > "$AGENT_STATE/released"; rm -rf "$K") & r=$!
+AGENT_LOCK_WAIT=5 hook projects/demo; rc=$?; wait $r
 assert_eq "$rc" 0 "$CHECK: exit"; committed || f "folder not committed"
 [ "$(git log -1 --format=%ct)" -ge "$(cat "$AGENT_STATE/released")" ] || f "committed before the lock was released"
 [ -d "$K" ] && f "lock left behind"
@@ -89,6 +89,7 @@ assert_eq "$(git rev-parse HEAD)" "$h" "$CHECK: committed under a busy lock"
 git status --porcelain | grep -q "projects/demo/STATE.md" || f "hub file not left uncommitted"
 assert_eq "$(grep -c "sync lock busy" "$J" 2>/dev/null)" 1 "$CHECK: journal lines about the busy lock"
 grep "sync lock busy" "$J" | grep -q newfix || f "skip line does not list the commits"
+grep -q "hub commit skipped: sync lock busy" "$J" || f "skip line does not say the hub commit was skipped: $(grep "sync lock busy" "$J")"
 [ -d "$K" ] || f "other process's lock removed"; assert_eq "$(cat "$K/pid")" "$SP" "$CHECK: lock owner"
 
 CHECK=stale_lock_removed; setup
@@ -102,10 +103,12 @@ assert_eq "$(grep -c "removed stale lock" "$AGENT_SESSION_END_LOG" 2>/dev/null)"
 CHECK=release_before_auto_sync; setup
 S="$(mktemp -d)"; printf '#!/bin/bash\nexit 0\n' > "$S/gitleaks"; chmod +x "$S/gitleaks"
 git config core.hooksPath .githooks; echo more >> projects/demo/STATE.md; echo m >> memory/MEMORY.md
+printf '#!/bin/bash\nif [ -d "%s" ]; then echo held; else echo free; fi > "%s"\n' "$K" "$AGENT_STATE/at-brain" > bin/brain
 PATH="$S:$PATH" AGENT_AUTO_SYNC=1 hook projects/demo; assert_eq "$?" 0 "$CHECK: exit"
 for i in $(seq 1 50); do grep -qE "synced:|skipped:|failed:|refused:" "$AGENT_SYNC_LOG" 2>/dev/null && break; sleep 0.2; done
 grep -q "skipped: another sync is running" "$AGENT_SYNC_LOG" 2>/dev/null && f "the follow-on sync found the lock held"
 grep -q "synced:" "$AGENT_SYNC_LOG" 2>/dev/null || f "the follow-on sync did not sync: $(cat "$AGENT_SYNC_LOG" 2>/dev/null)"
+assert_eq "$(cat "$AGENT_STATE/at-brain" 2>/dev/null)" free "$CHECK: lock state when the step before auto_sync ran"
 
 CHECK=since_writes_session_end_log; setup
 S0=$((NOW - 3600)); L="$AGENT_SESSION_END_LOG"
@@ -133,4 +136,70 @@ out=$(hook projects/demo); assert_eq "$?" 0 "$CHECK: busy"; assert_eq "$out" "" 
 kill $SP; wait $SP 2>/dev/null                                                   # now stale: owner gone
 out=$(hook projects/demo); assert_eq "$?" 0 "$CHECK: stale"; assert_eq "$out" "" "$CHECK: stale is quiet"
 out=$(hook projects/demo); assert_eq "$?" 0 "$CHECK: nothing to commit"; assert_eq "$out" "" "$CHECK: nothing to commit is quiet"
+CHECK=only_owner_releases_lock; setup
+# while session-end holds the lock, another live process's pid lands in the pid file (from the pre-commit hook):
+# the lock is no longer session-end's, so it must leave it
+sleep 30 & OP=$!; KIDS="$KIDS $OP"; D="$(mktemp -d)"
+printf '#!/bin/bash\necho %s > "%s/pid"\n' "$OP" "$K" > "$D/pre-commit"; chmod +x "$D/pre-commit"; git config core.hooksPath "$D"
+echo more >> projects/demo/STATE.md; hook projects/demo
+committed || f "folder not committed"
+[ -d "$K" ] || f "lock removed although its pid file named another live process"
+assert_eq "$(cat "$K/pid" 2>/dev/null)" "$OP" "$CHECK: lock owner"
+
+CHECK=stale_takeover_one_holder; setup
+# several takers on one dead-pid lock at once: each round exactly one of them holds it, and nobody loses it mid-hold
+B="$(mktemp -d)"; bad=""
+for it in $(seq 1 40); do
+  k="$B/lock$it"; o="$B/o$it"; mkdir "$k"; sh -c 'echo $$ > '"$k"'/pid'; : > "$o"
+  for t in 1 2 3 4; do
+    bash -c '. "$1"; while [ ! -e "$2.go" ]; do :; done; sleep 0.00$((RANDOM % 10))
+      if sync_lock_take "$2" 0; then echo won >> "$3"; sleep 0.3
+        [ "$(cat "$2/pid" 2>/dev/null)" = "$$" ] || echo lost >> "$3"; sync_lock_release "$2"; fi' _ "$HUB/bin/lib.sh" "$k" "$o" 2>/dev/null &
+  done
+  sleep 0.1; touch "$k.go"; wait
+  [ "$(grep -c won "$o")" = 1 ] && ! grep -q lost "$o" || bad="$bad $it($(grep -c won "$o") won, $(grep -c lost "$o") lost)"
+done
+[ -z "$bad" ] || f "rounds without exactly one holder:$bad"
+mkdir "$B/g"; sh -c 'echo $$ > '"$B/g"'/pid'; mkdir "$B/g.gc"; touch -t 202001010000 "$B/g.gc"   # a guard left by a killed run
+bash -c '. "$1"; sync_lock_take "$2" 0' _ "$HUB/bin/lib.sh" "$B/g" || f "an expired takeover guard blocks the lock for good"
+
+CHECK=lock_wait_is_at_least_w; setup
+# a whole-second clock that is about to tick (x.9 s) must not shorten the wait: a busy lock is waited on >= W seconds
+hold_lock
+el=$(bash -c '. "$1"; ms() { python3 -c "import time; print(int(time.time() * 1000))"; }; b=$(ms)
+  date() { if [ "$1" = +%s ]; then echo $(( (1000900 + $(ms) - b) / 1000 )); else command date "$@"; fi; }
+  b=$(ms); s=$b; sync_lock_take "$2" 2 && echo took; echo $(( $(ms) - s ))' _ "$HUB/bin/lib.sh" "$K")
+case "$el" in took*) f "took a live lock";; esac
+[ "$el" -ge 2000 ] || f "busy lock waited on for ${el} ms, want >= 2000"
+
+CHECK=since_digit_count; setup
+echo more >> projects/demo/STATE.md; h=$(git rev-parse HEAD)
+for v in 12345678 123456789012; do
+  bin/session-end projects/demo --since $v < /dev/null 2>/dev/null; assert_eq "$?" 2 "$CHECK: [$v] exit"
+done
+assert_eq "$(git rev-parse HEAD)" "$h" "$CHECK: committed anyway"
+bin/session-end projects/demo --since 123456789 < /dev/null; assert_eq "$?" 0 "$CHECK: 9 digits accepted"
+
+CHECK=since_not_echoed_into_log; setup
+L="$AGENT_SESSION_END_LOG"
+bin/session-end projects/demo --since 'evil' < /dev/null 2>/dev/null
+bin/session-end projects/demo --since "$(printf '12\nforged line')" < /dev/null 2>/dev/null
+assert_eq "$(wc -l < "$L" | tr -d ' ')" 2 "$CHECK: one line per run"
+grep -q -e evil -e forged "$L" && f "raw --since value in the log: $(cat "$L")"
+grep -c " refused: " "$L" | grep -qx 2 || f "refusals not logged: $(cat "$L")"
+
+CHECK=refused_commit_logged; setup
+D="$(mktemp -d)"; printf '#!/bin/bash\nexit 1\n' > "$D/pre-commit"; chmod +x "$D/pre-commit"; git config core.hooksPath "$D"
+echo more >> projects/demo/STATE.md; h=$(git rev-parse HEAD)
+bin/session-end projects/demo --since $((NOW - 3600)) < /dev/null; assert_eq "$?" 0 "$CHECK: exit"
+assert_eq "$(git rev-parse HEAD)" "$h" "$CHECK: committed through a refusing hook"
+tail -1 "$AGENT_SESSION_END_LOG" | grep -q " failed: commit refused$" || f "log: $(tail -1 "$AGENT_SESSION_END_LOG")"
+hook projects/demo; assert_eq "$?" 0 "$CHECK: hook path exit"
+
+CHECK=stdin_read_capped; setup
+# a writer that floods stdin: only about 1 MB is read, so the run is not slowed by the flood
+echo more >> projects/demo/STATE.md; s=$(date +%s)
+yes 2>/dev/null | bin/session-end projects/demo; el=$(( $(date +%s) - s ))
+committed || f "folder not committed"
+[ "$el" -le 5 ] || f "took ${el} s with a flooding stdin"
 echo ok

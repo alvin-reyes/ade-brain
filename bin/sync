@@ -1,6 +1,6 @@
 #!/bin/bash
 # bin/sync [--yes|--auto]: review, then commit and push hub files only (never repos/, never other staged files).
-# --yes and --auto hold the sync lock ($(state_dir)/sync.lock); --yes waits up to AGENT_LOCK_WAIT seconds (default 30) for it,
+# --yes and --auto hold the sync lock ($(state_dir)/sync.lock); --yes waits at least AGENT_LOCK_WAIT seconds (default 30) for it,
 # then exits 1 ("another sync is running").
 # --auto: unattended --yes for the 30-minute launchd job and the end of every focus session. One run at a time
 # (lock), skips while git is busy (index.lock, rebase, merge), refuses without gitleaks, rebases once if the push is rejected,
@@ -35,7 +35,7 @@ if [ "$MODE" = "--auto" ]; then
   [ "$(git config core.hooksPath)" = .githooks ] || { log "refused: core.hooksPath is not .githooks (run bin/setup), so the pre-commit secret check would not run"; exit 1; }
 fi
 if [ "$MODE" = "--yes" ]; then
-  # the same lock as --auto, but waits up to AGENT_LOCK_WAIT seconds (default 30) for it
+  # the same lock as --auto, but waits at least AGENT_LOCK_WAIT seconds (default 30) for it
   warn() { echo "$*" >&2; }
   LOCK="$(sync_lock_path)"; sync_lock_take "$LOCK" "$(sync_lock_wait)" warn || { echo "another sync is running" >&2; exit 1; }
   trap 'sync_lock_release "$LOCK"' EXIT

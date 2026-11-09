@@ -111,8 +111,8 @@ export PATH="$P0"
 make_hub; cd "$HUB"; git add -A >/dev/null 2>&1; git commit -q --no-verify -m base >/dev/null 2>&1
 export AGENT_LOCK_WAIT=3; K="$AGENT_SYNC_LOCK"; sleep 30 & sp=$!; trap 'kill $sp 2>/dev/null' EXIT
 CHECK=sync_yes_waits_for_lock
-mkdir "$K"; echo $sp > "$K/pid"; (sleep 2; date +%s > "$K.released"; rm -rf "$K") & r=$!
-echo y1 >> memory/MEMORY.md; bin/sync --yes >/dev/null; rc=$?; wait $r
+mkdir "$K"; echo $sp > "$K/pid"; (sleep 1; date +%s > "$K.released"; rm -rf "$K") & r=$!
+echo y1 >> memory/MEMORY.md; AGENT_LOCK_WAIT=5 bin/sync --yes >/dev/null; rc=$?; wait $r
 assert_eq "$rc" 0 "$CHECK: exit"; git log -1 --pretty=%s | grep -q "^sync " || fail "$CHECK: not committed"
 [ "$(git log -1 --format=%ct)" -ge "$(cat "$K.released")" ] || fail "$CHECK: committed before the lock was released"
 [ -d "$K" ] && fail "$CHECK: lock left behind"
@@ -125,4 +125,12 @@ git diff --cached --name-only | grep -qx memory/MEMORY.md && fail "$CHECK: files
 CHECK=sync_review_takes_no_lock
 out=$(bin/sync); assert_eq "$?" 0 "$CHECK: exit"; echo "$out" | grep -q "memory/MEMORY.md" || fail "$CHECK: pending change not listed"
 [ -d "$K" ] && [ "$(cat "$K/pid")" = "$sp" ] || fail "$CHECK: review touched the lock"
+CHECK=sync_yes_only_owner_releases
+# while --yes holds the lock, another live process's pid lands in the pid file (from the pre-commit hook): --yes leaves it
+rm -rf "$K"; D="$(mktemp -d)"; git config core.hooksPath "$D"
+printf '#!/bin/bash\necho %s > "%s/pid"\n' "$sp" "$K" > "$D/pre-commit"; chmod +x "$D/pre-commit"
+echo y3 >> memory/MEMORY.md; bin/sync --yes >/dev/null; assert_eq "$?" 0 "$CHECK: exit"
+git log -1 --pretty=%s | grep -q "^sync " || fail "$CHECK: not committed"
+[ -d "$K" ] || fail "$CHECK: lock removed although its pid file named another live process"
+assert_eq "$(cat "$K/pid" 2>/dev/null)" "$sp" "$CHECK: lock owner"
 echo ok

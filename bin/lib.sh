@@ -62,21 +62,43 @@ keychain_service() { echo "${AGENT_KEYCHAIN_SERVICE:-${HUB_KEYCHAIN_SERVICE:-$(h
 sync_lock_path() { echo "${AGENT_SYNC_LOCK:-$(state_dir)/sync.lock}"; }
 # seconds bin/sync --yes and bin/session-end wait for a busy lock (--auto never waits)
 sync_lock_wait() { echo "${AGENT_LOCK_WAIT:-30}"; }
-# sync_lock_take <lock> <wait-secs> [log-cmd]: take the lock, polling about once a second for up to <wait-secs>.
+# sync_lock_take <lock> <wait-secs> [log-cmd]: take the lock, trying once a second; a busy lock is retried <wait-secs>
+# times after the first try (attempts are counted, so the wait is at least <wait-secs> seconds).
 # A stale lock (its owner pid is gone, or it is over 120 minutes old) is removed and `<log-cmd> removed stale lock` runs.
 # Returns 0 holding the lock (pid file = $$), 1 when a live owner still holds it.
 sync_lock_take() {
-  local k="$1" w="${2:-0}" lg="${3:-:}" op t0; t0=$(date +%s); mkdir -p "$(dirname "$k")" 2>/dev/null
+  local k="$1" w="${2:-0}" lg="${3:-:}" n=0; mkdir -p "$(dirname "$k")" 2>/dev/null
   while :; do
-    if [ -d "$k" ]; then
-      op=$(cat "$k/pid" 2>/dev/null)
-      if { [ -n "$op" ] && ! kill -0 "$op" 2>/dev/null; } || [ -n "$(find "$k" -maxdepth 0 -mmin +120 2>/dev/null)" ]; then
-        rm -rf "$k"; "$lg" "removed stale lock"; fi
-    fi
     mkdir "$k" 2>/dev/null && { echo $$ > "$k/pid"; return 0; }
-    [ $(( $(date +%s) - t0 )) -lt "$w" ] || return 1
-    sleep 1
+    _sync_lock_reap "$k" "$lg" && continue
+    [ "$n" -lt "$w" ] || return 1
+    n=$((n + 1)); sleep 1
   done
+}
+_sync_lock_stale() {
+  local op; op=$(cat "$1/pid" 2>/dev/null)
+  { [ -n "$op" ] && ! kill -0 "$op" 2>/dev/null; } || [ -n "$(find "$1" -maxdepth 0 -mmin +120 2>/dev/null)" ]
+}
+# _sync_lock_reap <lock> <log-cmd>: removes <lock> if it is stale; 0 = removed. Only one taker at a time may judge and
+# remove (the guard <lock>.gc, a mkdir), and the lock is judged again inside the guard, so two takers that both saw the
+# same stale lock cannot remove the lock one of them has just taken. The judged directory is moved aside and removed
+# only if it is still the one judged (same inode); otherwise it is put back and the lock counts as busy.
+# A guard left by a killed run expires after a minute.
+_sync_lock_reap() {
+  local k="$1" g="$1.gc" s="$1.stale.$$" i r=1
+  _sync_lock_stale "$k" || return 1
+  [ -n "$(find "$g" -maxdepth 0 -mmin +1 2>/dev/null)" ] && rm -rf "$g"
+  mkdir "$g" 2>/dev/null || return 1
+  i=$(stat -f %i "$k" 2>/dev/null)
+  if [ -n "$i" ] && _sync_lock_stale "$k"; then
+    rm -rf "$s"
+    if mv "$k" "$s" 2>/dev/null; then
+      if [ "$(stat -f %i "$s" 2>/dev/null)" = "$i" ]; then rm -rf "$s"; "$lg" "removed stale lock"; r=0
+      else [ -e "$k" ] || mv "$s" "$k" 2>/dev/null; rm -rf "$s"; fi
+    fi
+  fi
+  rmdir "$g" 2>/dev/null
+  return $r
 }
 # sync_lock_release <lock>: removes the lock only when this process owns it
 sync_lock_release() { [ "$(cat "$1/pid" 2>/dev/null)" = "$$" ] && rm -rf "$1"; return 0; }
