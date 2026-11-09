@@ -114,6 +114,10 @@ Other providers (OpenRouter, Ollama, a second account) work through a wrapper co
   is busy, refused without gitleaks or without the git hooks (`bin/setup`), every commit to push scanned first, one
   rebase retry, never a force push. One line per run in `~/.agent-hub/<name>/logs/sync.log`. Off: `HUB_AUTO_SYNC=0`
   in `hub.conf` (or `bin/init --auto-sync off`), then `bin/schedule install` again.
+  `bin/sync --yes` and the session-end commit share the same lock (`~/.agent-hub/<name>/sync.lock`) and wait at least
+  `AGENT_LOCK_WAIT` seconds (default 30) for it; `bin/sync --yes` now exits 1 (`another sync is running`) when the lock
+  stays busy. `bin/session-end <folder> --since <epoch>` (run by hand or a launcher) logs one line per run to
+  `~/.agent-hub/<name>/logs/session-end.log` (`AGENT_SESSION_END_LOG` overrides it).
 - **Monitors**: any executable `projects/<x>/monitors.d/*.sh` or `ops/<x>/monitors.d/*.sh`. Each is read-only; its first
   output line is the status (a leading timestamp such as `Fri 10:05 UTC |` is ignored), and lines starting with `ALERT`
   alert. `bin/monitor` journals a status change and each new ALERT once, and shows a notification for an ALERT. Under
