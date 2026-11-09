@@ -1,6 +1,6 @@
 # S1: bin/session-end without a hook
 
-Status: Done (2026-11-09, QA). Source: `docs/plans/2026-11-09-other-ai-cli-agents.md`, section "S1: `bin/session-end` without a hook".
+Status: Reopened (2026-11-09): QA passed, but the adversarial code review blocked it (lock race M1, tests M2–M4); back with the developer. Source: `docs/plans/2026-11-09-other-ai-cli-agents.md`, section "S1: `bin/session-end` without a hook".
 Verification command: `bash tests/run.sh` (architecture verification command, `docs/architecture.md`).
 
 ## Goal
