@@ -1,18 +1,22 @@
 #!/bin/bash
-# bin/work [--claude CMD] [--model M] [--effort E] [--prompt TEXT] [--no-remote] [--agent-model [name=]M] [--agent-effort [name=]E] <folder> [repo]: deep work in a new Terminal, inside the project's checkout, with the folder's hooks.
+# bin/work [--claude CMD] [--model M] [--effort E] [--prompt TEXT] [--no-remote] [--force] [--agent-model [name=]M] [--agent-effort [name=]E] <folder> [repo]: deep work in a new Terminal, inside the project's checkout, with the folder's hooks.
 # A folder with no repo (none, or a "(none ...)" row) works in the hub folder itself. Clones a missing checkout (owner/name as given, else HUB_CODE_OWNER/<name>) to ${AGENT_CODE_DIR:-$HOME/Project}/<name> and records the path in ACCESS.md.
 # --claude picks the Claude install (default: claude_cmd in lib.sh). --model / --effort (anywhere in the arguments) pass through to claude for this session.
 # --prompt TEXT is the session's first message (passed last, after --, quoted for the launcher).
 # Remote Control is on for every session, named after the folder (projects/acme -> acme); --no-remote turns it off.
+# A folder whose session is already running with Remote Control (a claude process with --remote-control <name>) is refused
+# with exit 3 before anything
+# is opened or changed; --force opens another anyway.
 # --agent-model / --agent-effort (repeatable) set the folder's specialist agents: a bare value sets all, name=value one (it wins). WORK_DRY=1 only prints the command. AGENT_TERMINAL=iterm uses iTerm.
 set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"
-USAGE="usage: bin/work [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--no-remote] [--agent-model [name=]M] [--agent-effort [name=]E] <projects|ops>/<name> [repo]"
-MODEL=""; EFFORT=""; PROMPT=""; REMOTE=1; CL="$(claude_cmd)"; POS=(); ASET=""
+USAGE="usage: bin/work [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--no-remote] [--force] [--agent-model [name=]M] [--agent-effort [name=]E] <projects|ops>/<name> [repo]"
+MODEL=""; EFFORT=""; PROMPT=""; REMOTE=1; FORCE=0; CL="$(claude_cmd)"; POS=(); ASET=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --model|--effort|--claude) [ $# -ge 2 ] || { echo "$USAGE" >&2; exit 2; }
       case "$1" in --model) MODEL="$2" ;; --effort) EFFORT="$2" ;; *) CL="$2" ;; esac; shift 2 ;;
     --no-remote) REMOTE=0; shift ;;
+    --force) FORCE=1; shift ;;
     --prompt) [ $# -ge 2 ] && [ -n "$2" ] || { echo "$USAGE" >&2; exit 2; }; PROMPT="$2"; shift 2 ;;
     --agent-model|--agent-effort) [ $# -ge 2 ] || { echo "$USAGE" >&2; exit 2; }
       k="${1#--agent-}"; v="${2#*=}"; n=""; [ "$v" = "$2" ] || n="${2%%=*}"
@@ -32,6 +36,15 @@ case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be
 case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
 F="${POS[0]:-}"; F="${F%/}"; WANT="${POS[1]:-}"   # projects/x/ (tab completion) = projects/x
 [ -n "$F" ] && [ -d "$H/$F" ] && [ -f "$H/$F/ACCESS.md" ] || { echo "$USAGE" >&2; exit 2; }
+# one session per folder: refuse when a claude process already runs with --remote-control <name> (whole word; a grep or
+# editor that mentions it is not a session; the program must be claude*, as an exec'ing wrapper leaves it; a session
+# started with --no-remote has no name and is not seen). Full command lines (-ww): plain `ps aux` cuts long ones (a folder with many
+# agents) short. ps runs to completion before the filter starts, so the filter never sees itself. Read-only, so dry runs check too.
+if [ "$REMOTE" = 1 ] && [ "$FORCE" = 0 ]; then
+  procs="$(ps -axww -o pid=,command= 2>/dev/null)"
+  pid=$(awk -v n="${F##*/}" 'p=="" {b=$2; sub(/.*\//,"",b); if(b ~ /^claude/) for(i=3;i<NF;i++) if($i=="--remote-control" && $(i+1)==n) p=$1} END{print p}' <<<"$procs")
+  [ -z "$pid" ] || { echo "work: ${F##*/} is already running (pid $pid); use it, or stop it first (--force opens another)" >&2; exit 3; }
+fi
 A="$H/$F/ACCESS.md"
 # Code table rows (or rows appended later with an absolute checkout) as "<repo>|<checkout>" (first = default)
 rows=$(awk -F'|' '/^## /{c=($0=="## Code")} /^\|/{n=$2; k=$3; gsub(/^[ \t]+|[ \t]+$/,"",n); gsub(/^[ \t]+|[ \t]+$/,"",k);

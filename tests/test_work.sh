@@ -139,4 +139,18 @@ rm hub.conf
 AGENT_CLAUDE=claude-other WORK_DRY=1 bin/work projects/demo | grep -q "' claude-other --settings" || fail "AGENT_CLAUDE picks the install"
 WORK_DRY=1 bin/work --claude claude-koneksi projects/demo | grep -q "' claude-koneksi --settings" || fail "--claude picks the install"
 WORK_DRY=1 bin/work --claude 'x;rm' projects/demo >/dev/null 2>&1; assert_eq "$?" "2" "unsafe claude command name"
+# one session per folder: a running --remote-control <name> process (full command line, as ps -axww shows it) is refused
+P="$(mktemp -d)"; long="$(printf 'x%.0s' $(seq 1 3000))"   # a command line far longer than plain ps aux shows
+fake_ps() { printf '#!/bin/bash\necho "$*" > "%s/ps.args"\nprintf "%%s\\n" %s\n' "$P" "$1" > "$P/ps"; chmod +x "$P/ps"; }
+fake_ps "'  4242 /x/claude --settings s --agents $long --remote-control demo -- go'"
+out=$(PATH="$P:$PATH" WORK_DRY=1 bin/work projects/demo 2>&1); assert_eq "$?" "3" "running session refused"
+echo "$out" | grep -q "demo is already running (pid 4242)" || fail "refusal names the pid: $out"
+echo "$out" | grep -q "^cd " && fail "nothing prepared for a running session"
+assert_contains "$P/ps.args" "-axww" "ps shows full command lines"
+# negatives: nothing running, a longer name, another folder, a non-claude mention, --force, --no-remote all proceed
+for ps_out in "''" "'  7 /x/claude --remote-control demo-x'" "'  8 /x/claude --remote-control other'" "'  9 grep -q --remote-control demo'" "'  10 vim notes about --remote-control'"; do
+  fake_ps "$ps_out"; PATH="$P:$PATH" WORK_DRY=1 bin/work projects/demo >/dev/null 2>&1; assert_eq "$?" "0" "proceeds with [$ps_out]"
+done
+fake_ps "'  4242 /x/claude --remote-control demo'"
+for flag in --force --no-remote; do PATH="$P:$PATH" WORK_DRY=1 bin/work $flag projects/demo >/dev/null 2>&1; assert_eq "$?" "0" "$flag proceeds"; done
 echo ok
