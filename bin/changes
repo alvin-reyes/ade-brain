@@ -5,6 +5,7 @@
 # their description). The session's own folder is not echoed back. One snapshot per session (hook stdin session_id);
 # the first prompt only records a baseline. Output capped. Always exits 0.
 . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; ST="$(state_dir)"; mkdir -p "$ST"
+[ -z "${1:-}" ] || session_mark "$1" busy   # a focus session shows as busy in bin/sessions from its prompt on
 # the script goes in -c so stdin stays the hook JSON (read in Python with a deadline: bash 3.2's read -t drops partial input)
 PY_SRC=$(cat <<'PY'
 import glob, json, os, re, select, time

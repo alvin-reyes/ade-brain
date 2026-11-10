@@ -114,7 +114,10 @@ echo "$cmd"
 SD="$(state_dir)/sessions"
 reg=$(printf 'R=%q.$$\nmkdir -p %q && printf '"'"'name=%%s\\nfolder=%%s\\nlauncher=%%s\\nparent=%%s\\nstarted=%%s\\ncwd=%%s\\n'"'"' %q %q "$$" %q "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)" %q > "$R"' \
   "$SD/${F##*/}" "$SD" "${F##*/}" "$F" "${CLAUDE_PID:--}" "$dir")
-L=$(mktemp "${TMPDIR:-/tmp}/agent-work.XXXXXX"); printf '#!/bin/bash\n%s\ntrap '"'"'rm -f "$0" "$R"'"'"' EXIT\n%s\n' "$reg" "$cmd" > "$L"; chmod +x "$L"
+# a terminal can carry the session variables of a Claude session that has exited (ADE hands them to every sub-terminal):
+# with them the new session starts as a child of that dead session and no other session can list or message it
+SCRUB='unset CLAUDE_PID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN CLAUDE_CODE_SESSION_ID CLAUDE_CODE_BRIDGE_SESSION_ID CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_ENTRYPOINT CLAUDECODE'
+L=$(mktemp "${TMPDIR:-/tmp}/agent-work.XXXXXX"); printf '#!/bin/bash\n%s\ntrap '"'"'rm -f "$0" "$R"'"'"' EXIT\n%s\n%s\n' "$reg" "$SCRUB" "$cmd" > "$L"; chmod +x "$L"
 # WORK_NO_OPEN=1 (tests): write the launcher, print its path, open nothing
 [ "${WORK_NO_OPEN:-}" = 1 ] && { echo "launcher: $L"; L=""; exit 0; }
 if [ "${AGENT_TERMINAL:-terminal}" = iterm ]; then
