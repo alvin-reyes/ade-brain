@@ -109,7 +109,14 @@ cmd="cd $(sq "$dir") && AGENT_FOLDER='$F' $CL --settings $(sq "$H/$F/.claude/set
 echo "$cmd"
 [ "${WORK_DRY:-}" = 1 ] && exit 0
 # the command (it may hold quotes from the agents JSON) runs from a launcher script, so no AppleScript escaping is needed
-L=$(mktemp "${TMPDIR:-/tmp}/agent-work.XXXXXX"); printf '#!/bin/bash\ntrap '"'"'rm -f "$0"'"'"' EXIT\n%s\n' "$cmd" > "$L"; chmod +x "$L"
+# the launcher registers the session in $(state_dir)/sessions/<name>.<launcher pid> while it runs (bin/sessions lists them);
+# parent = the Claude session that ran bin/work ($CLAUDE_PID), so an orchestrator can list its own children
+SD="$(state_dir)/sessions"
+reg=$(printf 'R=%q.$$\nmkdir -p %q && printf '"'"'name=%%s\\nfolder=%%s\\nlauncher=%%s\\nparent=%%s\\nstarted=%%s\\ncwd=%%s\\n'"'"' %q %q "$$" %q "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)" %q > "$R"' \
+  "$SD/${F##*/}" "$SD" "${F##*/}" "$F" "${CLAUDE_PID:--}" "$dir")
+L=$(mktemp "${TMPDIR:-/tmp}/agent-work.XXXXXX"); printf '#!/bin/bash\n%s\ntrap '"'"'rm -f "$0" "$R"'"'"' EXIT\n%s\n' "$reg" "$cmd" > "$L"; chmod +x "$L"
+# WORK_NO_OPEN=1 (tests): write the launcher, print its path, open nothing
+[ "${WORK_NO_OPEN:-}" = 1 ] && { echo "launcher: $L"; L=""; exit 0; }
 if [ "${AGENT_TERMINAL:-terminal}" = iterm ]; then
   osascript -e "tell application \"iTerm\" to create window with default profile command \"bash -l $L\""
 else
