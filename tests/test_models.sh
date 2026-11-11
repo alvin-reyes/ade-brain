@@ -51,6 +51,11 @@ out=$(sub env -u CLAUDE_CODE_SUBAGENT_MODEL); echo "$out" | grep -qF ':-sonnet}'
 sed -i.bak 's/^HUB_SUBAGENT_MODEL=.*/HUB_SUBAGENT_MODEL="x;y"/' "$D4/hub.conf"
 sub env -u CLAUDE_CODE_SUBAGENT_MODEL >/dev/null 2>&1; assert_eq "$?" "2" "bad HUB_SUBAGENT_MODEL refused"
 sub env 'CLAUDE_CODE_SUBAGENT_MODEL=a b' >/dev/null 2>&1; assert_eq "$?" "2" "bad inherited subagent model refused"
+sub env 'CLAUDE_CODE_SUBAGENT_MODEL=a"b' >/dev/null 2>&1; assert_eq "$?" "2" "a quote in the inherited subagent model refused"
+# a 1M-context suffix (engines.md: sonnet[1m]) is a valid name ADE may set: kept, and exported as given
+out=$(sub env 'CLAUDE_CODE_SUBAGENT_MODEL=sonnet[1m]') || fail "an inherited sonnet[1m] was refused"
+x=$(echo "$out" | grep '^export CLAUDE_CODE_SUBAGENT_MODEL=')
+assert_eq "$(env -u CLAUDE_CODE_SUBAGENT_MODEL bash -c "$x; echo \$CLAUDE_CODE_SUBAGENT_MODEL")" "sonnet[1m]" "a bracket suffix reaches the session"
 # --- BMAD overrides: review lenses pass no model (they follow the subagent default), code on Opus, quick code review ---
 for t in bmad-build bmad-code-review; do
   grep -q 'pass no model' "$REPO/_bmad/custom/$t.toml" || fail "$t review lenses pass no model"

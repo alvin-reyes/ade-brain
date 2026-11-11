@@ -444,7 +444,7 @@ sequenceDiagram
 
 <section id="deepwork">
   <h2>Deep work: <code>bin/work</code></h2>
-  <pre class="cmd"><code>bin/work [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--no-remote]
+  <pre class="cmd"><code>bin/work [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--no-remote] [--force]
          [--agent-model [name=]M] [--agent-effort [name=]E] &lt;projects|ops&gt;/&lt;name&gt; [repo]</code></pre>
   <div class="diagram"><pre class="mermaid">
 flowchart TD
@@ -463,6 +463,9 @@ flowchart TD
   <ul>
     <li><b>Remote Control</b> is on for every session, named after the folder (<code>projects/acme</code> → <code>acme</code>), so you can follow it from your phone.
       <code>--no-remote</code> turns it off. Use that with API-key wrappers such as OpenRouter or Ollama, because Remote Control needs a claude.ai login.</li>
+    <li><b>One session per folder.</b> When that folder's session is already running (a <code>claude</code> process with
+      <code>--remote-control &lt;name&gt;</code>), <code>bin/work</code> refuses with exit 3 and names its pid; <code>--force</code> opens another anyway.
+      <code>bin/sessions</code> lists the running sessions <code>bin/work</code> started; <code>--mine</code> keeps the ones the calling Claude session started.</li>
     <li><code>--prompt "&lt;task&gt;"</code> sends the session's first message.</li>
     <li><b>Specialist agents.</b> Markdown agent files in <code>&lt;folder&gt;/.claude/agents/</code> (front matter <code>name</code>, <code>description</code>, optional <code>tools</code> and <code>model</code>) are passed to the session as <code>--agents</code>.
       <code>bin/new</code> doesn't create any; add them yourself. <code>HUB_AGENT_MODEL</code> is their default model.
@@ -723,6 +726,7 @@ flowchart LR
       <tr><td><code>bin/doctor</code></td><td>OK / MISSING for tools, the Claude install, memory link, brain index, SSH key, GitHub login, repos, remote box, staging, embeddings, secrets</td></tr>
       <tr><td><code>bin/context [folder] [--rules]</code></td><td>every folder's state, or one folder's state and journal</td></tr>
       <tr><td><code>bin/work [opts] &lt;folder&gt; [repo]</code></td><td>deep work in a new Terminal in the folder's checkout</td></tr>
+      <tr><td><code>bin/sessions [--mine | --parent PID]</code></td><td>the focus sessions <code>bin/work</code> started that are still running</td></tr>
       <tr><td><code>bin/new projects/&lt;name&gt;</code> · <code>ops/&lt;name&gt;</code></td><td>a new folder and its agent; never overwrites</td></tr>
       <tr><td><code>bin/journal &lt;folder&gt; "&lt;text&gt;"</code></td><td>one dated entry (<code>hub</code> for the root)</td></tr>
       <tr><td><code>bin/brain index [--full]</code> · <code>search [-n N] [--json] &lt;q&gt;</code> · <code>status</code></td><td>the searchable memory</td></tr>

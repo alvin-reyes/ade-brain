@@ -1,4 +1,4 @@
-# Token trim (Alvin, 9 Nov 2026): reviewer subagents run on the subagent default (ADE's, else Sonnet; 11 Nov 2026);
+# Token trim (owner, 9 Nov 2026): reviewer subagents run on the subagent default (ADE's, else Sonnet; 11 Nov 2026);
 # gathering, triage and presenting stay on the session's model.
 # Quick by default (11 Nov 2026): one lens instead of four or five; "thorough" in the request runs the thorough set.
 [workflow]

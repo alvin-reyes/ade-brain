@@ -1,4 +1,4 @@
-# Token trim + code on Opus (Alvin, 9 Nov 2026): build in-session up to 200 lines (BMAD default 100);
+# Token trim + code on Opus (owner, 9 Nov 2026): build in-session up to 200 lines (BMAD default 100);
 # code is written only by Opus (5.5 or later); its review lenses pass no model, so they run on the subagent default (ADE's, else Sonnet; 11 Nov 2026), as in bmad-code-review.toml.
 [workflow]
 persistent_facts = [

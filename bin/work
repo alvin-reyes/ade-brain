@@ -43,7 +43,9 @@ case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be
 # subagents that name no model: an inherited CLAUDE_CODE_SUBAGENT_MODEL (ADE sets models) wins, else hub.conf, else sonnet.
 # Set in the launcher, never in settings (a settings env would replace ADE's). An explicit Agent or agent-file model still wins.
 SUBM="${CLAUDE_CODE_SUBAGENT_MODEL:-${HUB_SUBAGENT_MODEL:-sonnet}}"
-[ "$PROV" != anthropic ] || [[ "$SUBM" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "work: bad subagent model '$SUBM' (CLAUDE_CODE_SUBAGENT_MODEL or HUB_SUBAGENT_MODEL)" >&2; exit 2; }
+# names may carry a context suffix such as sonnet[1m]; nothing that could end the launcher's double quotes ($ ` " \)
+SUBRE='^[][A-Za-z0-9._:/-]+$'
+[ "$PROV" != anthropic ] || [[ "$SUBM" =~ $SUBRE ]] || { echo "work: bad subagent model '$SUBM' (CLAUDE_CODE_SUBAGENT_MODEL or HUB_SUBAGENT_MODEL)" >&2; exit 2; }
 # hub.conf defaults (HUB_MODEL, HUB_EFFORT, HUB_AGENT_MODEL); the command line wins
 # (a provider session never takes HUB_MODEL, which may be a full Anthropic id)
 [ -n "$MODEL" ] || [ "$PROV" != anthropic ] || MODEL="${HUB_MODEL:-}"; [ -n "$EFFORT" ] || EFFORT="${HUB_EFFORT:-}"
