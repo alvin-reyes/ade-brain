@@ -1,4 +1,4 @@
-# 0002: Subagents on the subagent default (Sonnet unless ADE says otherwise), code on Opus
+# 0003: Subagents on the subagent default (Sonnet unless ADE says otherwise), code on Opus
 
 - Status: Accepted (owner, 11 Nov 2026; revised the same day so ADE sets the models)
 - Context: token use was high. Most BMAD skills launch subagents without naming a model, so in an Opus session they

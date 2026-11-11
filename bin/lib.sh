@@ -42,8 +42,62 @@ _timeout_fallback() {
 if ! command -v timeout >/dev/null; then
   if command -v gtimeout >/dev/null; then timeout() { gtimeout "$@"; }; else timeout() { _timeout_fallback "$@"; }; fi
 fi
+# Providers behind Claude Code (story SP; contract in .ade/context/providers.md, findings in .ade/context/engines.md).
+# One row per provider; anthropic (Claude Code's own login) has no row. Base URLs live only here: no override, ever.
+# Fields: base_url, secret (Keychain name for bin/secret), label (doctor), model/opus/sonnet/haiku/small (slots),
+# owner_only (1 = only in a hub with HUB_OWNED_BY_OWNER=1; owner rule 2026-11-09, ADR 0002; a row without it is owner-only too).
+providers() { echo "deepseek glm"; }
+provider_field() {
+  case "$1:$2" in
+    deepseek:base_url) echo "https://api.deepseek.com/anthropic" ;;
+    deepseek:secret) echo "deepseek-api-key" ;;
+    deepseek:label) echo "DeepSeek API key" ;;
+    deepseek:model|deepseek:sonnet|deepseek:haiku|deepseek:small) echo "deepseek-flash" ;;
+    deepseek:opus) echo "deepseek-v4-pro" ;;
+    deepseek:owner_only) echo 1 ;;
+    glm:base_url) echo "https://api.z.ai/api/anthropic" ;;
+    glm:secret) echo "zai-api-key" ;;
+    glm:label) echo "z.ai API key" ;;
+    glm:owner_only) echo 1 ;;
+    glm:model|glm:opus|glm:sonnet|glm:haiku|glm:small) echo "unconfirmed" ;;
+    *) return 1 ;;
+  esac
+}
+# provider_feature_go <provider> <focus|agents|delegation|effort|remote>: 0 = go (S0 item 21). One go per line.
+provider_feature_go() {
+  case "$1:$2" in
+    deepseek:focus) return 0 ;;
+    deepseek:agents) return 0 ;;
+    deepseek:delegation) return 0 ;;
+    deepseek:effort) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+provider_no_go_reason() { echo "provider $1 has no go for $2 (S0 item 21, .ade/context/engines.md)"; }
+# provider_model_ok <provider> <model>: a slot alias or an id from the row
+provider_model_ok() {
+  case "$2" in opus|sonnet|haiku) return 0 ;; esac
+  local s; for s in model opus sonnet haiku small; do [ "$(provider_field "$1" "$s")" = "$2" ] && return 0; done; return 1
+}
+# provider_model_id <provider> <model>: a slot alias resolved through the row, else the model itself
+provider_model_id() { case "$2" in opus|sonnet|haiku) provider_field "$1" "$2" ;; *) echo "$2" ;; esac; }
+# provider_hub_refusal <provider>: prints why this hub may not use it (empty = it may). Call after hub.conf is read.
+# Fails closed: only owner_only 0 opens a provider to client hubs; a missing value counts as owner-only.
+provider_hub_refusal() {
+  local o; o="$(provider_field "$1" owner_only)"
+  [ "$o" = 0 ] || [ "${HUB_OWNED_BY_OWNER:-}" = 1 ] && return 0
+  if [ "$o" = 1 ]; then
+    echo "$1 is only for the owner's own hubs (HUB_OWNED_BY_OWNER=1 in hub.conf): its terms allow training on API data and store it in the People's Republic of China (ADR 0002)"
+  else
+    echo "$1 has no owner_only value in bin/lib.sh, so it is refused outside the owner's own hubs (HUB_OWNED_BY_OWNER=1 in hub.conf, ADR 0002)"
+  fi
+}
+# provider_scrub_vars: names that beat apiKeyHelper or switch Claude Code to another backend (auth order:
+# ANTHROPIC_AUTH_TOKEN > ANTHROPIC_API_KEY > apiKeyHelper > OAuth). A provider session never passes them on.
+provider_scrub_vars() { echo "ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_CUSTOM_HEADERS CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY CLAUDE_CODE_OAUTH_TOKEN"; }
 # hub.conf (written by bin/init): who this agent is and what it can reach. Names and locations only, never secrets.
-# AGENT_* environment variables override it (tests use them).
+# AGENT_* environment variables override it (tests use them). Provider choice and hub ownership come only from hub.conf.
+unset HUB_PROVIDER HUB_PROVIDERS_ALLOWED HUB_OWNED_BY_OWNER
 [ -f "$(hub_root)/hub.conf" ] && . "$(hub_root)/hub.conf"
 hub_name() { echo "${HUB_NAME:-$(basename "$(hub_root)")}"; }
 hub_owner() { echo "${HUB_OWNER:-the hub owner}"; }
@@ -58,3 +112,47 @@ remote_dir() { echo "${AGENT_REMOTE_DIR:-${HUB_REMOTE_DIR:-}}"; }
 remote_target() { local u; u="$(remote_user)"; echo "${u:+$u@}$(remote_host)"; }
 staging_url() { echo "${AGENT_STAGING_URL:-${HUB_STAGING_URL:-}}"; }
 keychain_service() { echo "${AGENT_KEYCHAIN_SERVICE:-${HUB_KEYCHAIN_SERVICE:-$(hub_name)}}"; }
+# The sync lock: one bin/sync --yes/--auto run or session-end commit at a time. A directory holding its owner's pid.
+sync_lock_path() { echo "${AGENT_SYNC_LOCK:-$(state_dir)/sync.lock}"; }
+# seconds bin/sync --yes and bin/session-end wait for a busy lock (--auto never waits)
+sync_lock_wait() { echo "${AGENT_LOCK_WAIT:-30}"; }
+# sync_lock_take <lock> <wait-secs> [log-cmd]: take the lock, trying once a second; a busy lock is retried <wait-secs>
+# times after the first try (attempts are counted, so the wait is at least <wait-secs> seconds).
+# A stale lock (its owner pid is gone, or it is over 120 minutes old) is removed and `<log-cmd> removed stale lock` runs.
+# Returns 0 holding the lock (pid file = $$), 1 when a live owner still holds it.
+sync_lock_take() {
+  local k="$1" w="${2:-0}" lg="${3:-:}" n=0; mkdir -p "$(dirname "$k")" 2>/dev/null
+  while :; do
+    mkdir "$k" 2>/dev/null && { echo $$ > "$k/pid"; return 0; }
+    _sync_lock_reap "$k" "$lg" && continue
+    [ "$n" -lt "$w" ] || return 1
+    n=$((n + 1)); sleep 1
+  done
+}
+_sync_lock_stale() {
+  local op; op=$(cat "$1/pid" 2>/dev/null)
+  { [ -n "$op" ] && ! kill -0 "$op" 2>/dev/null; } || [ -n "$(find "$1" -maxdepth 0 -mmin +120 2>/dev/null)" ]
+}
+# _sync_lock_reap <lock> <log-cmd>: removes <lock> if it is stale; 0 = removed. Only one taker at a time may judge and
+# remove (the guard <lock>.gc, a mkdir), and the lock is judged again inside the guard, so two takers that both saw the
+# same stale lock cannot remove the lock one of them has just taken. The judged directory is moved aside and removed
+# only if it is still the one judged (same inode); otherwise it is put back and the lock counts as busy.
+# A guard left by a killed run expires after a minute.
+_sync_lock_reap() {
+  local k="$1" g="$1.gc" s="$1.stale.$$" i r=1
+  _sync_lock_stale "$k" || return 1
+  [ -n "$(find "$g" -maxdepth 0 -mmin +1 2>/dev/null)" ] && rm -rf "$g"
+  mkdir "$g" 2>/dev/null || return 1
+  i=$(stat -f %i "$k" 2>/dev/null)
+  if [ -n "$i" ] && _sync_lock_stale "$k"; then
+    rm -rf "$s"
+    if mv "$k" "$s" 2>/dev/null; then
+      if [ "$(stat -f %i "$s" 2>/dev/null)" = "$i" ]; then rm -rf "$s"; "$lg" "removed stale lock"; r=0
+      else [ -e "$k" ] || mv "$s" "$k" 2>/dev/null; rm -rf "$s"; fi
+    fi
+  fi
+  rmdir "$g" 2>/dev/null
+  return $r
+}
+# sync_lock_release <lock>: removes the lock only when this process owns it
+sync_lock_release() { [ "$(cat "$1/pid" 2>/dev/null)" = "$$" ] && rm -rf "$1"; return 0; }

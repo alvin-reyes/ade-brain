@@ -15,4 +15,4 @@ replaces the shell's, so the hub never writes model variables into `.claude/sett
 - `HUB_BRIEFING_MODEL` (`--briefing-model`, default `haiku`): `bin/briefing`.
 - BMAD (`_bmad/custom/`): `bmad-build` writes code on Opus (its implementation subagent passes `opus`); review lenses
   in `bmad-build` and `bmad-code-review` pass no model, so they run on the subagent default; `bmad-code-review` has
-  `review = "quick"` (thorough on request). An "Opus review" request runs the lenses on `opus`. See ADR 0002.
+  `review = "quick"` (thorough on request). An "Opus review" request runs the lenses on `opus`. See ADR 0003.

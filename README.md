@@ -106,6 +106,38 @@ memory and skills into the right place wherever you run it, and `bin/doctor` say
 
 Other providers (OpenRouter, Ollama, a second account) work through a wrapper command passed as `--claude`.
 
+## Providers behind Claude Code
+
+A focus session can run Claude Code against DeepSeek instead of Anthropic. The CLI stays Claude Code, so hooks,
+`--agents` and session end work as before; only the endpoint and models change. Rows live in `bin/lib.sh`
+(contract: `.ade/context/providers.md`).
+
+- **Choose it in `hub.conf` only:** `HUB_PROVIDERS_ALLOWED="anthropic deepseek"` (default `anthropic`) and, for every
+  session, `HUB_PROVIDER=deepseek`; or one session with `bin/work --provider deepseek <folder>`. Both are ignored when
+  set in the environment.
+- **Owner's own hubs only.** DeepSeek's terms allow training on API data and store it in the People's Republic of
+  China, so it is refused unless `hub.conf` has `HUB_OWNED_BY_OWNER=1` (never set it in a client hub). `bin/doctor`
+  flags a client hub whose allowlist lists deepseek. See ADR 0002.
+- **The key:** `bin/secret --set deepseek-api-key`. `bin/doctor` shows whether it is stored, never its value. With no
+  key, `bin/work` stops before Claude Code starts.
+- **Exposure (credential option 1):** the key is read by Claude Code's `apiKeyHelper` (`bin/secret deepseek-api-key`)
+  only, so it is never in the environment, argv or a file; hooks and tool commands cannot see it.
+- **No Anthropic credential reaches DeepSeek:** `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY` and the other names in
+  `provider_scrub_vars` (`bin/lib.sh`) would beat the helper, so the session starts without them and drops them from the
+  folder's settings; a checkout whose `.claude/settings.json` or `settings.local.json` sets one in `env` is refused.
+- **Models:** `--model` is a slot alias (`opus`, `sonnet`, `haiku`) or a row id (`deepseek-flash`, `deepseek-v4-pro`);
+  `HUB_DEEPSEEK_MODEL` and `HUB_DEEPSEEK_SMALL_MODEL` change the defaults. `HUB_MODEL` and `HUB_AGENT_MODEL` are not
+  used (they may be Anthropic ids). There is no base URL override.
+- **Remote Control is off** for a provider session (it needs a claude.ai login), and `--resume`/`--continue` are
+  refused: resuming would send an earlier session's history to the new provider.
+- **Wrappers:** a provider session needs plain `claude`; `--claude`, `HUB_CLAUDE` or `AGENT_CLAUDE` naming anything else
+  is refused.
+- **Own config dir:** the session runs with `CLAUDE_CONFIG_DIR=.local/providers/deepseek`, so `/model` cannot change
+  your Anthropic default. Claude Code's first-run prompts may show once there.
+- **Data sharing:** everything the session reads goes to DeepSeek (code, notes, tool output). That is the owner's
+  decision per hub, recorded in ADR 0002; do not use it for client work.
+- GLM is disabled until it passes the same checks as DeepSeek. Meta is not offered.
+
 ## What a hub has
 
 - **The persona** in `CLAUDE.md` and `.claude/agents/<persona>.md`, with shared rules: verified not vibed, secrets never
@@ -117,13 +149,17 @@ Other providers (OpenRouter, Ollama, a second account) work through a wrapper co
   other terminals changed since the last prompt (STATE.md updates, new journal entries with their text, new or updated
   memory files with their description); in deep work Stop asks for a STATE update after new commits, and SessionEnd
   journals the commits, commits the folder and starts `bin/sync --auto`, which pushes.
-- **Deep work**: `bin/work <folder>` opens a Terminal in the folder's repo checkout with its context and hooks (a folder with no repo, such as an ops watcher, opens in the hub folder itself). `--prompt "<task>"` starts that session with its first message. Every session starts with Remote Control on, named after the folder, so you can follow it from your phone; `--no-remote` turns that off (use it with an API-key wrapper such as an OpenRouter or Ollama one: Remote Control needs a claude.ai login).
+- **Deep work**: `bin/work <folder>` opens a Terminal in the folder's repo checkout with its context and hooks (a folder with no repo, such as an ops watcher, opens in the hub folder itself). `--prompt "<task>"` starts that session with its first message. Every session starts with Remote Control on, named after the folder, so you can follow it from your phone; `--no-remote` turns that off (use it with an API-key wrapper such as an OpenRouter or Ollama one: Remote Control needs a claude.ai login). Inside ADE it opens a sub-terminal of your tab instead (see "Deep work inside ADE").
 - **Scheduled jobs** (`bin/schedule install`, launchd): the weekday morning briefing (`bin/briefing`, Haiku, read-only);
   `bin/monitor` every 30 minutes; and `bin/sync --auto` every 30 minutes.
 - **Auto sync**: `bin/sync --auto` commits and pushes the hub's files unattended: one run at a time, skipped while git
   is busy, refused without gitleaks or without the git hooks (`bin/setup`), every commit to push scanned first, one
   rebase retry, never a force push. One line per run in `~/.agent-hub/<name>/logs/sync.log`. Off: `HUB_AUTO_SYNC=0`
   in `hub.conf` (or `bin/init --auto-sync off`), then `bin/schedule install` again.
+  `bin/sync --yes` and the session-end commit share the same lock (`~/.agent-hub/<name>/sync.lock`) and wait at least
+  `AGENT_LOCK_WAIT` seconds (default 30) for it; `bin/sync --yes` now exits 1 (`another sync is running`) when the lock
+  stays busy. `bin/session-end <folder> --since <epoch>` (run by hand or a launcher) logs one line per run to
+  `~/.agent-hub/<name>/logs/session-end.log` (`AGENT_SESSION_END_LOG` overrides it).
 - **Monitors**: any executable `projects/<x>/monitors.d/*.sh` or `ops/<x>/monitors.d/*.sh`. Each is read-only; its first
   output line is the status (a leading timestamp such as `Fri 10:05 UTC |` is ignored), and lines starting with `ALERT`
   alert. `bin/monitor` journals a status change and each new ALERT once, and shows a notification for an ALERT. Under
@@ -144,6 +180,57 @@ folder's `.claude/settings.json` (the hook commands), `HUB_CLAUDE_CONFIG_DIR` in
 `_bmad/config.toml`. Use the same user name and folder. Otherwise fix those values: move each folder's
 `.claude/settings.json` aside and run `bin/new <folder>` again, edit `hub.conf` and `_bmad/config.toml`, then run
 `bin/setup` and `bin/schedule install`.
+
+## Deep work inside ADE
+
+Run from an ADE terminal (or a Claude Code session in one), `bin/work <folder>` opens the session as a sub-terminal of
+that tab instead of a Terminal window; the session you ran it from keeps running. Inside ADE means all four of
+`ADE_HOOK_BIN` (an executable file), `ADE_HOOK_PORT`, `ADE_HOOK_TOKEN` and `ADE_PTY_ID` are set, as ADE sets them in
+every terminal. `bin/work` then runs
+
+```
+"$ADE_HOOK_BIN" open --cwd <checkout> --name <folder> --focus -- bash -l <launcher>
+```
+
+The launcher is the same file the Terminal path runs, so the prompt, the agents and any provider settings stay in it,
+never on ADE's command line. `--focus` is always passed, and ADE honours it only when the caller's tab is the active
+tab: it shows the new sub-terminal there, but it never switches tabs, and `ade open` exits 0 either way. What `bin/work` does with `ade open`'s
+answer:
+
+| Exit | `bin/work` |
+|---|---|
+| `0` | Done: the sub-terminal runs the launcher, which removes itself. |
+| `1` | ADE refused (an error, the sub-terminal cap, an ADE too old, or no answer in time): prints ADE's reason and the hint `AGENT_TERMINAL=terminal bin/work <folder>`, exits 1, opens no window. |
+| `3`, `4` | ADE is unreachable (stale variables, for example under tmux, or the connection refused): one `work:` warning line, then a Terminal window. |
+| `2` | Fails with exit 2 and opens nothing (a usage error is a bug to fix, not to hide). |
+| `5` | The sub-terminal opened but the command was not typed: prints `bash -l <launcher>` to run in it, keeps the launcher, exits 5. No window. |
+| any other | Fails with that code and opens nothing. |
+
+Before that, `bin/work` checks with `ade help` that this ADE can type the command: `"$ADE_HOOK_BIN" help` (stdin from
+`/dev/null`, at most 5 seconds) must print a line starting `capabilities:` with the word `command`, such as
+`capabilities: command` or `capabilities: command split`. Otherwise it prints one `work:` line and opens a Terminal
+window, as outside ADE. That covers an ADE build without `ade open` (such as v0.22.0, which would take `ade open` as a
+hook event and do nothing) and one with `ade open` but without typed commands (story 9), which would refuse with exit 1.
+The probe asks the helper on disk (`$ADE_HOOK_BIN`), not the running app: after updating ADE, restart the app if
+`ade open` says it is too old. The probe runs only once the arguments and the folder are checked, so a typo'd folder
+fails at once.
+
+`AGENT_TERMINAL=terminal` or `AGENT_TERMINAL=iterm` always opens a window. `AGENT_TERMINAL=ade` always uses ADE: it never
+falls back (exits 3 and 4 are returned as they are), and outside ADE or on an ADE without `capabilities: command` it is exit 2. Any other value
+inside ADE counts as unset (auto: the ADE path). `WORK_DRY=1` also prints the ADE command it would run, if this ADE lists
+`capabilities: command`. Outside ADE nothing changes, except that the usage line names `AGENT_TERMINAL=terminal|iterm|ade`
+and `AGENT_TERMINAL=ade` is exit 2 with a message.
+
+Live but foreign `ADE_*` variables: a shell that inherited them from an ADE terminal but is not in one (tmux attached
+from another terminal, an app launched from an ADE shell) still reaches that ADE, so the session opens as a sub-terminal
+of that ADE tab. Run `AGENT_TERMINAL=terminal bin/work <folder>` there to get a window.
+
+Interrupting `bin/work` (Ctrl-C) while `ade open` runs removes the launcher, but ADE may already have typed the command:
+the new sub-terminal then prints a harmless `No such file or directory`. Close it and run `bin/work` again.
+
+The sub-terminal needs ADE's `ade open` on the ADE build (stories 4a and 4c in `better-agentic-ide`) and its typed
+command (`ade open -- COMMAND`, story 9). Until story 9 is on your build, `ade help` has no `capabilities: command`
+line, so `bin/work` opens a Terminal window with one `work:` line.
 
 ## Upgrading a hub made before auto sync
 
