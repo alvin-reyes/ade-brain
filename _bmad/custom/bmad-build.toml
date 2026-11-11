@@ -1,8 +1,9 @@
 # Token trim + code on Opus (Alvin, 9 Nov 2026): build in-session up to 200 lines (BMAD default 100);
-# code is written only by Opus (5.5 or later); reviewers may run cheaper (see bmad-code-review.toml).
+# code is written only by Opus (5.5 or later); its review lenses pass no model, so they run on the subagent default (ADE's, else Sonnet; 11 Nov 2026), as in bmad-code-review.toml.
 [workflow]
 persistent_facts = [
   "Code is written only by an Opus model (Opus 5.5 or later). If this session is not running on Opus, take route full whatever the size, so the Opus implementation subagent writes the code.",
+  "Every review-lens subagent this workflow launches (the oneshot review and step-04, quick or thorough) runs on the subagent default model: pass no model to the Agent tool for each one, so it follows CLAUDE_CODE_SUBAGENT_MODEL (set by ADE, else the hub's HUB_SUBAGENT_MODEL, Sonnet). This replaces the rule that review subagents match the session's model. Triage stays in this session. Exception: when the user asks for an Opus review, launch the lenses on \"opus\" instead.",
 ]
 route_selection = """
 Decide whether to use a coding subagent (full) or implement directly (oneshot).

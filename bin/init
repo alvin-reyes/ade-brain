@@ -4,7 +4,7 @@
 #            [--folders "projects/a ops/b"] [--repo owner/name[=~/checkout]]... [--code-owner <gh org>]
 #            [--remote user@host[:port]] [--remote-key <path>] [--remote-dir <dir>] [--staging-url <url>]
 #            [--secret <name>]... [--briefing HH:MM] [--claude <cmd>] [--claude-config-dir <dir>]
-#            [--model M] [--effort low|medium|high|xhigh|max] [--agent-model M] [--briefing-model M]
+#            [--model M] [--effort low|medium|high|xhigh|max] [--agent-model M] [--subagent-model M] [--briefing-model M]
 #            [--brain-path <dir>]... [--embed-model M] [--ollama-url URL] [--auto-sync on|off]
 #   bin/init --list   the personas
 # --dest copies the template to a new directory first (it must not exist); without it, initializes in place.
@@ -14,7 +14,7 @@ usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 fm() { awk -v k="$2" -F': ' '/^---$/{n++; next} n==1 && $1==k {sub(/^[^:]*: /,""); print; exit}' "$1"; }
 if [ "${1:-}" = --list ]; then for p in "$T"/personas/*.md; do printf '%-28s %s\n' "$(basename "$p" .md)" "$(fm "$p" title)"; done; exit 0; fi
 PERSONA=""; CLIENT=""; OWNER=""; NAME=""; DEST=""; FOLDERS=""; REPOS=(); CODE_OWNER=""; REMOTE=""; RKEY=""; RDIR=""
-STAGING=""; SECRETS=(); BRIEF="08:00"; CLAUDE_CMD="claude"; CFG=""; MODEL=""; EFFORT=""; AMODEL="sonnet"; BMODEL="haiku"; BPATHS=(); EMODEL="nomic-embed-text"; OURL="http://localhost:11434"; ASYNC="on"
+STAGING=""; SECRETS=(); BRIEF="08:00"; CLAUDE_CMD="claude"; CFG=""; MODEL=""; EFFORT=""; AMODEL="sonnet"; SMODEL="sonnet"; BMODEL="haiku"; BPATHS=(); EMODEL="nomic-embed-text"; OURL="http://localhost:11434"; ASYNC="on"
 while [ $# -gt 0 ]; do
   [ $# -ge 2 ] || usage
   case "$1" in
@@ -22,7 +22,7 @@ while [ $# -gt 0 ]; do
     --folders) FOLDERS="$2";; --repo) REPOS+=("$2");; --code-owner) CODE_OWNER="$2";; --remote) REMOTE="$2";;
     --remote-key) RKEY="$2";; --remote-dir) RDIR="$2";; --staging-url) STAGING="$2";; --secret) SECRETS+=("$2");;
     --briefing) BRIEF="$2";; --claude) CLAUDE_CMD="$2";; --claude-config-dir) CFG="$2";; --model) MODEL="$2";;
-    --effort) EFFORT="$2";; --agent-model) AMODEL="$2";; --briefing-model) BMODEL="$2";; --brain-path) BPATHS+=("$2");;
+    --effort) EFFORT="$2";; --agent-model) AMODEL="$2";; --subagent-model) SMODEL="$2";; --briefing-model) BMODEL="$2";; --brain-path) BPATHS+=("$2");;
     --embed-model) EMODEL="$2";; --ollama-url) OURL="$2";; --auto-sync) ASYNC="$2";; *) usage;;
   esac; shift 2
 done
@@ -35,7 +35,8 @@ slugify() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+
 [[ "$CLAUDE_CMD" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "init: bad --claude command" >&2; exit 2; }
 for s in ${SECRETS[@]+"${SECRETS[@]}"}; do [[ "$s" =~ ^[a-z0-9-]+$ ]] || { echo "init: secret names are a-z 0-9 - (names only, never values)" >&2; exit 2; }; done
 TITLE="$(fm "$P" title)"; [ -n "$MODEL" ] || MODEL="$(fm "$P" model)"; [ -n "$FOLDERS" ] || FOLDERS="$(fm "$P" folders)"; FOCUS="$(fm "$P" briefing_focus)"
-for m in "$MODEL" "$AMODEL" "$BMODEL" "$EMODEL"; do [ -z "$m" ] || [[ "$m" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "init: bad model name '$m'" >&2; exit 2; }; done
+[ -n "$SMODEL" ] || SMODEL="sonnet"
+for m in "$MODEL" "$AMODEL" "$SMODEL" "$BMODEL" "$EMODEL"; do [ -z "$m" ] || [[ "$m" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "init: bad model name '$m'" >&2; exit 2; }; done
 case "$ASYNC" in on|off) ;; *) echo "init: --auto-sync must be on or off" >&2; exit 2 ;; esac
 case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "init: --effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
 # the install's config dir: --claude-config-dir, else the CLAUDE_CONFIG_DIR its wrapper exports, else ~/.claude
@@ -99,6 +100,8 @@ HUB_CLAUDE_CONFIG_DIR=$(q "$CFG")
 HUB_MODEL=$(q "$MODEL")
 HUB_EFFORT=$(q "$EFFORT")
 HUB_AGENT_MODEL=$(q "$AMODEL")
+# fallback for subagents that name no model: bin/work sets CLAUDE_CODE_SUBAGENT_MODEL to it unless one is inherited (ADE's wins)
+HUB_SUBAGENT_MODEL=$(q "$SMODEL")
 HUB_BRIEFING_MODEL=$(q "$BMODEL")
 HUB_CODE_OWNER=$(q "$CODE_OWNER")
 HUB_REPOS=$(q "${REPO_NAMES# }")

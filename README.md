@@ -46,6 +46,7 @@ Or locally, without GitHub: `bin/init ... --dest ~/Project/acme-sre` copies the 
 | `--claude-config-dir <dir>` | that install's config dir (default: read from the wrapper, else `~/.claude`); memory and skills are linked there |
 | `--model M`, `--effort E` | the default model and effort for sessions (`bin/work`) and the persona agent (default: the persona's) |
 | `--agent-model M` | the folder agents' model (default `sonnet`) |
+| `--subagent-model M` | `HUB_SUBAGENT_MODEL`: the fallback for subagents that name no model of their own, e.g. most BMAD skills' (default `sonnet`). `bin/work` sets `CLAUDE_CODE_SUBAGENT_MODEL` to it only when the session doesn't inherit one, so ADE's value wins; no settings file sets it. An explicit model still wins: `bmad-build` writes code on Opus |
 | `--briefing-model M` | the morning briefing's model (default `haiku`) |
 | `--brain-path <path>` | extra folders, files or globs the brain indexes (e.g. `~/client/docs`, `'~/client/*.md'`), repeatable |
 | `--embed-model M`, `--ollama-url URL` | the local embedding model (default `nomic-embed-text`) and Ollama address |
@@ -99,6 +100,7 @@ memory and skills into the right place wherever you run it, and `bin/doctor` say
 |---|---|---|
 | `HUB_MODEL`, `HUB_EFFORT` | deep-work sessions, the persona agent | `bin/work --model M --effort E` |
 | `HUB_AGENT_MODEL` | folder agents (`.claude/agents/*.md`) | `bin/work --agent-model [name=]M`, or edit the agent file |
+| `HUB_SUBAGENT_MODEL` | subagents with no model of their own, in `bin/work` sessions (fallback) | an inherited `CLAUDE_CODE_SUBAGENT_MODEL` (e.g. ADE's) |
 | `HUB_BRIEFING_MODEL` | `bin/briefing` | `AGENT_BRIEFING_MODEL=M bin/briefing` |
 | `HUB_CLAUDE` | every session the hub starts | `bin/work --claude CMD`, `AGENT_CLAUDE=CMD` |
 
@@ -128,6 +130,9 @@ Other providers (OpenRouter, Ollama, a second account) work through a wrapper co
   launchd a monitor gets the plist's PATH only (`~/.local/bin`, Homebrew, system), not your shell profile, and is
   killed after `MONITOR_TIMEOUT` seconds (300).
 - **BMAD v6** skills in `.claude/skills/` for PRDs, specs, stories, builds and reviews, under the ADE rules (`.ade/rules.md`).
+  Token defaults (`_bmad/custom/`): code is written on Opus, review lenses pass no model (they run on the subagent
+  default: ADE's, else `HUB_SUBAGENT_MODEL`), and `bmad-code-review` is quick (one lens) unless you ask for a thorough
+  review.
 - **Access tools**: `bin/remote` (SSH to the box), `bin/secret` (macOS Keychain), `bin/doctor` (what this Mac can reach).
 
 Does a checkout know my work? Yes, as far as the hub's files go: STATE.md, memory, the journal and ACCESS.md are

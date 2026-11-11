@@ -279,6 +279,7 @@ bin/work ops/environments          <span class="c"># deep work in one folder's r
       <tr><td><code>--claude-config-dir &lt;dir&gt;</code></td><td>that install's config dir, where memory and skills are linked</td><td>read from the wrapper's <code>export CLAUDE_CONFIG_DIR=</code>, else <code>~/.claude</code></td></tr>
       <tr><td><code>--model M</code>, <code>--effort E</code></td><td>deep-work sessions; the model also seeds the persona agent at init; effort is <code>low|medium|high|xhigh|max</code> and applies to <code>bin/work</code> only</td><td>the persona's model</td></tr>
       <tr><td><code>--agent-model M</code></td><td>the folder agents' model (written when each is made) and <code>bin/work</code>'s specialist agents</td><td><code>sonnet</code></td></tr>
+      <tr><td><code>--subagent-model M</code></td><td>the fallback for subagents that name no model (most BMAD skills'): <code>bin/work</code> sets <code>CLAUDE_CODE_SUBAGENT_MODEL</code> to it unless the session inherits one, so ADE's value wins; an explicit model still wins</td><td><code>sonnet</code></td></tr>
       <tr><td><code>--briefing-model M</code></td><td>the morning briefing</td><td><code>haiku</code></td></tr>
       <tr><td><code>--brain-path &lt;path&gt;</code></td><td>extra folders, files or globs the brain indexes (repeatable; quote globs)</td><td>none</td></tr>
       <tr><td><code>--embed-model M</code>, <code>--ollama-url URL</code></td><td>the local embedding model and Ollama address</td><td><code>nomic-embed-text</code>, <code>http://localhost:11434</code></td></tr>
@@ -627,6 +628,7 @@ flowchart LR
       <tr><td><code>HUB_CLAUDE_CONFIG_DIR</code></td><td>its config dir (memory + skills links)</td><td>shell <code>CLAUDE_CONFIG_DIR</code> when unset</td></tr>
       <tr><td><code>HUB_MODEL</code>, <code>HUB_EFFORT</code></td><td>deep-work sessions (<code>bin/work</code>). The persona agent's model is written once, at init; effort doesn't apply to it</td><td><code>bin/work --model / --effort</code></td></tr>
       <tr><td><code>HUB_AGENT_MODEL</code></td><td>new folder agents (<code>bin/new</code>) and <code>bin/work</code>'s specialist agents</td><td><code>bin/work --agent-model</code></td></tr>
+      <tr><td><code>HUB_SUBAGENT_MODEL</code></td><td>subagents with no model of their own in <code>bin/work</code> sessions (fallback only)</td><td>an inherited <code>CLAUDE_CODE_SUBAGENT_MODEL</code> (e.g. ADE's)</td></tr>
       <tr><td><code>HUB_BRIEFING_MODEL</code></td><td>the briefing</td><td><code>AGENT_BRIEFING_MODEL</code></td></tr>
       <tr><td><code>HUB_CODE_OWNER</code></td><td>GitHub owner for bare repo names</td><td><code>AGENT_CODE_OWNER</code></td></tr>
       <tr><td><code>HUB_REPOS</code></td><td>repos <code>bin/doctor</code> checks you can read</td><td></td></tr>
@@ -656,6 +658,7 @@ flowchart LR
     <tbody>
       <tr><td><code>HUB_MODEL</code>, <code>HUB_EFFORT</code></td><td>deep-work sessions; <code>HUB_MODEL</code> also seeds the persona agent's <code>model:</code> at init</td><td><code>bin/work --model M --effort E</code>, or edit the agent file</td></tr>
       <tr><td><code>HUB_AGENT_MODEL</code></td><td>seeds each folder agent's <code>model:</code> when <code>bin/new</code> makes it; default for <code>bin/work</code>'s specialist agents</td><td><code>bin/work --agent-model [name=]M</code>, or edit the agent file</td></tr>
+      <tr><td><code>HUB_SUBAGENT_MODEL</code></td><td>the fallback <code>CLAUDE_CODE_SUBAGENT_MODEL</code> for <code>bin/work</code> sessions (subagents that name no model)</td><td>an inherited <code>CLAUDE_CODE_SUBAGENT_MODEL</code> (ADE's wins)</td></tr>
       <tr><td><code>HUB_BRIEFING_MODEL</code></td><td><code>bin/briefing</code></td><td><code>AGENT_BRIEFING_MODEL=M bin/briefing</code></td></tr>
       <tr><td><code>HUB_CLAUDE</code></td><td><code>bin/work</code> and <code>bin/briefing</code>; start the hub-root session with this command too</td><td><code>bin/work --claude CMD</code>, <code>AGENT_CLAUDE=CMD</code></td></tr>
     </tbody>

@@ -30,6 +30,10 @@ done
 [[ "$CL" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "work: bad claude command '$CL'" >&2; exit 2; }
 [ -z "$MODEL" ] || [[ "$MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
 case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
+# subagents that name no model: an inherited CLAUDE_CODE_SUBAGENT_MODEL (ADE sets models) wins, else hub.conf, else sonnet.
+# Set in the launcher, never in settings (a settings env would replace ADE's). An explicit Agent or agent-file model still wins.
+SUBM="${CLAUDE_CODE_SUBAGENT_MODEL:-${HUB_SUBAGENT_MODEL:-sonnet}}"
+[[ "$SUBM" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "work: bad subagent model '$SUBM' (CLAUDE_CODE_SUBAGENT_MODEL or HUB_SUBAGENT_MODEL)" >&2; exit 2; }
 # hub.conf defaults (HUB_MODEL, HUB_EFFORT, HUB_AGENT_MODEL); the command line wins
 [ -n "$MODEL" ] || MODEL="${HUB_MODEL:-}"; [ -n "$EFFORT" ] || EFFORT="${HUB_EFFORT:-}"
 [ -z "$MODEL" ] || [[ "$MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
@@ -114,7 +118,9 @@ echo "$cmd"
 SD="$(state_dir)/sessions"
 reg=$(printf 'R=%q.$$\nmkdir -p %q && printf '"'"'name=%%s\\nfolder=%%s\\nlauncher=%%s\\nparent=%%s\\nstarted=%%s\\ncwd=%%s\\n'"'"' %q %q "$$" %q "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)" %q > "$R"' \
   "$SD/${F##*/}" "$SD" "${F##*/}" "$F" "${CLAUDE_PID:--}" "$dir")
-L=$(mktemp "${TMPDIR:-/tmp}/agent-work.XXXXXX"); printf '#!/bin/bash\n%s\ntrap '"'"'rm -f "$0" "$R"'"'"' EXIT\n%s\n' "$reg" "$cmd" > "$L"; chmod +x "$L"
+# the subagent default ($SUBM, checked above) is exported by the launcher, so a value its own shell has still wins
+sub="export CLAUDE_CODE_SUBAGENT_MODEL=\"\${CLAUDE_CODE_SUBAGENT_MODEL:-$SUBM}\""
+L=$(mktemp "${TMPDIR:-/tmp}/agent-work.XXXXXX"); printf '#!/bin/bash\n%s\ntrap '"'"'rm -f "$0" "$R"'"'"' EXIT\n%s\n%s\n' "$reg" "$sub" "$cmd" > "$L"; chmod +x "$L"
 # WORK_NO_OPEN=1 (tests): write the launcher, print its path, open nothing
 [ "${WORK_NO_OPEN:-}" = 1 ] && { echo "launcher: $L"; L=""; exit 0; }
 if [ "${AGENT_TERMINAL:-terminal}" = iterm ]; then
