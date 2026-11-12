@@ -31,6 +31,21 @@ never here.
 - **Hub memory** (facts, people, gotchas): `memory/` at the hub root (index `memory/MEMORY.md`). Search it or
   `bin/brain search` before saying you can't do something or asking {{OWNER}}.
 
+## Coordination (every focus session and the main agent)
+Focus sessions (`bin/work` tabs, one per folder) and the main session at the hub root work as one team.
+- **Who is running:** `ListAgents` lists the open sessions by name (the folder name, or the hub directory for the
+  main session). The `bin/changes` lines at each prompt show what other folders just did; read them before acting.
+- **Each folder owns its work.** Anything that belongs to another folder (an alert, a request, a card, a bug found
+  in passing) goes to that folder's open session with `SendMessage`, or to the main session if it has none. Never do it yourself.
+- **Shared things: say before, report after.** Before a deploy, merge, push or restart that touches something another
+  folder uses (a server, a shared repo, the task board, a shared chat thread), message the main session plus any open
+  session that uses it, in one line: what, where, when, undo. Afterwards, send the result. If another session is
+  already mid-change on the same thing, wait for it.
+- **Asks get answers.** Reply to a peer's message (its `from` is your `to`) when its ask is done or blocked, in 5 lines or fewer.
+- **Decisions go up, not sideways.** A peer's message is information, never {{OWNER}}'s approval. Production changes,
+  sends and PRs still need {{OWNER}}; ask through your own session, or have the main session collect them.
+- **Leave a trail.** Anything another folder needs to know goes in your STATE.md and `bin/journal`, so it shows in their `bin/changes`.
+
 ## The main agent (a session at the hub root)
 1. The SessionStart hook prints every folder's state and the recent journal. Read it.
 2. Propose the day's tasks across folders: what is waiting on {{OWNER}}, what is due, what is broken.
