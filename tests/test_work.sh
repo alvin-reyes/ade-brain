@@ -132,12 +132,27 @@ WORK_DRY=1 bin/work projects/demo/ | grep -q -- " --remote-control demo" || fail
 out=$(WORK_DRY=1 bin/work projects/demo demo-code --no-remote); echo "$out" | grep -q "cd '$R'" || fail "--no-remote after the repo still finds the repo"
 echo "$out" | grep -q -- "--remote-control" && fail "--no-remote after the repo leaves it out"
 # which claude install: HUB_CLAUDE from hub.conf, else claude; AGENT_CLAUDE or --claude picks another
-WORK_DRY=1 bin/work projects/demo | grep -q "' claude --settings" || fail "default is claude"
+# (a bare name is resolved on the caller's PATH when it is found there, so allow a directory in front of it)
+WORK_DRY=1 bin/work projects/demo | grep -qE "' (/[^ ]*/)?claude --settings" || fail "default is claude"
 echo 'HUB_CLAUDE=claude-personal' > hub.conf
-WORK_DRY=1 bin/work projects/demo | grep -q "' claude-personal --settings" || fail "hub.conf HUB_CLAUDE picks the install"
+WORK_DRY=1 bin/work projects/demo | grep -qE "' (/[^ ]*/)?claude-personal --settings" || fail "hub.conf HUB_CLAUDE picks the install"
 rm hub.conf
-AGENT_CLAUDE=claude-other WORK_DRY=1 bin/work projects/demo | grep -q "' claude-other --settings" || fail "AGENT_CLAUDE picks the install"
-WORK_DRY=1 bin/work --claude claude-koneksi projects/demo | grep -q "' claude-koneksi --settings" || fail "--claude picks the install"
+AGENT_CLAUDE=claude-other WORK_DRY=1 bin/work projects/demo | grep -qE "' (/[^ ]*/)?claude-other --settings" || fail "AGENT_CLAUDE picks the install"
+WORK_DRY=1 bin/work --claude claude-koneksi projects/demo | grep -qE "' (/[^ ]*/)?claude-koneksi --settings" || fail "--claude picks the install"
+# the same install and account as the caller: a bare name runs the claude the caller's PATH finds (a new window's login
+# shell may find another install first), and the launcher carries the caller's CLAUDE_CONFIG_DIR, or its absence
+C="$(mktemp -d)"; printf '#!/bin/bash\nexit 0\n' > "$C/claude"; chmod +x "$C/claude"; cp "$C/claude" "$C/claude-personal"
+PATH="$C:$PATH" WORK_DRY=1 bin/work projects/demo | grep -qF "' $C/claude --settings" || fail "a bare claude runs the caller's install"
+PATH="$C:$PATH" AGENT_CLAUDE=claude-personal WORK_DRY=1 bin/work projects/demo | grep -qF "' $C/claude-personal --settings" || fail "a bare wrapper name runs the caller's wrapper"
+WORK_DRY=1 bin/work --claude "$C/claude" projects/demo | grep -qF "' $C/claude --settings" || fail "an explicit path is kept"
+lch() { local o; o=$(WORK_NO_OPEN=1 "$@" bin/work --no-remote projects/demo) || return $?
+  o=$(printf '%s\n' "$o" | sed -n 's/^launcher: //p'); cat "$o"; rm -f "$o"; }
+out=$(lch env CLAUDE_CONFIG_DIR="/x/o'cfg") || fail "launcher with a config dir"
+assert_eq "$(eval "$(printf '%s\n' "$out" | grep '^export CLAUDE_CONFIG_DIR=')"; echo "$CLAUDE_CONFIG_DIR")" "/x/o'cfg" "the launcher keeps the caller's config dir (account)"
+[ "$(printf '%s\n' "$out" | grep -n 'CLAUDE_CONFIG_DIR' | cut -d: -f1)" -lt "$(printf '%s\n' "$out" | grep -n -- '--settings' | cut -d: -f1)" ] || fail "config dir set before claude starts"
+out=$(lch env -u CLAUDE_CONFIG_DIR) || fail "launcher without a config dir"
+printf '%s\n' "$out" | grep -qx 'unset CLAUDE_CONFIG_DIR' || fail "no caller config dir: the launcher unsets one its login shell has [$out]"
+printf '%s\n' "$out" | grep -q '^export CLAUDE_CONFIG_DIR' && fail "no caller config dir: none exported"
 WORK_DRY=1 bin/work --claude 'x;rm' projects/demo >/dev/null 2>&1; assert_eq "$?" "2" "unsafe claude command name"
 # one session per folder: a running --remote-control <name> process (full command line, as ps -axww shows it) is refused
 P="$(mktemp -d)"; long="$(printf 'x%.0s' $(seq 1 3000))"   # a command line far longer than plain ps aux shows

@@ -22,7 +22,7 @@ history** of the work and runs Claude Code agents that know them. Client code st
 | Command | Does |
 |---|---|
 | `bin/context [folder]` | every folder's state, or one folder's state and journal |
-| `bin/work [opts] <folder> [repo]` | deep work in a new Terminal in the folder's repo checkout |
+| `bin/work [opts] <folder> [repo]` | deep work in a new Terminal in the folder's repo checkout, as the caller's Claude install and account (`CLAUDE_CONFIG_DIR`) |
 | `bin/journal <folder> "<text>"` | one dated journal entry |
 | `bin/new projects/<name>` / `ops/<name>` | a new folder plus its agent |
 | `bin/brain search "<words>"` | search every section of the hub (keywords + meaning); `bin/brain index` refreshes |

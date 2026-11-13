@@ -666,6 +666,9 @@ flowchart LR
       <tr><td><code>HUB_CLAUDE</code></td><td><code>bin/work</code> and <code>bin/briefing</code>; start the hub-root session with this command too</td><td><code>bin/work --claude CMD</code>, <code>AGENT_CLAUDE=CMD</code></td></tr>
     </tbody>
   </table></div>
+  <p>Focus sessions run as the same install and account as whoever starts them. <code>bin/work</code> resolves a bare command on the caller's <code>PATH</code>, since a new
+    window's login shell may find another <code>claude</code> first. The session keeps the caller's <code>CLAUDE_CONFIG_DIR</code>, or none when the caller has none. A wrapper
+    that exports its own <code>CLAUDE_CONFIG_DIR</code> still wins.</p>
   <p>Other providers, such as OpenRouter, Ollama or a second account, work through a wrapper command passed as <code>--claude</code>. <code>bin/init</code> reads the wrapper's
     <code>export CLAUDE_CONFIG_DIR=…</code> line to find its config dir. If you use a wrapper, start the hub-root session with it as well. Plain <code>claude</code> would use
     another config dir, without the hub's memory and skill links.</p>

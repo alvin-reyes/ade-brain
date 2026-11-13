@@ -104,6 +104,10 @@ memory and skills into the right place wherever you run it, and `bin/doctor` say
 | `HUB_BRIEFING_MODEL` | `bin/briefing` | `AGENT_BRIEFING_MODEL=M bin/briefing` |
 | `HUB_CLAUDE` | every session the hub starts | `bin/work --claude CMD`, `AGENT_CLAUDE=CMD` |
 
+Focus sessions run as the same install and account as whoever starts them: `bin/work` resolves a bare command on the
+caller's `PATH` (a new window's login shell may find another `claude` first), and the session keeps the caller's
+`CLAUDE_CONFIG_DIR`, or none when the caller has none. A wrapper that exports its own `CLAUDE_CONFIG_DIR` still wins.
+
 Other providers (OpenRouter, Ollama, a second account) work through a wrapper command passed as `--claude`.
 
 ## Providers behind Claude Code

@@ -1,7 +1,8 @@
 #!/bin/bash
 # bin/work [--provider P] [--claude CMD] [--model M] [--effort E] [--prompt TEXT] [--no-remote] [--force] [--agent-model [name=]M] [--agent-effort [name=]E] <folder> [repo]: deep work in a new Terminal, inside the project's checkout, with the folder's hooks.
 # A folder with no repo (none, or a "(none ...)" row) works in the hub folder itself. Clones a missing checkout (owner/name as given, else HUB_CODE_OWNER/<name>) to ${AGENT_CODE_DIR:-$HOME/Project}/<name> and records the path in ACCESS.md.
-# --claude picks the Claude install (default: claude_cmd in lib.sh). --model / --effort (anywhere in the arguments) pass through to claude for this session.
+# --claude picks the Claude install (default: claude_cmd in lib.sh); a bare name runs what the caller's PATH finds, and the
+# session keeps the caller's CLAUDE_CONFIG_DIR (or none), so it runs as the same install and account. --model / --effort (anywhere in the arguments) pass through to claude for this session.
 # --prompt TEXT is the session's first message (passed last, after --, quoted for the launcher).
 # Remote Control is on for every session, named after the folder (projects/acme -> acme); --no-remote turns it off.
 # A folder whose session is already running with Remote Control (a claude process with --remote-control <name>) is refused
@@ -170,6 +171,9 @@ fi
 sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }   # single-quoted for the launcher, a ' inside kept
 TRAP='rm -f "$0"'
 if [ "$PROV" = anthropic ]; then
+  # the caller's install: a bare name runs what the caller's PATH finds, since a new window's login shell may find another
+  # claude first (an explicit path, or a name not on PATH, is kept as given)
+  case "$CL" in */*) ;; *) p="$(command -v -- "$CL" 2>/dev/null)"; [[ "$p" == /* && "$p" =~ ^[A-Za-z0-9._/-]+$ ]] && CL="$p" ;; esac
   cmd="cd $(sq "$dir") && AGENT_FOLDER='$F' $CL --settings $(sq "$H/$F/.claude/settings.json")"
 else
   SEC="$(provider_field "$PROV" secret)"; CD="$H/.local/providers/$PROV"; SVC="$(keychain_service)"; SCRUB="$(provider_scrub_vars)"
@@ -254,6 +258,11 @@ reg=$(printf 'R=%q.$$\nmkdir -p %q && printf '"'"'name=%%s\\nfolder=%%s\\nlaunch
 # an Anthropic session's subagent default ($SUBM, checked above) is exported by the launcher, so a value its own shell has
 # still wins; a provider session never sets it (.ade/context/providers.md)
 sub=""; [ "$PROV" = anthropic ] && sub="export CLAUDE_CODE_SUBAGENT_MODEL=\"\${CLAUDE_CODE_SUBAGENT_MODEL:-$SUBM}\""$'\n'
+# ...and the caller's account: its CLAUDE_CONFIG_DIR, or none (unset, so a login shell's value cannot switch accounts).
+# A wrapper that exports its own still wins. A provider session sets its own dir.
+if [ "$PROV" = anthropic ]; then
+  if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then sub="${sub}export CLAUDE_CONFIG_DIR=$(sq "$CLAUDE_CONFIG_DIR")"$'\n'; else sub="${sub}unset CLAUDE_CONFIG_DIR"$'\n'; fi
+fi
 L=$(mktemp "${TMPDIR:-/tmp}/agent-work.XXXXXX"); printf '#!/bin/bash\ntrap %s EXIT\n%s\n%s%s\n' "$(sq "$TRAP \"\$R\"")" "$reg" "$sub" "$cmd" > "$L"; chmod +x "$L"
 # WORK_NO_OPEN=1 (tests): write the launcher, print its path, open nothing (both files are kept for the caller)
 [ "${WORK_NO_OPEN:-}" = 1 ] && { echo "launcher: $L"; MS=""; L=""; exit 0; }

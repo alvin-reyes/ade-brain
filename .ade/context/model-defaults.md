@@ -16,3 +16,12 @@ replaces the shell's, so the hub never writes model variables into `.claude/sett
 - BMAD (`_bmad/custom/`): `bmad-build` writes code on Opus (its implementation subagent passes `opus`); review lenses
   in `bmad-build` and `bmad-code-review` pass no model, so they run on the subagent default; `bmad-code-review` has
   `review = "quick"` (thorough on request). An "Opus review" request runs the lenses on `opus`. See ADR 0003.
+
+## Install and account of a focus session (`bin/work`, Anthropic path)
+
+- The Claude command (`--claude`, `AGENT_CLAUDE`, `HUB_CLAUDE`, else `claude`): a bare name is resolved with `command -v`
+  in the caller's environment and the absolute path goes into the launch command, so the new window's login shell cannot
+  pick another install. An explicit path, or a name not found on the caller's `PATH`, is kept as given.
+- The account: the launcher runs `export CLAUDE_CONFIG_DIR='<caller's value>'`, or `unset CLAUDE_CONFIG_DIR` when the
+  caller has none, so a value the login shell sets cannot switch accounts. A wrapper that exports its own still wins.
+- Provider sessions are unchanged: plain `claude`, their own `CLAUDE_CONFIG_DIR` (`.ade/context/providers.md`).
