@@ -35,6 +35,9 @@ assert_eq "$(. "$D3/hub.conf"; echo "$HUB_SUBAGENT_MODEL")" "sonnet" "subagent m
 D4="$(mktemp -d)/h4"; bin/init --persona qa-test-engineer --client B --owner C --dest "$D4" --subagent-model haiku >/dev/null || fail "init 4"
 assert_eq "$(. "$D4/hub.conf"; echo "$HUB_SUBAGENT_MODEL")" "haiku" "--subagent-model"
 bin/init --persona tech-lead --client B --owner C --subagent-model 'x"y' --dest "$(mktemp -d)/bad" >/dev/null 2>&1; assert_eq "$?" "2" "unsafe subagent model refused"
+# a context suffix (sonnet[1m]) is a valid subagent model, as bin/work accepts it; hub.conf keeps it as given
+D5="$(mktemp -d)/h5"; bin/init --persona qa-test-engineer --client B --owner C --dest "$D5" --subagent-model 'sonnet[1m]' >/dev/null 2>&1 || fail "init with --subagent-model sonnet[1m]"
+assert_eq "$(. "$D5/hub.conf"; echo "$HUB_SUBAGENT_MODEL")" "sonnet[1m]" "--subagent-model keeps a bracket suffix"
 # sub ENV...: the launcher bin/work writes (WORK_NO_OPEN: nothing opened), printed and removed
 sub() { local o l; o=$(cd "$D4" && env -u HUB -u CLAUDE_HOME WORK_NO_OPEN=1 "$@" bin/work --no-remote projects/app) || return $?
   l=$(printf '%s\n' "$o" | sed -n 's/^launcher: //p'); cat "$l"; rm -f "$l"; }

@@ -36,7 +36,9 @@ slugify() { printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+
 for s in ${SECRETS[@]+"${SECRETS[@]}"}; do [[ "$s" =~ ^[a-z0-9-]+$ ]] || { echo "init: secret names are a-z 0-9 - (names only, never values)" >&2; exit 2; }; done
 TITLE="$(fm "$P" title)"; [ -n "$MODEL" ] || MODEL="$(fm "$P" model)"; [ -n "$FOLDERS" ] || FOLDERS="$(fm "$P" folders)"; FOCUS="$(fm "$P" briefing_focus)"
 [ -n "$SMODEL" ] || SMODEL="sonnet"
-for m in "$MODEL" "$AMODEL" "$SMODEL" "$BMODEL" "$EMODEL"; do [ -z "$m" ] || [[ "$m" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "init: bad model name '$m'" >&2; exit 2; }; done
+for m in "$MODEL" "$AMODEL" "$BMODEL" "$EMODEL"; do [ -z "$m" ] || [[ "$m" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "init: bad model name '$m'" >&2; exit 2; }; done
+# the subagent model may carry a context suffix such as sonnet[1m] (the same check as bin/work's SUBRE)
+SUBRE='^[][A-Za-z0-9._:/-]+$'; [[ "$SMODEL" =~ $SUBRE ]] || { echo "init: bad model name '$SMODEL'" >&2; exit 2; }
 case "$ASYNC" in on|off) ;; *) echo "init: --auto-sync must be on or off" >&2; exit 2 ;; esac
 case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "init: --effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
 # the install's config dir: --claude-config-dir, else the CLAUDE_CONFIG_DIR its wrapper exports, else ~/.claude

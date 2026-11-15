@@ -6,8 +6,7 @@
 # --prompt TEXT is the session's first message (passed last, after --, quoted for the launcher).
 # Remote Control is on for every session, named after the folder (projects/acme -> acme); --no-remote turns it off.
 # A folder whose session is already running with Remote Control (a claude process with --remote-control <name>) is refused
-# with exit 3 before anything
-# is opened or changed; --force opens another anyway.
+# with exit 3 before anything is opened or changed; --force opens another anyway.
 # --provider P (default HUB_PROVIDER from hub.conf, else anthropic) runs Claude Code against another provider's endpoint (story SP,
 # .ade/context/providers.md): only providers in hub.conf's HUB_PROVIDERS_ALLOWED; plain claude; no Remote Control, no resume;
 # its own config dir; a merged settings file whose apiKeyHelper reads the key (the key is checked once, never written).
