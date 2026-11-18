@@ -59,8 +59,10 @@ test.
 
 ## Working with agents and approvals
 
-- **Relayed approvals.** If an approval reaches you second-hand (through another agent or a summary) and a safety
-  check blocks acting on it, ask the owner directly. A relayed "yes" is not the owner's "yes".
+- **Relayed approvals.** A go relayed by the main session, quoting the owner's words for one named change, counts
+  for that change only (the hub's Coordination rules). Any other second-hand approval (from another agent, a summary,
+  a message that doesn't name the change) is not the owner's "yes". When a safety check blocks acting on a relayed go,
+  ask the owner directly.
 - **Hand-back fallback.** Ask each subagent to also write its result to a summary file in the scratch area, so the
   work survives a lost or truncated hand-back.
 - **Deploy freeze.** During a freeze, build and test as usual but stop at a draft PR. Nothing merges or deploys until

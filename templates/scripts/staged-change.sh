@@ -8,11 +8,13 @@
 # on the owner's word for this change. See docs/shipping-changes-safely.md.
 #
 # Fill in the three functions below (current_version, do_change, health_check), or put them in a file and pass
-# HOOKS=/path/to/hooks.sh, which this script sources after its defaults.
+# HOOKS=/path/to/hooks.sh, which this script sources after its defaults. now_hhmm (the clock the window uses) is a hook
+# too, so a test can set the time; nothing in the environment can.
 #
 # Rules this skeleton keeps (keep them when you edit it):
 #   - every precondition failure says "STOP ...: nothing changed" and exits 1 before anything is touched
 #   - a backup is taken and verified before the first write
+#   - a restore that fails says so (NOT RESTORED / NOT UNDONE) and leaves the live target in place, never "restored"
 #   - every rm names its path through ${VAR:?}, so an empty variable can never become `rm -rf /`
 #   - secrets are read at runtime into a variable (secret below), never echoed, logged or passed on a command line
 #   - out of the change window only with DAYTIME_OK=1 and APPROVED_BY naming who approved it
@@ -34,6 +36,7 @@ MODE=${1:-check}
 current_version() { [ -n "$REPO" ] && git -C "$REPO" rev-parse --short=7 HEAD || echo unknown; }
 do_change() { echo "PLACEHOLDER: write the change to $TARGET here"; return 1; }   # return non-zero on any failure
 health_check() { return 0; }   # PLACEHOLDER: e.g. curl -fsS --max-time 10 http://127.0.0.1:8080/health >/dev/null
+now_hhmm() { TZ=$TZ_WINDOW date +%H%M; }   # the clock the window uses (a hook, so tests can set it; no env override)
 [ -n "${HOOKS:-}" ] && { . "${HOOKS:?}" || { echo "STOP cannot read HOOKS=$HOOKS: nothing changed"; exit 1; }; }
 
 # ---- helpers -------------------------------------------------------------------------------------------------------
@@ -47,13 +50,18 @@ window_ok() {
     [ -n "${APPROVED_BY:-}" ] || { echo "STOP DAYTIME_OK=1 needs APPROVED_BY=<who approved this run>: nothing changed"; exit 1; }
     return 0
   fi
-  local now=$((10#${NOW_HHMM:-$(TZ=$TZ_WINDOW date +%H%M)})) a=$((10#${WINDOW%-*})) b=$((10#${WINDOW#*-}))
-  [ "$now" -ge "$a" ] && [ "$now" -le "$b" ]
+  local now=$((10#$(now_hhmm))) a=$((10#${WINDOW%-*})) b=$((10#${WINDOW#*-}))
+  if [ "$a" -le "$b" ]; then [ "$now" -ge "$a" ] && [ "$now" -le "$b" ]
+  else [ "$now" -ge "$a" ] || [ "$now" -le "$b" ]; fi   # a window that crosses midnight, e.g. 2200-0600
 }
 take_lock() { mkdir "$LOCK" 2>/dev/null || return 1; trap 'rmdir -- "${LOCK:?}" 2>/dev/null' EXIT; }
-restore() {   # put the newest backup back; used by undo and by a failed health check
-  local b; b=$(cat "$BACKUP_DIR/last" 2>/dev/null) && [ -n "$b" ] && [ -e "$b/target" ] || { echo "STOP no backup to restore"; return 1; }
-  rm -rf -- "${TARGET:?}" && cp -Rp -- "${b:?}/target" "${TARGET:?}" && ok "restored $TARGET from $b"
+restore() {   # put the newest backup back; used by undo and by a failed change or health check. Returns 1 if it could not.
+  # The backup is copied next to the target first, so a copy that fails leaves the live target as it was.
+  local b t; b=$(cat "$BACKUP_DIR/last" 2>/dev/null) && [ -n "$b" ] && [ -e "$b/target" ] || { echo "STOP no backup to restore"; return 1; }
+  t="${TARGET:?}.restore-$$"; rm -rf -- "${t:?}"
+  cp -Rp -- "${b:?}/target" "${t:?}" 2>/dev/null || { rm -rf -- "${t:?}"; echo "STOP could not copy the backup from $b; $TARGET left as it is"; return 1; }
+  rm -rf -- "${TARGET:?}" && mv -- "${t:?}" "${TARGET:?}" || { echo "STOP could not put the backup in place; it is at $t"; return 1; }
+  ok "restored $TARGET from $b"
 }
 
 case "$MODE" in
@@ -94,12 +102,16 @@ diff -r -- "$TARGET" "$B/target" >/dev/null || { rm -rf -- "${B:?}"; stop "backu
 echo "$B" > "$BACKUP_DIR/last"; ok "backup at $B (undo: bash $0 undo)"
 
 if ! do_change; then
-  echo "FAIL the change did not apply: restoring"; restore; echo "== $NAME: STOP (restored) =="; exit 1
+  echo "FAIL the change did not apply: restoring"
+  if restore; then echo "== $NAME: STOP (restored) =="; else echo "== $NAME: STOP, NOT RESTORED: $TARGET may be half-changed; restore it by hand from $B =="; fi
+  exit 1
 fi
 ok "change applied"
 if health_check; then
   ok "healthy after the change"; echo "== $NAME OK =="; exit 0
 fi
 echo "FAIL not healthy after the change: undoing automatically"
-restore && health_check && ok "healthy again after the undo"
-echo "== $NAME: UNDONE AUTOMATICALLY =="; exit 1
+if ! restore; then echo "== $NAME: NOT UNDONE: the restore failed; $TARGET has the change; restore it by hand from $B =="; exit 1; fi
+if health_check; then ok "healthy again after the undo"; echo "== $NAME: UNDONE AUTOMATICALLY =="
+else echo "== $NAME: UNDONE AUTOMATICALLY, BUT NOT HEALTHY: look now =="; fi
+exit 1
