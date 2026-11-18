@@ -1,0 +1,22 @@
+# Token trim + code on Opus (owner, 9 Nov 2026): build in-session up to 200 lines (BMAD default 100);
+# code is written only by Opus (5.5 or later); its review lenses pass no model, so they run on the subagent default (ADE's, else Sonnet; 11 Nov 2026), as in bmad-code-review.toml.
+[workflow]
+persistent_facts = [
+  "Code is written only by an Opus model (Opus 5.5 or later). If this session is not running on Opus, take route full whatever the size, so the Opus implementation subagent writes the code.",
+  "Every review-lens subagent this workflow launches (the oneshot review and step-04, quick or thorough) runs on the subagent default model: pass no model to the Agent tool for each one, so it follows CLAUDE_CODE_SUBAGENT_MODEL (set by ADE, else the hub's HUB_SUBAGENT_MODEL, Sonnet). This replaces the rule that review subagents match the session's model. Triage stays in this session. Exception: when the user asks for an Opus review, launch the lenses on \"opus\" instead.",
+]
+route_selection = """
+Decide whether to use a coding subagent (full) or implement directly (oneshot).
+If this session is not running on Opus, choose full.
+Otherwise, using the information already gathered, with no further reading and minimal
+extra reasoning, estimate the lines of code to add or modify.
+200 lines or fewer: oneshot. Otherwise: full.
+If the change touches more than five files and is not simple or mechanical,
+consider upgrading to full.
+"""
+implementation_handoff = """
+Launch a subagent on the Opus model (pass model "opus" to the Agent tool) with no prior conversation context, with this prompt:
+> Read {plan_file} fully and implement it — the plan is the sole source of truth. Load every file listed in its frontmatter `context:` before you start.
+>
+> When done, report what you changed, how you verified it, and anything left incomplete or risky.
+"""

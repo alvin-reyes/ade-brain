@@ -22,7 +22,7 @@ history** of the work and runs Claude Code agents that know them. Client code st
 | Command | Does |
 |---|---|
 | `bin/context [folder]` | every folder's state, or one folder's state and journal |
-| `bin/work [opts] <folder> [repo]` | deep work in a new Terminal in the folder's repo checkout |
+| `bin/work [opts] <folder> [repo]` | deep work in a new Terminal in the folder's repo checkout, as the caller's Claude install and account (`CLAUDE_CONFIG_DIR`) |
 | `bin/journal <folder> "<text>"` | one dated journal entry |
 | `bin/new projects/<name>` / `ops/<name>` | a new folder plus its agent |
 | `bin/brain search "<words>"` | search every section of the hub (keywords + meaning); `bin/brain index` refreshes |
@@ -31,7 +31,8 @@ history** of the work and runs Claude Code agents that know them. Client code st
 | `bin/doctor` | what this Mac can reach; never prints a secret |
 | `bin/briefing`, `bin/schedule install` | the morning briefing; the launchd jobs (briefing, monitor, sync) |
 | `bin/monitor` | run every folder's `monitors.d/*.sh`; journal status changes and ALERTs, notify on ALERT |
-| `bin/work --model M --agent-model [name=]M` | override this hub's models for one session (defaults in `hub.conf`) |
+| `bin/work --model M --agent-model [name=]M` | override this hub's models for one session (defaults in `hub.conf`; subagents with no model use an inherited `CLAUDE_CODE_SUBAGENT_MODEL`, else `HUB_SUBAGENT_MODEL`) |
+| `bin/work --force <folder>`, `bin/sessions` | a second session for a folder already running (refused without it); the running sessions (`--mine`: yours) |
 | `bin/sync`, then `bin/sync --yes` | review, then commit and push hub files only |
 | `bin/sync --auto` | the same, unattended (the 30-minute job and each session end); log `~/.agent-hub/{{NAME}}/logs/sync.log` |
 
