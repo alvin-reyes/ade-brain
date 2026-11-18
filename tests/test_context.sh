@@ -15,6 +15,13 @@ echo '- [Deploy steps](deploy-steps.md) — staging first, then prod' >> memory/
 out=$(bin/context projects/demo --rules); echo "$out" | grep -q "^## Hub memory (read a file from $HUB/memory/" || fail "--rules names the hub memory dir: [$out]"
 echo "$out" | grep -qxF -- '- [Deploy steps](deploy-steps.md) — staging first, then prod' || fail "--rules prints the memory index lines"
 bin/context projects/demo | grep -q "Deploy steps" && fail "memory index printed without --rules"
+# coordination: every focus session gets it (a checkout session does not load the hub CLAUDE.md); the main-agent section stays at the hub root
+out=$(bin/context projects/demo --rules); echo "$out" | grep -q '^## Coordination' || fail "--rules prints the Coordination section"
+echo "$out" | grep -q '^## The main agent' && fail "--rules leaves out the main-agent section"
+bin/context projects/demo | grep -q '^## Coordination' && fail "Coordination printed without --rules"
+# everything a focus session or its subagents produce reports to the main session
+echo "$out" | grep -q "Report to the main session" || fail "--rules tells focus sessions to report to the main session"
+echo "$out" | grep -q "subagents you start" || fail "--rules covers the subagents a focus session starts"
 bin/journal >/dev/null 2>&1; assert_eq "$?" "2" "journal needs args"
 touch -t 202001010000 projects/demo/STATE.md
 bin/stop-check projects/demo | grep -q "STATE.md" || fail "stop-check reminds"
