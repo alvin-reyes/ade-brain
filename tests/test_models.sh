@@ -84,4 +84,30 @@ echo "$out" | grep -q '\\"model\\":\\"opus\\"' || fail "--agent-model name=M win
 S="$(mktemp -d)"; printf '#!/bin/bash\necho "$@" > "%s/args"; echo ok-brief\n' "$S" > "$S/fc"; chmod +x "$S/fc"
 env -u HUB MONITOR_QUIET=1 AGENT_CLAUDE="$S/fc" bin/briefing >/dev/null || fail "briefing failed"
 assert_contains "$S/args" "--model sonnet" "briefing model from hub.conf"
+# --- bin/models: show and change every model setting after init ---
+m() { (cd "$D" && env -u HUB bin/models "$@"); }
+out=$(m) || fail "models show failed"
+for k in "root +HUB_ROOT_MODEL" "focus +HUB_MODEL +opus" "agents +HUB_AGENT_MODEL +sonnet" "subagents +HUB_SUBAGENT_MODEL" "briefing +HUB_BRIEFING_MODEL +sonnet"; do
+  echo "$out" | grep -qE "^$k" || fail "models shows $k [$out]"; done
+m set agents haiku >/dev/null || fail "set agents"
+. "$D/hub.conf"; assert_eq "$HUB_AGENT_MODEL" "haiku" "set agents writes hub.conf"
+assert_contains "$D/.claude/agents/planning.md" "model: haiku" "set agents rewrites the folder agents"
+assert_contains "$D/.claude/agents/tech-lead.md" "model: opus" "set agents leaves the persona agent"
+assert_eq "$HUB_OWNER" "Sam" "other hub.conf values are kept"
+m set focus sonnet >/dev/null || fail "set focus"
+. "$D/hub.conf"; assert_eq "$HUB_MODEL" "sonnet" "set focus writes HUB_MODEL"
+assert_contains "$D/.claude/agents/tech-lead.md" "model: sonnet" "set focus updates the persona agent"
+(cd "$D" && env -u HUB bin/new projects/mdl >/dev/null && env -u HUB WORK_DRY=1 bin/work projects/mdl) | grep -q -- "--model sonnet" || fail "focus sessions start on the focus model"
+m set root opus >/dev/null || fail "set root"
+assert_eq "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["model"])' "$D/.claude/settings.json")" "opus" "set root writes the root settings"
+m set all 'opus[1m]' >/dev/null || fail "set all"
+. "$D/hub.conf"; assert_eq "$HUB_ROOT_MODEL/$HUB_MODEL/$HUB_AGENT_MODEL/$HUB_SUBAGENT_MODEL/$HUB_BRIEFING_MODEL" "opus[1m]/opus[1m]/opus[1m]/opus[1m]/opus[1m]" "set all sets every model"
+grep -q "^model: opus\[1m\]$" "$D/.claude/agents/planning.md" || fail "set all rewrites the agents"
+# negatives: nothing changes on a refused call
+cp "$D/hub.conf" "$S/conf.before"
+m set agents 'x;rm -rf' >/dev/null 2>&1; assert_eq "$?" "2" "bad model name refused"
+m set nope opus >/dev/null 2>&1; assert_eq "$?" "2" "unknown scope refused"
+m set agents >/dev/null 2>&1; assert_eq "$?" "2" "missing model refused"
+m frob >/dev/null 2>&1; assert_eq "$?" "2" "unknown command refused"
+cmp -s "$D/hub.conf" "$S/conf.before" || fail "a refused call changed hub.conf"
 echo ok

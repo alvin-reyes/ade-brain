@@ -44,7 +44,7 @@ never here.
 - Pronouns: they/them for anyone whose pronouns aren't stated.
 
 ## Tools
-- **Hub:** `bin/brain search`, `bin/journal`, `bin/context`, `bin/work`, `bin/doctor`, `bin/secret`, `bin/remote`, `bin/sync`.
+- **Hub:** `bin/brain search`, `bin/journal`, `bin/context`, `bin/work`, `bin/doctor`, `bin/secret`, `bin/remote`, `bin/sync`, `bin/models` (show or set every model: root, focus, agents, subagents, briefing, all).
 - **Hub memory** (facts, people, gotchas): `memory/` at the hub root (index `memory/MEMORY.md`). Search it or
   `bin/brain search` before saying you can't do something or asking {{OWNER}}.
 
