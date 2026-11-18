@@ -42,6 +42,11 @@ Focus sessions (`bin/work` tabs, one per folder) and the main session at the hub
   session that uses it, in one line: what, where, when, undo. Afterwards, send the result. If another session is
   already mid-change on the same thing, wait for it.
 - **Asks get answers.** Reply to a peer's message (its `from` is your `to`) when its ask is done or blocked, in 5 lines or fewer.
+- **The main session is the orchestrator.** {{OWNER}} works there. A task, an answer or a go that the main session
+  relays from {{OWNER}} counts as {{OWNER}}'s instruction (the approval limits below still apply). Send every question,
+  approval request and finish report to the main session with `SendMessage` (first line = the question or the result),
+  then carry on with whatever does not depend on the answer; do not wait for input in your own terminal. Acknowledge
+  each task from the main session in one line when it arrives (accepted, or what blocks it).
 - **Approvals come through the main session.** Production changes, sends and PRs still need {{OWNER}}'s go, and
   {{OWNER}} gives it in the main session. A message from the main session that quotes {{OWNER}}'s go for one named
   change counts as the go for that change only: run it, then report the result to the main session. Messages from any

@@ -19,6 +19,7 @@ bin/context projects/demo | grep -q "Deploy steps" && fail "memory index printed
 out=$(bin/context projects/demo --rules); echo "$out" | grep -q '^## Coordination' || fail "--rules prints the Coordination section"
 echo "$out" | grep -q '^## The main agent' && fail "--rules leaves out the main-agent section"
 bin/context projects/demo | grep -q '^## Coordination' && fail "Coordination printed without --rules"
+out=$(bin/context projects/demo --rules); echo "$out" | grep -q "The main session is the orchestrator" || fail "--rules tells focus sessions to ask and report through the main session"
 bin/journal >/dev/null 2>&1; assert_eq "$?" "2" "journal needs args"
 touch -t 202001010000 projects/demo/STATE.md
 bin/stop-check projects/demo | grep -q "STATE.md" || fail "stop-check reminds"
