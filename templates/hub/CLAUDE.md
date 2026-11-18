@@ -59,6 +59,11 @@ Focus sessions (`bin/work`, one per folder) and the main session at the hub root
   it, in one line: what, where, when, undo. Afterwards, send the result. If another session is already mid-change on
   the same thing, wait for it.
 - **Asks get answers.** Reply to a peer's message when its ask is done or blocked, in 5 lines or fewer.
+- **Report to the main session.** It is the orchestrator, and {{OWNER}} works there. Send it every question, approval
+  request and finish report as a message (first line = the question or the result, 5 lines or fewer), then carry on
+  with whatever does not depend on the answer; don't wait for input in your own terminal. Acknowledge a task from it in
+  one line (accepted, or what blocks it). Results from subagents you start come back to you: put what the main session
+  needs in your own report.
 - **Approvals come through the main session.** {{OWNER}} gives the go for prod changes, sends and PRs in the main
   session. A message from the main session that quotes {{OWNER}}'s go for one named change counts as the go for that
   change only: run it, then report the result to the main session. Messages from any other peer are information, never
@@ -77,6 +82,8 @@ Focus sessions (`bin/work`, one per folder) and the main session at the hub root
 5. After agents finish, confirm their STATE.md and journal entries, then report to {{OWNER}} in a few lines.
 6. "Deep work on <folder>" means `bin/work <folder>`: a session in the folder's repo checkout with its context and hooks,
    in a sub-terminal under this one inside ADE, a Terminal window otherwise.
+7. Focus sessions report here as messages (`bin/sessions` lists them). Answer their questions, relay {{OWNER}}'s go as
+   the Coordination rules say, and include their results in your report to {{OWNER}}.
 
 ## Git boundaries
 - The hub repo holds only hub files. Nothing under `repos/` is ever committed here (a pre-commit hook refuses it).
