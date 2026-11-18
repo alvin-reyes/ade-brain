@@ -117,7 +117,7 @@ Plus: every check named in C1 to C19 appears by name in the output of `tests/tes
 
 ## Verification (QA)
 
-QA, 2026-11-09, at f3e8b9b (branch `w1-bin-work-ade`). Command run hermetically: `env -i PATH="$PATH" HOME="$S/home" TMPDIR="$S/tmp" LANG=C bash tests/run.sh` with `S=$(mktemp -d /tmp/w1q.XXXX)`. No real ADE, osascript or claude. `shasum` of `~/.claude-caiden/settings.json` (5f36b2ea...) and `~/.claude/settings.json` (7d2a7b7e...) was identical before and after.
+QA, 2026-11-09, at f3e8b9b (branch `w1-bin-work-ade`). Command run hermetically: `env -i PATH="$PATH" HOME="$S/home" TMPDIR="$S/tmp" LANG=C bash tests/run.sh` with `S=$(mktemp -d /tmp/w1q.XXXX)`. No real ADE, osascript or claude. `shasum` of `~/.claude-work/settings.json` (5f36b2ea...) and `~/.claude/settings.json` (7d2a7b7e...) was identical before and after.
 
 Real output (exit 0):
 
