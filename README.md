@@ -22,6 +22,40 @@ its own repos.
   (`bin/brain`). Hooks read them back at session start and on every prompt, so each session knows what the others did.
 - **Verified, not vibed**: work follows the ADE rules (`.ade/rules.md`) and BMAD skills, and the tests decide Done.
 
+```mermaid
+flowchart LR
+  owner([Owner]) -- "go" --> main["Main agent<br/>hub root session<br/>(the orchestrator)"]
+  main -- "report" --> owner
+  main -- "task, not history" --> fa["Folder agents<br/>subagents, own context"]
+  main -- "bin/work folder" --> fs["Focus sessions<br/>own terminal, repo checkout"]
+  fa -- "5-line result" --> main
+  fs -- "questions, approvals,<br/>finish reports" --> main
+  fa & fs -- "write" --> files[("Shared files<br/>STATE.md · journal<br/>memory · brain.db")]
+  files -- "read back: session start,<br/>every prompt" --> main
+  fs -- "code, branches, PRs" --> repo[("Client repos")]
+```
+
+A focus session, start to end:
+
+```mermaid
+sequenceDiagram
+  participant M as Main agent
+  participant W as bin/work
+  participant F as Focus session
+  participant H as Hub files
+  M->>W: bin/work projects/app
+  W->>W: one session per folder, the caller's account, token limits
+  W->>F: opens a Terminal window, or an ADE sub-terminal, in the checkout
+  H-->>F: SessionStart: folder state and the hub rules (bin/context)
+  loop every prompt
+    H-->>F: what other sessions changed (bin/changes)
+    F->>M: questions and approval requests
+  end
+  F->>H: STATE.md and the journal (Stop asks after new commits)
+  F->>M: finish report
+  F->>H: SessionEnd: journal the commits, commit the folder, sync
+```
+
 **Guide:** [`docs/index.html`](docs/index.html) walks through making a hub, the daily flow, hooks, the brain, auto sync,
 monitors and every setting, with flow diagrams.
 
@@ -66,6 +100,8 @@ Or locally, without GitHub: `bin/init ... --dest ~/Project/acme-sre` copies the 
 | `--briefing-model M` | the morning briefing's model (default `haiku`) |
 | `--brain-path <path>` | extra folders, files or globs the brain indexes (e.g. `~/client/docs`, `'~/client/*.md'`), repeatable |
 | `--embed-model M`, `--ollama-url URL` | the local embedding model (default `nomic-embed-text`) and Ollama address |
+| `--root-model M` | `HUB_ROOT_MODEL`: the hub root (orchestrator) session's model, in its settings (default `sonnet`; a `--model` flag or ADE's still wins) |
+| `--compact-window N`, `--bash-max-chars N` | token limits: compact at N tokens (default `200000`) and cap inline Bash output at N characters (default `8000`); `0` leaves Claude's default. See "Saving tokens" |
 | `--auto-sync on\|off` | `HUB_AUTO_SYNC`: push the hub every 30 minutes and at each focus session end (default `on`) |
 
 ## Personas
@@ -103,7 +139,8 @@ bin/brain search "what did the client decide about SMS"   # file:line, heading, 
 bin/brain status                    # sections, embedded, stale files
 ```
 
-Files stay the source of truth: agents write STATE, memory and notes as before; the index is rebuilt from them. Sections
+Files stay the source of truth: agents write STATE, memory and notes as before; the index is rebuilt from them, at each
+focus session's end and every 30 minutes by `bin/monitor` (incremental). Sections
 that look like they hold a secret are never indexed. `bin/doctor` checks the index is fresh and the model is pulled.
 
 ## Models and Claude installs
@@ -124,7 +161,27 @@ Focus sessions run as the same install and account as whoever starts them: `bin/
 caller's `PATH` (a new window's login shell may find another `claude` first), and the session keeps the caller's
 `CLAUDE_CONFIG_DIR`, or none when the caller has none. A wrapper that exports its own `CLAUDE_CONFIG_DIR` still wins.
 
+When a focus session runs on another account than the hub's, `bin/work` links the hub's memory into that account (and
+says so), so what the session remembers still reaches the hub. For hub-root sessions on another account, run
+`bin/setup --config-dir <that account's dir>`; `bin/doctor` names a shell account that lacks the link.
+
 Other providers (OpenRouter, Ollama, a second account) work through a wrapper command passed as `--claude`.
+
+## Saving tokens
+
+Most of a session's cost is its context, re-read on every call. Measured on four hubs over 30 days, 69% of context
+tokens were in calls already over 200k, and most Bash output came from a few long results. The defaults cap both:
+
+| Limit | Default | Focus sessions (`bin/work`) | Hub root |
+|---|---|---|---|
+| Compact the context at | 200k tokens (`HUB_COMPACT_WINDOW`) | the launcher exports `CLAUDE_CODE_AUTO_COMPACT_WINDOW` | `autoCompactWindow` in `.claude/settings.json` |
+| Inline Bash output | 8,000 characters (`HUB_BASH_MAX_CHARS`) | the launcher exports `BASH_MAX_OUTPUT_LENGTH` | `bashOutputMaxChars` in `.claude/settings.json` |
+| The orchestrator's model | `sonnet` (`HUB_ROOT_MODEL`) | (their own `HUB_MODEL`) | `model` in `.claude/settings.json` |
+
+A value the session inherits (ADE's) wins over the launcher's; `0` leaves Claude's default. Longer Bash output goes to a
+file with a short preview, which Claude reads only as needed. Code is still written on Opus (`bmad-build`). A hub made
+earlier gets the limits when it pulls the template; add `"model": "sonnet"` to its `.claude/settings.json` by hand.
+Habits that help too: one task per focus session (`bin/work --prompt "<task>"`), and folder agents' five-line replies.
 
 ## Providers behind Claude Code
 

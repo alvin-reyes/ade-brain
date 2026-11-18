@@ -22,4 +22,6 @@ for m in "$H"/projects/*/monitors.d/*.sh "$H"/ops/*/monitors.d/*.sh; do
     osascript -e "display notification \"$(echo "$out" | grep '^ALERT' | head -1 | tr -d '"\\')\" with title \"$(hub_name): $folder\"" 2>/dev/null
   fi
 done
+# refresh the brain index (incremental: only changed files are re-read and re-embedded), quietly; it never fails the run
+[ -x "$H/bin/brain" ] && timeout 120 "$H/bin/brain" index >/dev/null 2>&1
 exit 0

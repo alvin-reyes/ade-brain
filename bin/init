@@ -6,15 +6,16 @@
 #            [--secret <name>]... [--briefing HH:MM] [--claude <cmd>] [--claude-config-dir <dir>]
 #            [--model M] [--effort low|medium|high|xhigh|max] [--agent-model M] [--subagent-model M] [--briefing-model M]
 #            [--brain-path <dir>]... [--embed-model M] [--ollama-url URL] [--auto-sync on|off]
+#            [--root-model M] [--compact-window N] [--bash-max-chars N]   (token limits; 0 or "" = Claude's default)
 #   bin/init --list   the personas
 # --dest copies the template to a new directory first (it must not exist); without it, initializes in place.
 # Never overwrites an initialized hub (one with hub.conf). Writes no secrets: only names and locations.
-set -u; T="$(cd "$(dirname "$0")/.." && pwd)"
-usage() { sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+set -u; T="$(cd "$(dirname "$0")/.." && pwd)"; . "$T/bin/lib.sh"
+usage() { sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 fm() { awk -v k="$2" -F': ' '/^---$/{n++; next} n==1 && $1==k {sub(/^[^:]*: /,""); print; exit}' "$1"; }
 if [ "${1:-}" = --list ]; then for p in "$T"/personas/*.md; do printf '%-28s %s\n' "$(basename "$p" .md)" "$(fm "$p" title)"; done; exit 0; fi
 PERSONA=""; CLIENT=""; OWNER=""; NAME=""; DEST=""; FOLDERS=""; REPOS=(); CODE_OWNER=""; REMOTE=""; RKEY=""; RDIR=""
-STAGING=""; SECRETS=(); BRIEF="08:00"; CLAUDE_CMD="claude"; CFG=""; MODEL=""; EFFORT=""; AMODEL="sonnet"; SMODEL="sonnet"; BMODEL="haiku"; BPATHS=(); EMODEL="nomic-embed-text"; OURL="http://localhost:11434"; ASYNC="on"
+STAGING=""; SECRETS=(); BRIEF="08:00"; CLAUDE_CMD="claude"; CFG=""; MODEL=""; EFFORT=""; AMODEL="sonnet"; SMODEL="sonnet"; BMODEL="haiku"; BPATHS=(); EMODEL="nomic-embed-text"; OURL="http://localhost:11434"; ASYNC="on"; RMODEL="sonnet"; CWIN=200000; BMAX=8000
 while [ $# -gt 0 ]; do
   [ $# -ge 2 ] || usage
   case "$1" in
@@ -22,7 +23,7 @@ while [ $# -gt 0 ]; do
     --folders) FOLDERS="$2";; --repo) REPOS+=("$2");; --code-owner) CODE_OWNER="$2";; --remote) REMOTE="$2";;
     --remote-key) RKEY="$2";; --remote-dir) RDIR="$2";; --staging-url) STAGING="$2";; --secret) SECRETS+=("$2");;
     --briefing) BRIEF="$2";; --claude) CLAUDE_CMD="$2";; --claude-config-dir) CFG="$2";; --model) MODEL="$2";;
-    --effort) EFFORT="$2";; --agent-model) AMODEL="$2";; --subagent-model) SMODEL="$2";; --briefing-model) BMODEL="$2";; --brain-path) BPATHS+=("$2");;
+    --effort) EFFORT="$2";; --agent-model) AMODEL="$2";; --subagent-model) SMODEL="$2";; --briefing-model) BMODEL="$2";; --brain-path) BPATHS+=("$2");; --root-model) RMODEL="$2";; --compact-window) CWIN="$2";; --bash-max-chars) BMAX="$2";;
     --embed-model) EMODEL="$2";; --ollama-url) OURL="$2";; --auto-sync) ASYNC="$2";; *) usage;;
   esac; shift 2
 done
@@ -39,17 +40,16 @@ TITLE="$(fm "$P" title)"; [ -n "$MODEL" ] || MODEL="$(fm "$P" model)"; [ -n "$FO
 for m in "$MODEL" "$AMODEL" "$BMODEL" "$EMODEL"; do [ -z "$m" ] || [[ "$m" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "init: bad model name '$m'" >&2; exit 2; }; done
 # the subagent model may carry a context suffix such as sonnet[1m] (the same check as bin/work's SUBRE)
 SUBRE='^[][A-Za-z0-9._:/-]+$'; [[ "$SMODEL" =~ $SUBRE ]] || { echo "init: bad model name '$SMODEL'" >&2; exit 2; }
+[ -z "$RMODEL" ] || [[ "$RMODEL" =~ $SUBRE ]] || { echo "init: bad model name '$RMODEL'" >&2; exit 2; }
+# token limits (.ade/context/model-defaults.md): 0 leaves Claude's default; Claude Code takes 100000-1000000 for the window
+[[ "$CWIN" =~ ^[0-9]+$ ]] && { [ "$CWIN" = 0 ] || { [ "$CWIN" -ge 100000 ] && [ "$CWIN" -le 1000000 ]; }; } ||
+  { echo "init: --compact-window must be 0 or 100000-1000000 tokens" >&2; exit 2; }
+[[ "$BMAX" =~ ^[0-9]+$ ]] && { [ "$BMAX" = 0 ] || { [ "$BMAX" -ge 1000 ] && [ "$BMAX" -le 150000 ]; }; } ||
+  { echo "init: --bash-max-chars must be 0 or 1000-150000 characters" >&2; exit 2; }
 case "$ASYNC" in on|off) ;; *) echo "init: --auto-sync must be on or off" >&2; exit 2 ;; esac
 case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "init: --effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
 # the install's config dir: --claude-config-dir, else the CLAUDE_CONFIG_DIR its wrapper exports, else ~/.claude
-if [ -z "$CFG" ]; then
-  w="$(command -v "$CLAUDE_CMD" 2>/dev/null)"
-  if [ -n "$w" ] && [ -f "$w" ] && [ "$(wc -c < "$w")" -lt 65536 ]; then
-    CFG="$(sed -n "s/^[[:space:]]*export[[:space:]][[:space:]]*CLAUDE_CONFIG_DIR=[\"']\{0,1\}\([^\"']*\).*/\1/p" "$w" | head -1)"
-    CFG="${CFG//\$\{HOME\}/$HOME}"; CFG="${CFG//\$HOME/$HOME}"; CFG="${CFG/#\~/$HOME}"
-  fi
-  [ -n "$CFG" ] || CFG="$HOME/.claude"
-fi
+if [ -z "$CFG" ]; then CFG="$(wrapper_config_dir "$CLAUDE_CMD")"; [ -n "$CFG" ] || CFG="$HOME/.claude"; fi
 for f in $FOLDERS; do [[ "$f" =~ ^(projects|ops)/[a-z0-9-]+$ ]] || { echo "init: bad folder '$f'" >&2; exit 2; }; done
 H="$T"
 if [ -n "$DEST" ]; then
@@ -122,6 +122,11 @@ HUB_TOOLS=""
 HUB_BRAIN_PATHS=$(q "${BPATHS[*]+${BPATHS[*]}}")
 HUB_EMBED_MODEL=$(q "$EMODEL")
 HUB_OLLAMA_URL=$(q "$OURL")
+# token limits: the hub root's model (its .claude/settings.json; a --model flag or ANTHROPIC_MODEL still wins), and the
+# context window focus sessions and the hub root compact at and their inline Bash output cap (0 = Claude's default)
+HUB_ROOT_MODEL=$(q "$RMODEL")
+HUB_COMPACT_WINDOW=$(q "$CWIN")
+HUB_BASH_MAX_CHARS=$(q "$BMAX")
 # 1: bin/sync --auto pushes the hub every 30 minutes (bin/schedule) and at each focus session end; 0: off
 HUB_AUTO_SYNC=$([ "$ASYNC" = off ] && echo 0 || echo 1)
 CONF
@@ -142,6 +147,19 @@ s = re.sub(r"(?m)^output_folder = .*$", lambda m: "output_folder = " + q(out), s
 open(p, "w").write(s)
 PY
 fi
+# the hub root's settings: its model and token limits (keys, never an env block: an env value would replace ADE's)
+python3 - "$H/.claude/settings.json" "$RMODEL" "$CWIN" "$BMAX" <<'PY' || { echo "init: could not write .claude/settings.json" >&2; exit 1; }
+import json, sys
+p, model, win, bmax = sys.argv[1:]
+d = json.load(open(p))
+out = {}
+if model: out["model"] = model
+if win != "0": out["autoCompactWindow"] = int(win)
+if bmax != "0": out["bashOutputMaxChars"] = int(bmax)
+for k, v in d.items():
+    if k not in ("model", "autoCompactWindow", "bashOutputMaxChars"): out[k] = v
+open(p, "w").write(json.dumps(out, indent=2) + "\n")
+PY
 [ -f "$H/memory/MEMORY.md" ] || printf '# Memory index (hub root: cross-folder facts)\n\n' > "$H/memory/MEMORY.md"
 if [ ! -d "$H/.git" ]; then git -C "$H" init -q && git -C "$H" branch -M main 2>/dev/null; fi
 git -C "$H" config core.hooksPath .githooks
