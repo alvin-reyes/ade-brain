@@ -71,7 +71,7 @@ export PATH="$S:$PATH" AGENT_CLAUDE=claude
 printf '%s\n' 'HUB_PROVIDERS_ALLOWED="anthropic deepseek"' 'HUB_OWNED_BY_OWNER=1' > hub.conf
 bin/new projects/demo >/dev/null; bin/new projects/bare >/dev/null
 R="$(mktemp -d "$S/code.XXXXXX")/demo-code"; mkdir -p "$R" && git -C "$R" init -q
-printf '| demo-code | %s | main | Alvin | none |\n' "$R" >> projects/demo/ACCESS.md
+printf '| demo-code | %s | main | Owner | none |\n' "$R" >> projects/demo/ACCESS.md
 
 # inade CMD...: run CMD with the four ADE variables set (the fake helper)
 inade() { env ADE_HOOK_BIN="$S/ade-hook" ADE_HOOK_PORT=4711 ADE_HOOK_TOKEN=00ff00ff ADE_PTY_ID=7 "$@"; }

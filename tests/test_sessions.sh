@@ -3,7 +3,7 @@
 . "$(dirname "$0")/helpers.sh"
 make_hub; cd "$HUB"
 unset ADE_HOOK_BIN ADE_HOOK_PORT ADE_HOOK_TOKEN ADE_PTY_ID   # never the real ADE
-ST="$(mktemp -d)"; export RSPUR_STATE="$ST" AGENT_STATE="$ST"
+ST="$(mktemp -d)"; export AGENT_STATE="$ST"
 bin/new projects/demo >/dev/null
 S="$(mktemp -d)"; printf '#!/bin/bash\nexec sleep 30\n' > "$S/claude-stub"; chmod +x "$S/claude-stub"
 launch() { WORK_NO_OPEN=1 bin/work --force --claude claude-stub projects/demo 2>/dev/null | sed -n 's/^launcher: //p'; }
