@@ -48,8 +48,8 @@ never here.
 
 ## Coordination (focus sessions and the main session)
 Focus sessions (`bin/work`, one per folder) and the main session at the hub root work as one team.
-- **Who is running:** the agents list (`ListAgents` where the CLI has it). The `bin/changes` lines at each prompt show
-  what other folders just did; read them before acting.
+- **Who is running:** `bin/sessions`, or the agents list (`ListAgents` where the CLI has it). The `bin/changes` lines
+  at each prompt show what other folders just did; read them before acting.
 - **Each folder owns its work.** Anything that belongs to another folder (an alert, a client ask, a bug found in
   passing) goes to that folder's open session as a message, or to the main session if it has none. Never do it yourself.
 - **Shared things: say before, report after.** Before a deploy, merge, push or restart that touches something another
