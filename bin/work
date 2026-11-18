@@ -49,6 +49,11 @@ SUBM="${CLAUDE_CODE_SUBAGENT_MODEL:-${HUB_SUBAGENT_MODEL:-sonnet}}"
 # names may carry a context suffix such as sonnet[1m]; nothing that could end the launcher's double quotes ($ ` " \)
 SUBRE='^[][A-Za-z0-9._:/-]+$'
 [ "$PROV" != anthropic ] || [[ "$SUBM" =~ $SUBRE ]] || { echo "work: bad subagent model '$SUBM' (CLAUDE_CODE_SUBAGENT_MODEL or HUB_SUBAGENT_MODEL)" >&2; exit 2; }
+# token limits (.ade/context/model-defaults.md): the context window the session compacts at, and its inline Bash output
+# cap. Exported by the launcher unless the session inherits a value (ADE's wins); 0 leaves Claude's default.
+CWIN="${HUB_COMPACT_WINDOW:-200000}"; BMAX="${HUB_BASH_MAX_CHARS:-8000}"
+[[ "$CWIN" =~ ^[0-9]+$ ]] || { echo "work: bad HUB_COMPACT_WINDOW '$CWIN' (tokens; 0 = Claude's default)" >&2; exit 2; }
+[[ "$BMAX" =~ ^[0-9]+$ ]] || { echo "work: bad HUB_BASH_MAX_CHARS '$BMAX' (characters; 0 = Claude's default)" >&2; exit 2; }
 # hub.conf defaults (HUB_MODEL, HUB_EFFORT, HUB_AGENT_MODEL); the command line wins
 # (a provider session never takes HUB_MODEL, which may be a full Anthropic id)
 [ -n "$MODEL" ] || [ "$PROV" != anthropic ] || MODEL="${HUB_MODEL:-}"; [ -n "$EFFORT" ] || EFFORT="${HUB_EFFORT:-}"
@@ -261,6 +266,17 @@ if [ "$PROV" != anthropic ]; then   # the memory links bin/setup makes, inside t
     rm -f "$m"; ln -s "$2" "$m"; }
   plink "$H" "$H/memory"; plink "$dir" "$H/$F/memory"
 fi
+# a session on another Claude account than the hub's (HUB_CLAUDE_CONFIG_DIR) gets the hub's memory links there, as
+# bin/setup makes them, so what it remembers reaches the hub. Its account: the dir its wrapper exports, else the caller's
+# CLAUDE_CONFIG_DIR, else ~/.claude. Never with CLAUDE_HOME set (tests) or WORK_NO_OPEN; a dry run has exited above.
+if [ "$PROV" = anthropic ] && [ -z "${CLAUDE_HOME:-}" ] && [ "${WORK_NO_OPEN:-}" != 1 ]; then
+  SCD="$(wrapper_config_dir "$CL")"; SCD="${SCD:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"; HCD="$(claude_home)"
+  if [ "${SCD%/}" != "${HCD%/}" ]; then
+    if link_memory "$SCD" "$H" >/dev/null && link_memory "$SCD" "$dir" "$H/$F/memory" >/dev/null; then
+      echo "work: this session runs as $SCD, not the hub's $HCD; linked the hub's memory there" >&2
+    else echo "work: this session runs as $SCD, not the hub's $HCD, and the hub's memory could not be linked there" >&2; fi
+  fi
+fi
 # the command (it may hold quotes from the agents JSON) runs from a launcher script, so no AppleScript escaping is needed
 # the launcher registers the session in $(state_dir)/sessions/<name>.<launcher pid> while it runs (bin/sessions lists them);
 # parent = the Claude session that ran bin/work ($CLAUDE_PID), so an orchestrator can list its own children
@@ -275,6 +291,9 @@ sub=""; [ "$PROV" = anthropic ] && sub="export CLAUDE_CODE_SUBAGENT_MODEL=\"\${C
 if [ "$PROV" = anthropic ]; then
   if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then sub="${sub}export CLAUDE_CONFIG_DIR=$(sq "$CLAUDE_CONFIG_DIR")"$'\n'; else sub="${sub}unset CLAUDE_CONFIG_DIR"$'\n'; fi
 fi
+# the token limits (checked above), for every provider
+[ "$CWIN" = 0 ] || sub="${sub}export CLAUDE_CODE_AUTO_COMPACT_WINDOW=\"\${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-$CWIN}\""$'\n'
+[ "$BMAX" = 0 ] || sub="${sub}export BASH_MAX_OUTPUT_LENGTH=\"\${BASH_MAX_OUTPUT_LENGTH:-$BMAX}\""$'\n'
 # a terminal can carry the session variables of a Claude session that has exited (ADE hands them to every sub-terminal):
 # with them the new session starts as a child of that dead session and no other session can list or message it
 SESS_UNSET='unset CLAUDE_PID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN CLAUDE_CODE_SESSION_ID CLAUDE_CODE_BRIDGE_SESSION_ID CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_ENTRYPOINT CLAUDECODE'

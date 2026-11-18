@@ -10,6 +10,13 @@ done
 line OK "claude install" "$(claude_cmd) ($(claude_home))"
 m="$(claude_home)/projects/$(encode_path "$H")/memory"
 if [ -L "$m" ] && [ "$(readlink "$m")" = "$H/memory" ]; then line OK "hub memory link" "$m"; else line MISSING "hub memory link" "run bin/setup (links into $(claude_home))"; fi
+# a shell on another Claude account (its CLAUDE_CONFIG_DIR): sessions started from it keep their memory there
+SC="${CLAUDE_CONFIG_DIR:-}"; HC="$(claude_home)"
+if [ -z "${CLAUDE_HOME:-}" ] && [ -n "$SC" ] && [ "${SC%/}" != "${HC%/}" ]; then
+  m2="$SC/projects/$(encode_path "$H")/memory"
+  if [ -L "$m2" ] && [ "$(readlink "$m2")" = "$H/memory" ]; then line OK "hub memory link, this shell's account" "$m2"
+  else line MISSING "hub memory link, this shell's account" "$SC: run bin/setup --config-dir $SC"; fi
+fi
 if [ -f "$H/.local/brain.db" ]; then st=$("$H/bin/brain" status 2>/dev/null | awk '$1=="stale"{print $2}')
   [ "${st:-1}" = 0 ] && line OK "brain index" "up to date" || line MISSING "brain index" "${st:-?} file(s) changed since indexing: bin/brain index"
 else line MISSING "brain index" "none yet: bin/brain index"; fi

@@ -7,6 +7,22 @@ claude_home() { echo "${CLAUDE_HOME:-${HUB_CLAUDE_CONFIG_DIR:-${CLAUDE_CONFIG_DI
 # the Claude install hub sessions run as: AGENT_CLAUDE, else HUB_CLAUDE from hub.conf, else claude
 claude_cmd() { echo "${AGENT_CLAUDE:-${HUB_CLAUDE:-claude}}"; }
 encode_path() { printf '%s' "$1" | sed 's/[^A-Za-z0-9]/-/g'; }
+# wrapper_config_dir CMD: the CLAUDE_CONFIG_DIR a wrapper script exports (empty for a binary or a plain claude)
+wrapper_config_dir() { local w c; w="$(command -v -- "$1" 2>/dev/null)"
+  [ -n "$w" ] && [ -f "$w" ] && [ "$(wc -c < "$w")" -lt 65536 ] || return 0
+  c="$(sed -n "s/^[[:space:]]*export[[:space:]][[:space:]]*CLAUDE_CONFIG_DIR=[\"']\{0,1\}\([^\"']*\).*/\1/p" "$w" | head -1)"
+  c="${c//\$\{HOME\}/$HOME}"; c="${c//\$HOME/$HOME}"; c="${c/#\~/$HOME}"; printf '%s' "$c"; }
+# link_memory CONFIG_DIR DIR [TARGET]: Claude's auto-memory for sessions in DIR, inside CONFIG_DIR, becomes a link to
+# TARGET (default DIR/memory). Files already in a plain memory folder there are copied in first (never overwriting), and
+# the folder is kept as memory.bak-<time>. Prints "ok" when the link was already right, "linked" otherwise.
+link_memory() { local mem="$1/projects/$(encode_path "$2")/memory" tgt="${3:-$2/memory}"
+  mkdir -p "$tgt" "$(dirname "$mem")" || return 1
+  if [ -L "$mem" ] && [ "$(readlink "$mem")" = "$tgt" ]; then echo ok; return 0; fi
+  if [ -d "$mem" ] && [ ! -L "$mem" ]; then
+    cp -n "$mem"/* "$tgt/" 2>/dev/null || true
+    mv "$mem" "$mem.bak-$(date -u +%Y%m%dT%H%M%SZ)"
+  fi
+  rm -f "$mem"; ln -s "$tgt" "$mem" && echo linked; }
 utc_today() { date -u +%Y-%m-%d; }
 utc_now() { date -u +%H:%M; }
 folders() { local h; h="$(hub_root)"; for d in "$h"/projects/* "$h"/ops/*; do [ -d "$d" ] && echo "${d#$h/}"; done; }
