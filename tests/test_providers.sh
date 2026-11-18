@@ -71,7 +71,7 @@ settings_of() { printf '%s\n' "$1" | grep -o -- "--settings '[^']*'" | head -1 |
 jget() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1]))
 for k in sys.argv[2].split("."): d = d.get(k, "<absent>") if isinstance(d, dict) else "<absent>"
 print(json.dumps(d) if not isinstance(d, str) else d)' "$1" "$2"; }
-agents_json() { eval "$(printf '%s\n' "$1" | head -1 | sed -E 's/^.* --agents /printf %s /; s/ --(model|effort) [^ ]*//g; s/ -- .*$//')"; }
+agents_json() { eval "$(printf '%s\n' "$1" | head -1 | sed -E 's/^.* --agents /printf %s /; s/ --(permission-mode|model|effort) [^ ]*//g; s/ -- .*$//')"; }
 calls() { grep -c "^$1" "$SP_CALLS"; }
 dry() { WORK_DRY=1 bin/work "$@"; }
 # a provider dry run prints the command, then the merged settings JSON (no file is kept): the JSON, as a file to read
