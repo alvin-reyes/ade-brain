@@ -139,7 +139,7 @@ ade_and_window_launchers_are_identical() {
   cmp -s "$S/l.ade" "$S/l.win" || fail "the launchers differ: $(diff "$S/l.ade" "$S/l.win")"
   bash -n "$S/l.ade" || fail "the launcher is not valid bash"
   assert_eq "$(head -1 "$S/l.ade")" "#!/bin/bash" "shebang"
-  assert_eq "$(sed -n 2p "$S/l.ade")" "trap 'rm -f \"\$0\"' EXIT" "the launcher's trap"
+  assert_eq "$(sed -n 2p "$S/l.ade")" "trap 'rm -f \"\$0\" \"\$R\"' EXIT" "the launcher's trap (itself and its session record)"
   clean_tmp
 }
 # C5

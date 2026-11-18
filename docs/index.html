@@ -279,6 +279,7 @@ bin/work ops/environments          <span class="c"># deep work in one folder's r
       <tr><td><code>--claude-config-dir &lt;dir&gt;</code></td><td>that install's config dir, where memory and skills are linked</td><td>read from the wrapper's <code>export CLAUDE_CONFIG_DIR=</code>, else <code>~/.claude</code></td></tr>
       <tr><td><code>--model M</code>, <code>--effort E</code></td><td>deep-work sessions; the model also seeds the persona agent at init; effort is <code>low|medium|high|xhigh|max</code> and applies to <code>bin/work</code> only</td><td>the persona's model</td></tr>
       <tr><td><code>--agent-model M</code></td><td>the folder agents' model (written when each is made) and <code>bin/work</code>'s specialist agents</td><td><code>sonnet</code></td></tr>
+      <tr><td><code>--subagent-model M</code></td><td>the fallback for subagents that name no model (most BMAD skills'): <code>bin/work</code> sets <code>CLAUDE_CODE_SUBAGENT_MODEL</code> to it unless the session inherits one, so ADE's value wins; an explicit model still wins</td><td><code>sonnet</code></td></tr>
       <tr><td><code>--briefing-model M</code></td><td>the morning briefing</td><td><code>haiku</code></td></tr>
       <tr><td><code>--brain-path &lt;path&gt;</code></td><td>extra folders, files or globs the brain indexes (repeatable; quote globs)</td><td>none</td></tr>
       <tr><td><code>--embed-model M</code>, <code>--ollama-url URL</code></td><td>the local embedding model and Ollama address</td><td><code>nomic-embed-text</code>, <code>http://localhost:11434</code></td></tr>
@@ -443,7 +444,7 @@ sequenceDiagram
 
 <section id="deepwork">
   <h2>Deep work: <code>bin/work</code></h2>
-  <pre class="cmd"><code>bin/work [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--no-remote]
+  <pre class="cmd"><code>bin/work [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--no-remote] [--force]
          [--agent-model [name=]M] [--agent-effort [name=]E] &lt;projects|ops&gt;/&lt;name&gt; [repo]</code></pre>
   <div class="diagram"><pre class="mermaid">
 flowchart TD
@@ -462,6 +463,9 @@ flowchart TD
   <ul>
     <li><b>Remote Control</b> is on for every session, named after the folder (<code>projects/acme</code> → <code>acme</code>), so you can follow it from your phone.
       <code>--no-remote</code> turns it off. Use that with API-key wrappers such as OpenRouter or Ollama, because Remote Control needs a claude.ai login.</li>
+    <li><b>One session per folder.</b> When that folder's session is already running (a <code>claude</code> process with
+      <code>--remote-control &lt;name&gt;</code>), <code>bin/work</code> refuses with exit 3 and names its pid; <code>--force</code> opens another anyway.
+      <code>bin/sessions</code> lists the running sessions <code>bin/work</code> started; <code>--mine</code> keeps the ones the calling Claude session started.</li>
     <li><code>--prompt "&lt;task&gt;"</code> sends the session's first message.</li>
     <li><b>Specialist agents.</b> Markdown agent files in <code>&lt;folder&gt;/.claude/agents/</code> (front matter <code>name</code>, <code>description</code>, optional <code>tools</code> and <code>model</code>) are passed to the session as <code>--agents</code>.
       <code>bin/new</code> doesn't create any; add them yourself. <code>HUB_AGENT_MODEL</code> is their default model.
@@ -627,6 +631,7 @@ flowchart LR
       <tr><td><code>HUB_CLAUDE_CONFIG_DIR</code></td><td>its config dir (memory + skills links)</td><td>shell <code>CLAUDE_CONFIG_DIR</code> when unset</td></tr>
       <tr><td><code>HUB_MODEL</code>, <code>HUB_EFFORT</code></td><td>deep-work sessions (<code>bin/work</code>). The persona agent's model is written once, at init; effort doesn't apply to it</td><td><code>bin/work --model / --effort</code></td></tr>
       <tr><td><code>HUB_AGENT_MODEL</code></td><td>new folder agents (<code>bin/new</code>) and <code>bin/work</code>'s specialist agents</td><td><code>bin/work --agent-model</code></td></tr>
+      <tr><td><code>HUB_SUBAGENT_MODEL</code></td><td>subagents with no model of their own in <code>bin/work</code> sessions (fallback only)</td><td>an inherited <code>CLAUDE_CODE_SUBAGENT_MODEL</code> (e.g. ADE's)</td></tr>
       <tr><td><code>HUB_BRIEFING_MODEL</code></td><td>the briefing</td><td><code>AGENT_BRIEFING_MODEL</code></td></tr>
       <tr><td><code>HUB_CODE_OWNER</code></td><td>GitHub owner for bare repo names</td><td><code>AGENT_CODE_OWNER</code></td></tr>
       <tr><td><code>HUB_REPOS</code></td><td>repos <code>bin/doctor</code> checks you can read</td><td></td></tr>
@@ -656,10 +661,14 @@ flowchart LR
     <tbody>
       <tr><td><code>HUB_MODEL</code>, <code>HUB_EFFORT</code></td><td>deep-work sessions; <code>HUB_MODEL</code> also seeds the persona agent's <code>model:</code> at init</td><td><code>bin/work --model M --effort E</code>, or edit the agent file</td></tr>
       <tr><td><code>HUB_AGENT_MODEL</code></td><td>seeds each folder agent's <code>model:</code> when <code>bin/new</code> makes it; default for <code>bin/work</code>'s specialist agents</td><td><code>bin/work --agent-model [name=]M</code>, or edit the agent file</td></tr>
+      <tr><td><code>HUB_SUBAGENT_MODEL</code></td><td>the fallback <code>CLAUDE_CODE_SUBAGENT_MODEL</code> for <code>bin/work</code> sessions (subagents that name no model)</td><td>an inherited <code>CLAUDE_CODE_SUBAGENT_MODEL</code> (ADE's wins)</td></tr>
       <tr><td><code>HUB_BRIEFING_MODEL</code></td><td><code>bin/briefing</code></td><td><code>AGENT_BRIEFING_MODEL=M bin/briefing</code></td></tr>
       <tr><td><code>HUB_CLAUDE</code></td><td><code>bin/work</code> and <code>bin/briefing</code>; start the hub-root session with this command too</td><td><code>bin/work --claude CMD</code>, <code>AGENT_CLAUDE=CMD</code></td></tr>
     </tbody>
   </table></div>
+  <p>Focus sessions run as the same install and account as whoever starts them. <code>bin/work</code> resolves a bare command on the caller's <code>PATH</code>, since a new
+    window's login shell may find another <code>claude</code> first. The session keeps the caller's <code>CLAUDE_CONFIG_DIR</code>, or none when the caller has none. A wrapper
+    that exports its own <code>CLAUDE_CONFIG_DIR</code> still wins.</p>
   <p>Other providers, such as OpenRouter, Ollama or a second account, work through a wrapper command passed as <code>--claude</code>. <code>bin/init</code> reads the wrapper's
     <code>export CLAUDE_CONFIG_DIR=…</code> line to find its config dir. If you use a wrapper, start the hub-root session with it as well. Plain <code>claude</code> would use
     another config dir, without the hub's memory and skill links.</p>
@@ -720,6 +729,7 @@ flowchart LR
       <tr><td><code>bin/doctor</code></td><td>OK / MISSING for tools, the Claude install, memory link, brain index, SSH key, GitHub login, repos, remote box, staging, embeddings, secrets</td></tr>
       <tr><td><code>bin/context [folder] [--rules]</code></td><td>every folder's state, or one folder's state and journal</td></tr>
       <tr><td><code>bin/work [opts] &lt;folder&gt; [repo]</code></td><td>deep work in a new Terminal in the folder's checkout</td></tr>
+      <tr><td><code>bin/sessions [--mine | --parent PID]</code></td><td>the focus sessions <code>bin/work</code> started that are still running</td></tr>
       <tr><td><code>bin/new projects/&lt;name&gt;</code> · <code>ops/&lt;name&gt;</code></td><td>a new folder and its agent; never overwrites</td></tr>
       <tr><td><code>bin/journal &lt;folder&gt; "&lt;text&gt;"</code></td><td>one dated entry (<code>hub</code> for the root)</td></tr>
       <tr><td><code>bin/brain index [--full]</code> · <code>search [-n N] [--json] &lt;q&gt;</code> · <code>status</code></td><td>the searchable memory</td></tr>

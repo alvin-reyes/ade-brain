@@ -27,6 +27,46 @@ D3="$(mktemp -d)/h3"; bin/init --persona qa-test-engineer --client B --owner C -
 assert_eq "$(. "$D3/hub.conf"; echo "$HUB_CLAUDE_CONFIG_DIR")" "$HOME/.claude" "plain claude uses ~/.claude"
 bin/init --persona tech-lead --client B --owner C --model 'opus;rm' --dest "$(mktemp -d)/bad" >/dev/null 2>&1; assert_eq "$?" "2" "unsafe model refused"
 bin/init --persona tech-lead --client B --owner C --effort huge --dest "$(mktemp -d)/bad" >/dev/null 2>&1; assert_eq "$?" "2" "bad effort refused"
+# --- HUB_SUBAGENT_MODEL is a fallback only: no settings env (it would override ADE's); bin/work applies it at launch ---
+noenv() { python3 -c 'import json,sys; sys.exit("env" in json.load(open(sys.argv[1])))' "$1"; }
+for f in "$REPO/.claude/settings.json" "$REPO/templates/folder-settings.json" "$D3/.claude/settings.json" "$D3/projects/app/.claude/settings.json"; do
+  noenv "$f" || fail "no env block in $f (a settings env replaces ADE's value)"; done
+assert_eq "$(. "$D3/hub.conf"; echo "$HUB_SUBAGENT_MODEL")" "sonnet" "subagent model default"
+D4="$(mktemp -d)/h4"; bin/init --persona qa-test-engineer --client B --owner C --dest "$D4" --subagent-model haiku >/dev/null || fail "init 4"
+assert_eq "$(. "$D4/hub.conf"; echo "$HUB_SUBAGENT_MODEL")" "haiku" "--subagent-model"
+bin/init --persona tech-lead --client B --owner C --subagent-model 'x"y' --dest "$(mktemp -d)/bad" >/dev/null 2>&1; assert_eq "$?" "2" "unsafe subagent model refused"
+# a context suffix (sonnet[1m]) is a valid subagent model, as bin/work accepts it; hub.conf keeps it as given
+D5="$(mktemp -d)/h5"; bin/init --persona qa-test-engineer --client B --owner C --dest "$D5" --subagent-model 'sonnet[1m]' >/dev/null 2>&1 || fail "init with --subagent-model sonnet[1m]"
+assert_eq "$(. "$D5/hub.conf"; echo "$HUB_SUBAGENT_MODEL")" "sonnet[1m]" "--subagent-model keeps a bracket suffix"
+# sub ENV...: the launcher bin/work writes (WORK_NO_OPEN: nothing opened), printed and removed
+sub() { local o l; o=$(cd "$D4" && env -u HUB -u CLAUDE_HOME WORK_NO_OPEN=1 "$@" bin/work --no-remote projects/app) || return $?
+  l=$(printf '%s\n' "$o" | sed -n 's/^launcher: //p'); cat "$l"; rm -f "$l"; }
+out=$(sub env -u CLAUDE_CODE_SUBAGENT_MODEL) || fail "work 4"
+echo "$out" | grep -qF 'export CLAUDE_CODE_SUBAGENT_MODEL="${CLAUDE_CODE_SUBAGENT_MODEL:-haiku}"' || fail "work falls back to HUB_SUBAGENT_MODEL [$out]"
+echo "$out" | grep -q "_FORCE" && fail "an explicit subagent model must still win (no _FORCE)"
+x=$(echo "$out" | grep '^export CLAUDE_CODE_SUBAGENT_MODEL=')
+assert_eq "$(env -u CLAUDE_CODE_SUBAGENT_MODEL bash -c "$x; echo \$CLAUDE_CODE_SUBAGENT_MODEL")" "haiku" "the launcher exports the fallback"
+assert_eq "$(CLAUDE_CODE_SUBAGENT_MODEL=opus bash -c "$x; echo \$CLAUDE_CODE_SUBAGENT_MODEL")" "opus" "the launcher's own value wins"
+out=$(sub env CLAUDE_CODE_SUBAGENT_MODEL=opus) || fail "work 4 env"
+echo "$out" | grep -qF 'CLAUDE_CODE_SUBAGENT_MODEL="${CLAUDE_CODE_SUBAGENT_MODEL:-opus}"' || fail "an inherited (ADE) value wins over hub.conf [$out]"
+sed -i.bak 's/^HUB_SUBAGENT_MODEL=.*/HUB_SUBAGENT_MODEL=/' "$D4/hub.conf"
+out=$(sub env -u CLAUDE_CODE_SUBAGENT_MODEL); echo "$out" | grep -qF ':-sonnet}' || fail "an empty HUB_SUBAGENT_MODEL means sonnet"
+sed -i.bak 's/^HUB_SUBAGENT_MODEL=.*/HUB_SUBAGENT_MODEL="x;y"/' "$D4/hub.conf"
+sub env -u CLAUDE_CODE_SUBAGENT_MODEL >/dev/null 2>&1; assert_eq "$?" "2" "bad HUB_SUBAGENT_MODEL refused"
+sub env 'CLAUDE_CODE_SUBAGENT_MODEL=a b' >/dev/null 2>&1; assert_eq "$?" "2" "bad inherited subagent model refused"
+sub env 'CLAUDE_CODE_SUBAGENT_MODEL=a"b' >/dev/null 2>&1; assert_eq "$?" "2" "a quote in the inherited subagent model refused"
+# a 1M-context suffix (engines.md: sonnet[1m]) is a valid name ADE may set: kept, and exported as given
+out=$(sub env 'CLAUDE_CODE_SUBAGENT_MODEL=sonnet[1m]') || fail "an inherited sonnet[1m] was refused"
+x=$(echo "$out" | grep '^export CLAUDE_CODE_SUBAGENT_MODEL=')
+assert_eq "$(env -u CLAUDE_CODE_SUBAGENT_MODEL bash -c "$x; echo \$CLAUDE_CODE_SUBAGENT_MODEL")" "sonnet[1m]" "a bracket suffix reaches the session"
+# --- BMAD overrides: review lenses pass no model (they follow the subagent default), code on Opus, quick code review ---
+for t in bmad-build bmad-code-review; do
+  grep -q 'pass no model' "$REPO/_bmad/custom/$t.toml" || fail "$t review lenses pass no model"
+  grep -q 'pass model \\"sonnet\\"' "$REPO/_bmad/custom/$t.toml" && fail "$t must not pin sonnet (ADE decides)"
+  grep -q 'Opus review' "$REPO/_bmad/custom/$t.toml" || fail "$t: an Opus review runs the lenses on opus"; done
+grep -q 'written only by an Opus model' "$REPO/_bmad/custom/bmad-build.toml" || fail "bmad-build writes code on Opus"
+grep -q '^review = "quick"' "$REPO/_bmad/custom/bmad-code-review.toml" || fail "bmad-code-review defaults to quick"
+grep -q 'more than 200 changed lines' "$REPO/_bmad/custom/bmad-code-review.toml" || fail "a quick review of a big diff offers a thorough run"
 # --- persona model suggestion: the default when --model is not given ---
 grep -q "^model: opus" personas/fractional-cto.md || fail "fractional CTO suggests opus"
 assert_eq "$(. "$D3/hub.conf"; echo "$HUB_MODEL")" "$(awk -F': ' '$1=="model"{print $2; exit}' personas/qa-test-engineer.md)" "persona model is the default"

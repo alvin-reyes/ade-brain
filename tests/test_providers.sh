@@ -426,7 +426,7 @@ anthropic_path_unchanged() {
     echo "$a" | grep -qF -- "--settings '$HUB/projects/demo/.claude/settings.json'" || fail "anthropic uses the folder settings"
   done
   launch projects/demo; assert_eq "$rc" "0" "anthropic launch"; assert_eq "$(calls secret)" "0" "anthropic reads no key"
-  grep -q "^trap 'rm -f \"\$0\"' EXIT$" "$SP_CAP/launcher" || fail "anthropic launcher trap unchanged"
+  grep -q "^trap 'rm -f \"\$0\" \"\$R\"' EXIT$" "$SP_CAP/launcher" || fail "anthropic launcher trap unchanged (itself and its session record)"
 }
 
 # AC31: owner rule (2026-11-09): DeepSeek only in the owner's own hubs; a client hub refuses it even when allowed

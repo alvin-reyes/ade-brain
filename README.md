@@ -46,6 +46,7 @@ Or locally, without GitHub: `bin/init ... --dest ~/Project/acme-sre` copies the 
 | `--claude-config-dir <dir>` | that install's config dir (default: read from the wrapper, else `~/.claude`); memory and skills are linked there |
 | `--model M`, `--effort E` | the default model and effort for sessions (`bin/work`) and the persona agent (default: the persona's) |
 | `--agent-model M` | the folder agents' model (default `sonnet`) |
+| `--subagent-model M` | `HUB_SUBAGENT_MODEL`: the fallback for subagents that name no model of their own, e.g. most BMAD skills' (default `sonnet`). `bin/work` sets `CLAUDE_CODE_SUBAGENT_MODEL` to it only when the session doesn't inherit one, so ADE's value wins; no settings file sets it. An explicit model still wins: `bmad-build` writes code on Opus |
 | `--briefing-model M` | the morning briefing's model (default `haiku`) |
 | `--brain-path <path>` | extra folders, files or globs the brain indexes (e.g. `~/client/docs`, `'~/client/*.md'`), repeatable |
 | `--embed-model M`, `--ollama-url URL` | the local embedding model (default `nomic-embed-text`) and Ollama address |
@@ -99,8 +100,13 @@ memory and skills into the right place wherever you run it, and `bin/doctor` say
 |---|---|---|
 | `HUB_MODEL`, `HUB_EFFORT` | deep-work sessions, the persona agent | `bin/work --model M --effort E` |
 | `HUB_AGENT_MODEL` | folder agents (`.claude/agents/*.md`) | `bin/work --agent-model [name=]M`, or edit the agent file |
+| `HUB_SUBAGENT_MODEL` | subagents with no model of their own, in `bin/work` sessions (fallback) | an inherited `CLAUDE_CODE_SUBAGENT_MODEL` (e.g. ADE's) |
 | `HUB_BRIEFING_MODEL` | `bin/briefing` | `AGENT_BRIEFING_MODEL=M bin/briefing` |
 | `HUB_CLAUDE` | every session the hub starts | `bin/work --claude CMD`, `AGENT_CLAUDE=CMD` |
+
+Focus sessions run as the same install and account as whoever starts them: `bin/work` resolves a bare command on the
+caller's `PATH` (a new window's login shell may find another `claude` first), and the session keeps the caller's
+`CLAUDE_CONFIG_DIR`, or none when the caller has none. A wrapper that exports its own `CLAUDE_CONFIG_DIR` still wins.
 
 Other providers (OpenRouter, Ollama, a second account) work through a wrapper command passed as `--claude`.
 
@@ -147,7 +153,7 @@ A focus session can run Claude Code against DeepSeek instead of Anthropic. The C
   other terminals changed since the last prompt (STATE.md updates, new journal entries with their text, new or updated
   memory files with their description); in deep work Stop asks for a STATE update after new commits, and SessionEnd
   journals the commits, commits the folder and starts `bin/sync --auto`, which pushes.
-- **Deep work**: `bin/work <folder>` opens a Terminal in the folder's repo checkout with its context and hooks (a folder with no repo, such as an ops watcher, opens in the hub folder itself). `--prompt "<task>"` starts that session with its first message. Every session starts with Remote Control on, named after the folder, so you can follow it from your phone; `--no-remote` turns that off (use it with an API-key wrapper such as an OpenRouter or Ollama one: Remote Control needs a claude.ai login). Inside ADE it opens a sub-terminal of your tab instead, never a window (see "Deep work inside ADE").
+- **Deep work**: `bin/work <folder>` opens a Terminal in the folder's repo checkout with its context and hooks (a folder with no repo, such as an ops watcher, opens in the hub folder itself). `--prompt "<task>"` starts that session with its first message. Every session starts with Remote Control on, named after the folder, so you can follow it from your phone; `--no-remote` turns that off (use it with an API-key wrapper such as an OpenRouter or Ollama one: Remote Control needs a claude.ai login). One session per folder: if that folder's session is already running, `bin/work` refuses (exit 3) and names its pid; `--force` opens another anyway. `bin/sessions` lists the running sessions `bin/work` started (`--mine`: the ones this Claude session started). Inside ADE it opens a sub-terminal of your tab instead, never a window (see "Deep work inside ADE").
 - **Scheduled jobs** (`bin/schedule install`, launchd): the weekday morning briefing (`bin/briefing`, Haiku, read-only);
   `bin/monitor` every 30 minutes; and `bin/sync --auto` every 30 minutes.
 - **Auto sync**: `bin/sync --auto` commits and pushes the hub's files unattended: one run at a time, skipped while git
@@ -164,6 +170,9 @@ A focus session can run Claude Code against DeepSeek instead of Anthropic. The C
   launchd a monitor gets the plist's PATH only (`~/.local/bin`, Homebrew, system), not your shell profile, and is
   killed after `MONITOR_TIMEOUT` seconds (300).
 - **BMAD v6** skills in `.claude/skills/` for PRDs, specs, stories, builds and reviews, under the ADE rules (`.ade/rules.md`).
+  Token defaults (`_bmad/custom/`): code is written on Opus, review lenses pass no model (they run on the subagent
+  default: ADE's, else `HUB_SUBAGENT_MODEL`), and `bmad-code-review` is quick (one lens) unless you ask for a thorough
+  review.
 - **Access tools**: `bin/remote` (SSH to the box), `bin/secret` (macOS Keychain), `bin/doctor` (what this Mac can reach).
 
 Does a checkout know my work? Yes, as far as the hub's files go: STATE.md, memory, the journal and ACCESS.md are
