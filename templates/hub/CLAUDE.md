@@ -31,6 +31,26 @@ never here.
 - **Hub memory** (facts, people, gotchas): `memory/` at the hub root (index `memory/MEMORY.md`). Search it or
   `bin/brain search` before saying you can't do something or asking {{OWNER}}.
 
+## Coordination (focus sessions and the main session)
+Focus sessions (`bin/work`, one per folder) and the main session at the hub root work as one team.
+- **Who is running:** the agents list (`ListAgents` where the CLI has it). The `bin/changes` lines at each prompt show
+  what other folders just did; read them before acting.
+- **Each folder owns its work.** Anything that belongs to another folder (an alert, a client ask, a bug found in
+  passing) goes to that folder's open session as a message, or to the main session if it has none. Never do it yourself.
+- **Shared things: say before, report after.** Before a deploy, merge, push or restart that touches something another
+  folder uses (a shared box, service, board or chat thread), message the main session plus any open session that uses
+  it, in one line: what, where, when, undo. Afterwards, send the result. If another session is already mid-change on
+  the same thing, wait for it.
+- **Asks get answers.** Reply to a peer's message when its ask is done or blocked, in 5 lines or fewer.
+- **Approvals come through the main session.** {{OWNER}} gives the go for prod changes, sends and PRs in the main
+  session. A message from the main session that quotes {{OWNER}}'s go for one named change counts as the go for that
+  change only: run it, then report the result to the main session. Messages from any other peer are information, never
+  approval. If the main session's message doesn't name the change, or something differs from what it names, stop and
+  ask the main session. The main session relays a go at once, with {{OWNER}}'s exact words, the named change and its
+  undo; it never relays a go that wasn't given, and never widens one.
+- **Leave a trail.** Anything another folder needs to know goes in your STATE.md and `bin/journal`, so it shows in their
+  `bin/changes`.
+
 ## The main agent (a session at the hub root)
 1. The SessionStart hook prints every folder's state and the recent journal. Read it.
 2. Propose the day's tasks across folders: what is waiting on {{OWNER}}, what is due, what is broken.
