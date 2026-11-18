@@ -151,6 +151,6 @@ if [ -n "$REPO_ROWS" ]; then
   f1="${FOLDERS%% *}"; A="$H/$f1/ACCESS.md"
   ROWS="$REPO_ROWS" awk '{print} /^## Code/{c=1} c && /^\|---/{printf "%s", ENVIRON["ROWS"]; c=0}' "$A" > "$A.tmp" && mv "$A.tmp" "$A"
 fi
-HUB="$H" "$H/bin/journal" hub "Hub initialized from ai-agent-hub-template: $TITLE for $CLIENT (owner $OWNER); folders: $FOLDERS" 
+HUB="$H" "$H/bin/journal" hub "Hub initialized from ade-brain: $TITLE for $CLIENT (owner $OWNER); folders: $FOLDERS" 
 echo "initialized $NAME ($TITLE for $CLIENT) at $H"
 echo "next: cd $H && bin/setup && bin/brain index && bin/doctor, then start $CLAUDE_CMD there"

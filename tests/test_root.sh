@@ -10,7 +10,7 @@ grep -rqi "orillia\|arjuns57\|jared" bin templates personas docs README.md CLAUD
 # every relative link in an llms.txt index points at a file the hub actually has
 [ ! -f llms.txt ] || for l in $(grep -oE '\]\([^)]+\)' llms.txt | sed -E 's/^\]\(//; s/\)$//' | grep -v '://'); do [ -e "$l" ] || fail "llms.txt links to missing $l"; done
 python3 -c "import json; d=json.load(open('.claude/settings.json')); assert 'attribution' not in d and 'includeCoAuthoredBy' not in d" || fail "the template overrides commit attribution for every hub"
-grep -rni "alvin" templates | grep -qv "github.com/alvin-reyes/ai-agent-hub-template" && fail "a person's name is hard-coded in templates/ (use {{OWNER}})"
+grep -rni "alvin" templates | grep -qv "github.com/alvin-reyes/ade-brain" && fail "a person's name is hard-coded in templates/ (use {{OWNER}})"
 grep -rni "alvin" _bmad/custom && fail "a person's name in _bmad/custom/ (every hub copies it; say 'owner')"
 # every user-facing bin/work flag and the session list are documented
 for d in README.md docs/index.html templates/hub/README.md; do

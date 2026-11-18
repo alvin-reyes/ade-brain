@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="description" content="How to make, run and configure an AI agent hub from ai-agent-hub-template: setup, daily flow, hooks, brain, auto sync, monitors and every setting.">
+<meta name="description" content="How to make, run and configure an AI agent hub from ade-brain: setup, daily flow, hooks, brain, auto sync, monitors and every setting.">
 <title>Agent Hub Guide</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -103,7 +103,7 @@ html { scroll-behavior: smooth; }
 
 <header class="top">
   <div class="wrap">
-    <span class="eyebrow">ai-agent-hub-template · guide</span>
+    <span class="eyebrow">ade-brain · guide</span>
     <h1>Agent Hub Guide</h1>
     <p class="lede">How to make, run and configure an <strong>agent hub</strong>: a private repo of Bash and Markdown that holds the
       <strong>context, state and history</strong> of one technical persona's work for one client, on Claude Code.
@@ -226,7 +226,7 @@ flowchart TD
 
   <ol class="steps">
     <li><div><b>Create the repo from the template and clone it.</b>
-      <pre class="cmd"><code>gh repo create my-acme-sre --private --template alvin-reyes/ai-agent-hub-template --clone
+      <pre class="cmd"><code>gh repo create my-acme-sre --private --template alvin-reyes/ade-brain --clone
 cd my-acme-sre</code></pre>
       <p>Without GitHub: run <code>bin/init … --dest ~/Project/acme-sre</code> from a template checkout. It copies the template to that new folder
         first, leaving out <code>.git</code>, <code>hub.conf</code>, <code>repos/</code> and <code>_bmad-output/</code>. The folder must not exist yet.
@@ -288,7 +288,7 @@ bin/work ops/environments          <span class="c"># deep work in one folder's r
   </table></div>
   <p><code>bin/init</code> fills <code>{{CLIENT}}</code> and <code>{{OWNER}}</code> in the persona text. It sets BMAD's <code>project_name</code> and
     <code>output_folder</code> in <code>_bmad/config.toml</code> and creates <code>memory/MEMORY.md</code>. It runs <code>git init</code> on <code>main</code> when there is no <code>.git</code> yet,
-    sets <code>core.hooksPath .githooks</code>, makes every folder with <code>bin/new</code> and journals <i>"Hub initialized from ai-agent-hub-template"</i>.</p>
+    sets <code>core.hooksPath .githooks</code>, makes every folder with <code>bin/new</code> and journals <i>"Hub initialized from ade-brain"</i>.</p>
 </section>
 
 <section id="personas">
@@ -811,7 +811,7 @@ bin/schedule install</code></pre>
 </div>
 
 <footer>
-  <div class="wrap">Generated from the scripts in <a href="https://github.com/alvin-reyes/ai-agent-hub-template">ai-agent-hub-template</a>. When this page and a script disagree, the script is right.</div>
+  <div class="wrap">Generated from the scripts in <a href="https://github.com/alvin-reyes/ade-brain">ade-brain</a>. When this page and a script disagree, the script is right.</div>
 </footer>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
 <script>
