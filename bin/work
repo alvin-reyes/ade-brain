@@ -1,9 +1,10 @@
 #!/bin/bash
-# bin/work [--provider P] [--claude CMD] [--model M] [--effort E] [--prompt TEXT] [--no-remote] [--agent-model [name=]M] [--agent-effort [name=]E] <folder> [repo]: deep work in a new Terminal, inside the project's checkout, with the folder's hooks.
+# bin/work [--provider P] [--claude CMD] [--model M] [--effort E] [--prompt TEXT] [--name N] [--no-remote] [--agent-model [name=]M] [--agent-effort [name=]E] <folder> [repo]: deep work in a new Terminal, inside the project's checkout, with the folder's hooks.
 # A folder with no repo (none, or a "(none ...)" row) works in the hub folder itself. Clones a missing checkout (owner/name as given, else HUB_CODE_OWNER/<name>) to ${AGENT_CODE_DIR:-$HOME/Project}/<name> and records the path in ACCESS.md.
 # --claude picks the Claude install (default: claude_cmd in lib.sh). --model / --effort (anywhere in the arguments) pass through to claude for this session.
 # --prompt TEXT is the session's first message (passed last, after --, quoted for the launcher).
-# Remote Control is on for every session, named after the folder (projects/acme -> acme); --no-remote turns it off.
+# Remote Control is on for every session, named after the folder (projects/acme -> acme); --name N names it N instead
+# (two sessions on one folder); --no-remote turns it off.
 # --provider P (default HUB_PROVIDER from hub.conf, else anthropic) runs Claude Code against another provider's endpoint (story SP,
 # .ade/context/providers.md): only providers in hub.conf's HUB_PROVIDERS_ALLOWED; plain claude; no Remote Control, no resume;
 # its own config dir; a merged settings file whose apiKeyHelper reads the key (the key is checked once, never written).
@@ -16,13 +17,15 @@
 set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"
 # temp files (merged settings, launcher) go on any exit until the launcher is handed off; the launcher then removes them
 MS=""; L=""; trap '[ -z "$MS" ] || rm -f "$MS"; [ -z "$L" ] || rm -f "$L"' EXIT
-USAGE="usage: bin/work [--provider P] [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--no-remote] [--agent-model [name=]M] [--agent-effort [name=]E] <projects|ops>/<name> [repo]  (AGENT_TERMINAL=terminal|iterm|ade)"
-MODEL=""; EFFORT=""; PROMPT=""; REMOTE=1; CL="$(claude_cmd)"; POS=(); ASET=""; PROV="${HUB_PROVIDER:-anthropic}"
+USAGE="usage: bin/work [--provider P] [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--name N] [--no-remote] [--agent-model [name=]M] [--agent-effort [name=]E] <projects|ops>/<name> [repo]  (AGENT_TERMINAL=terminal|iterm|ade)"
+MODEL=""; EFFORT=""; PROMPT=""; REMOTE=1; RNAME=""; CL="$(claude_cmd)"; POS=(); ASET=""; PROV="${HUB_PROVIDER:-anthropic}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --model|--effort|--claude|--provider) [ $# -ge 2 ] || { echo "$USAGE" >&2; exit 2; }
       case "$1" in --model) MODEL="$2" ;; --effort) EFFORT="$2" ;; --provider) PROV="$2" ;; *) CL="$2" ;; esac; shift 2 ;;
     --no-remote) REMOTE=0; shift ;;
+    --name) [ $# -ge 2 ] && [[ "$2" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "work: --name needs a name of A-Za-z0-9._- only" >&2; exit 2; }
+      RNAME="$2"; shift 2 ;;
     --prompt) [ $# -ge 2 ] && [ -n "$2" ] || { echo "$USAGE" >&2; exit 2; }; PROMPT="$2"; shift 2 ;;
     --agent-model|--agent-effort) [ $# -ge 2 ] || { echo "$USAGE" >&2; exit 2; }
       k="${1#--agent-}"; v="${2#*=}"; n=""; [ "$v" = "$2" ] || n="${2%%=*}"
@@ -211,7 +214,7 @@ fi
 [ -n "$agents" ] && cmd="$cmd --agents $(printf %q "$agents")"
 [ -n "$MODEL" ] && cmd="$cmd --model $MODEL"
 [ -n "$EFFORT" ] && cmd="$cmd --effort $EFFORT"
-[ "$REMOTE" = 1 ] && cmd="$cmd --remote-control $(printf %q "${F##*/}")"
+[ "$REMOTE" = 1 ] && cmd="$cmd --remote-control $(printf %q "${RNAME:-${F##*/}}")"
 [ -n "$PROMPT" ] && cmd="$cmd -- $(printf %q "$PROMPT")"
 echo "$cmd"
 # a dry run shows the merged settings instead of keeping the file (the EXIT trap removes it)

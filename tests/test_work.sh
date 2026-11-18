@@ -129,6 +129,11 @@ echo "$out" | grep -q -- " --remote-control demo .*-- go$" || fail "remote contr
 WORK_DRY=1 bin/work --no-remote projects/demo | grep -q -- "--remote-control" && fail "--no-remote leaves it out"
 WORK_DRY=1 bin/work projects/demo --no-remote | grep -q -- "--remote-control" && fail "--no-remote after the folder leaves it out"
 WORK_DRY=1 bin/work projects/demo/ | grep -q -- " --remote-control demo" || fail "a trailing slash still names the session after the folder"
+# --name gives the session its own Remote Control name (two focus sessions on one folder)
+WORK_DRY=1 bin/work --name demo-redesign projects/demo | grep -q -- " --remote-control demo-redesign" || fail "--name sets the remote control name"
+WORK_DRY=1 bin/work projects/demo --name demo-data --prompt "go" | grep -q -- " --remote-control demo-data .*-- go$" || fail "--name after the folder, before the prompt"
+WORK_DRY=1 bin/work --name 'bad name;' projects/demo >/dev/null 2>&1; assert_eq "$?" "2" "--name refuses characters outside A-Za-z0-9._-"
+WORK_DRY=1 bin/work --name >/dev/null 2>&1; assert_eq "$?" "2" "--name needs a value"
 out=$(WORK_DRY=1 bin/work projects/demo demo-code --no-remote); echo "$out" | grep -q "cd '$R'" || fail "--no-remote after the repo still finds the repo"
 echo "$out" | grep -q -- "--remote-control" && fail "--no-remote after the repo leaves it out"
 # which claude install: HUB_CLAUDE from hub.conf, else claude; AGENT_CLAUDE or --claude picks another
