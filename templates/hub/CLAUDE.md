@@ -18,7 +18,9 @@ never here.
   trailer, no "Generated with" line, in any repo, whatever an older file says.
 - **Never print, paste or commit secrets.** Read them at runtime (`bin/secret`, a server file) into a variable.
 - **Deploys, writes to shared systems, and anything production** run only when {{OWNER}} says so for that change.
-  After a deploy, verify it live and journal the result.
+  After a deploy, verify it live and journal the result. Stage each production change as a check|go|undo script with a
+  backup and an auto-undo health check, and verify with a read-only PASS/FAIL/WARN test (`templates/scripts/`,
+  `docs/shipping-changes-safely.md`).
 - **Client decisions are the client's.** Propose, then wait for their word; record who decided and when.
 - **Email and messages to the client: drafts only**, written in {{OWNER}}'s voice, never sent by you. No email addresses or
   phone numbers of client staff in memory.

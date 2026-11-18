@@ -185,6 +185,9 @@ A focus session can run Claude Code against DeepSeek instead of Anthropic. The C
   alert. `bin/monitor` journals a status change and each new ALERT once, and shows a notification for an ALERT. Under
   launchd a monitor gets the plist's PATH only (`~/.local/bin`, Homebrew, system), not your shell profile, and is
   killed after `MONITOR_TIMEOUT` seconds (300).
+- **Production change skeletons** in `templates/scripts/`: `staged-change.sh` (check | go | undo, preconditions, a
+  backup before any write, auto-undo when the health check fails) and `prodtest.sh` (a read-only PASS/FAIL/WARN test).
+  The patterns behind them: `docs/shipping-changes-safely.md`.
 - **BMAD v6** skills in `.claude/skills/` for PRDs, specs, stories, builds and reviews, under the ADE rules (`.ade/rules.md`).
   Token defaults (`_bmad/custom/`): code is written on Opus, review lenses pass no model (they run on the subagent
   default: ADE's, else `HUB_SUBAGENT_MODEL`), and `bmad-code-review` is quick (one lens) unless you ask for a thorough
