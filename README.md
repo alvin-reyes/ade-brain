@@ -1,10 +1,26 @@
-# ai-agent-hub-template
+# ade-brain
 
-A template for an **AI technical persona that remembers your work**: a staff software engineer, DevOps/SRE, data
-engineer, QA, security engineer, architect, tech lead, PM or fractional CTO, for one client. It runs on Claude Code.
+The brain for agentic development: a template for an **AI technical persona that remembers your work and coordinates
+its agents**. The persona can be a staff software engineer, DevOps/SRE, data engineer, QA, security engineer,
+architect, tech lead, PM or fractional CTO, working for one client. It runs on Claude Code, inside ADE or in a plain
+terminal. (Formerly `ai-agent-hub-template`.)
 
-The hub is a private repo of Bash and Markdown that holds the **context, state and history** of the work. Every
-session starts with what is live, open and waiting; agents keep it up to date; the client's code stays in its own repos.
+Each brain is one **hub**: a private repo of Bash and Markdown that holds the **context, state and history** of the
+work. Every session starts with what is live, open and waiting; agents keep it up to date; the client's code stays in
+its own repos.
+
+## How it works
+
+- **The main agent is the orchestrator.** A Claude session at the hub root reads every folder's state, proposes the
+  day's tasks, and on the owner's go hands each one to the folder that owns it. It confirms the result in that
+  folder's STATE.md and the journal, then reports in a few lines. Only it (or `bin/sync`) commits to the hub.
+- **Folder agents** (`.claude/agents/<folder>.md`) run as its subagents: each gets the task, not the history, loads
+  its folder's context and replies in five lines or fewer.
+- **Focus sessions** (`bin/work <folder>`) take long or code-heavy work into their own terminal, in the folder's repo
+  checkout, with the folder's hooks. `bin/sessions` lists the ones running.
+- **Shared files are the memory**: each folder's STATE.md, the journal, `memory/`, and a local search index
+  (`bin/brain`). Hooks read them back at session start and on every prompt, so each session knows what the others did.
+- **Verified, not vibed**: work follows the ADE rules (`.ade/rules.md`) and BMAD skills, and the tests decide Done.
 
 **Guide:** [`docs/index.html`](docs/index.html) walks through making a hub, the daily flow, hooks, the brain, auto sync,
 monitors and every setting, with flow diagrams.
@@ -13,7 +29,7 @@ monitors and every setting, with flow diagrams.
 
 ```bash
 # on GitHub: create a private repo from this template, then clone it
-gh repo create my-acme-sre --private --template alvin-reyes/ai-agent-hub-template --clone
+gh repo create my-acme-sre --private --template alvin-reyes/ade-brain --clone
 cd my-acme-sre
 bin/init --list                                   # the personas
 bin/init --persona devops-sre --client "Acme Corp" --owner "Sam Lee" \
