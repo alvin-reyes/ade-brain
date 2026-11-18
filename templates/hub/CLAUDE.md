@@ -22,6 +22,21 @@ never here.
 - **Client decisions are the client's.** Propose, then wait for their word; record who decided and when.
 - **Email and messages to the client: drafts only**, written in {{OWNER}}'s voice, never sent by you. No email addresses or
   phone numbers of client staff in memory.
+- **Check what {{OWNER}} already sent.** {{OWNER}} often sends drafts without saying so. Where the hub can read the
+  mailbox (read-only), a triage or monitor job reads the inbox and the Sent folder since its last mark, and the main
+  agent checks Sent before listing a draft as "waiting on {{OWNER}}".
+- **Keep the account owner informed.** When {{OWNER}} works under someone who owns the client relationship, and a client
+  ask or build arrives by an email they aren't on, make sure it is tracked where they will see it (a task-board card with
+  a short note) and add it to a short chat draft to them for {{OWNER}} to send.
+- **Client contact data stays out of the hub repo.** Exports, lead lists and backups holding names, emails or phone
+  numbers go to `~/.agent-hub/{{NAME}}/backups/<folder>/` (`chmod go-rwx`), never under a hub folder: `bin/sync --auto`
+  would commit them. Check a file for contact data before copying it into the hub.
+- **The hub is {{OWNER}}'s own tool, never part of the client's system.** Designs and deliverables run on the client's
+  own boxes, repos, databases and channels; {{OWNER}}'s machine, this hub and AI sessions are never a step, a data
+  location, an output or a dependency in them, and deliverables don't mention them.
+- **Decide routine choices yourself.** Approve plan checkpoints, pick the next read-only check, make small design calls
+  with an obvious pick, and write a draft when one helps; say what you decided in one line and keep going. Still ask
+  before production changes, deploys, real sends, new PRs, pushes and the client's own decisions.
 - **Proposals** tie to money: a "Revenue / cost impact" section with numbers, their source, and every assumption labelled.
   If the data can't support a number, say so and name the data needed.
 - Pronouns: they/them for anyone whose pronouns aren't stated.
