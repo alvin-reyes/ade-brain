@@ -20,7 +20,7 @@ same table, never a copy. Findings: `engines.md`. Decision and terms: `decisions
   `owner_only` `0` opens a row to client hubs; a missing value counts as owner-only. glm is `owner_only` 1.
 - `provider_scrub_vars`: the names that beat `apiKeyHelper` or switch Claude Code's backend (`ANTHROPIC_AUTH_TOKEN`,
   `ANTHROPIC_API_KEY`, `ANTHROPIC_CUSTOM_HEADERS`, `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`,
-  `CLAUDE_CODE_USE_FOUNDRY`, `CLAUDE_CODE_OAUTH_TOKEN`). S3a's `bin/agent` must strip the same list.
+  `CLAUDE_CODE_USE_FOUNDRY`, `CLAUDE_CODE_OAUTH_TOKEN`). `bin/agent` never passes them (allowlisted environment).
 - No base URL override exists (`HUB_<P>_BASE_URL` is never read).
 
 ## `hub.conf` keys
@@ -29,6 +29,34 @@ same table, never a copy. Findings: `engines.md`. Decision and terms: `decisions
 - `HUB_<P>_MODEL`, `HUB_<P>_SMALL_MODEL` (`<P>` upper-case, `-` as `_`): main and small-fast slot overrides, checked
   like `--model`.
 - `HUB_MODEL` and `HUB_AGENT_MODEL` are not passed to a provider session.
+
+## Roles (`bin/roles`, `bin/agent`)
+- Table in `bin/lib.sh`: `roles`, `role_candidates <role>` (exit 2: unknown role, bad entry, provider without a row, empty
+  list), `candidate_refusal <p:m> [dir] [has|read]` (prints the reason, empty = usable), `role_pick <role> [dir] [has|read]`
+  (sets `ROLE_PICK`, `ROLE_SKIPS`; 0 picked, 1 none usable, 2 bad table).
+- Defaults: `routine` = `anthropic:sonnet deepseek:sonnet`; `triage` = `anthropic:haiku deepseek:haiku`; `reviewer` =
+  `deepseek:sonnet anthropic:sonnet`; `architect`, `builder` = `anthropic:opus`. An `anthropic:` model must be `opus`,
+  `sonnet`, `haiku` (optional `[1m]`) or `claude-*`. `HUB_ROLE_<ROLE>` in `hub.conf` replaces a list or adds a role (`-` as `_`); every `HUB_ROLE_*` is unset
+  before `hub.conf` is sourced.
+- `candidate_refusal` makes `bin/work --provider`'s checks with the `delegation` feature: allowlist, row,
+  `provider_hub_refusal`, own hub, plain `claude`, go, model, `hub.conf` slot models, config dir, checkout settings, key.
+  `anthropic` needs only the allowlist. `bin/roles` uses `--has`; `bin/agent` reads the key once before the run.
+- `bin/agent --role R --folder F`, task on stdin, runs in the folder's first checkout (else the hub folder). Exit 0 report;
+  1 failed, timed out or killed, never retried elsewhere; 2 refused, nothing ran.
+- Engine: `claude -p --output-format text --no-session-persistence --model M --tools Read,Grep,Glob --safe-mode --restricted
+  --strict-mcp-config --disable-slash-commands`, plus `--settings <file>` for a provider (mode 600, removed, same layer as a
+  provider session, with `disableAllHooks`, `ENABLE_TOOL_SEARCH=false` and `permissions.deny` `Read(**/<name>)` for `.env`,
+  `.env.*`, `*.pem`, `*.key`, `id_rsa*`, `.ssh/**`, `.aws/**`, `.npmrc`, `.netrc`, `credentials*`, `secrets/**`). Not `--bare`:
+  it never reads the Claude login and offers a provider run only `Read`.
+- Environment: cleared, then only `HOME USER SHELL PATH LANG TMPDIR HTTPS_PROXY NO_PROXY SSL_CERT_FILE NODE_EXTRA_CA_CERTS`,
+  `AGENT_FOLDER` and `CLAUDE_CONFIG_DIR` (provider: its own dir; Anthropic: `claude_home`, left unset when it is the default).
+- Lifetime: own process group plus a watchdog in it; timeout (`AGENT_TIMEOUT`, default 540, cap 570), TERM, INT, HUP or the
+  death of `bin/agent` end the group (TERM, KILL after 5 s).
+- Output: `agent: role=... bytes=... truncated=... timeout=... full=<path>`, then `<<<AGENT-OUTPUT nonce=<32 hex> ...>>>`,
+  at most 20 KiB, and `<<<END-AGENT-OUTPUT nonce=<same>>>` as the last line. Full text: `.local/agent-out/` (mode 600, 30
+  days). Journal: `journal/delegations-YYYY-MM.md`, no task text; `bin/context` and `bin/changes` do not read it.
+- `orchestrator_endpoint_warning`: `bin/doctor` (`WARN`) and hub-root `bin/context` (`WARNING:`), host only, not in a focus
+  session (`AGENT_FOLDER`).
 
 ## A provider session (`bin/work --provider <p>`)
 - Refused (exit 2): not allowed; no row; owner-only in a client hub; a command other than plain `claude`; a feature
