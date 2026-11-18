@@ -190,6 +190,8 @@ hands read-only work to a **role**, and the hub decides which model runs it:
 
 ```bash
 bin/roles                                                  # each role, its model, why any candidate was skipped
+bin/keys                                                   # each AI tool: key stored or missing, and what it still needs
+bin/keys set glm                                           # store a tool's key from a hidden prompt (deepseek, glm, muse, gemini)
 bin/agent --role reviewer --folder projects/app < task.md  # the task comes on stdin, never as an argument
 ```
 
@@ -225,7 +227,8 @@ A focus session can run Claude Code against DeepSeek instead of Anthropic. The C
 - **Owner's own hubs only.** DeepSeek's terms allow training on API data and store it in the People's Republic of
   China, so it is refused unless `hub.conf` has `HUB_OWNED_BY_OWNER=1` (never set it in a client hub). `bin/doctor`
   flags a client hub whose allowlist lists deepseek. See ADR 0002.
-- **The key:** `bin/secret --set deepseek-api-key`. `bin/doctor` shows whether it is stored, never its value. With no
+- **The key:** `bin/keys set deepseek` (or `bin/secret --set deepseek-api-key`). A stored key enables nothing by itself, and each
+  hub keeps its own keys in the Keychain under its `HUB_KEYCHAIN_SERVICE`. `bin/doctor` shows whether it is stored, never its value. With no
   key, `bin/work` stops before Claude Code starts.
 - **Exposure (credential option 1):** the key is read by Claude Code's `apiKeyHelper` (`bin/secret deepseek-api-key`)
   only, so it is never in the environment, argv or a file; hooks and tool commands cannot see it.
