@@ -275,7 +275,10 @@ sub=""; [ "$PROV" = anthropic ] && sub="export CLAUDE_CODE_SUBAGENT_MODEL=\"\${C
 if [ "$PROV" = anthropic ]; then
   if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then sub="${sub}export CLAUDE_CONFIG_DIR=$(sq "$CLAUDE_CONFIG_DIR")"$'\n'; else sub="${sub}unset CLAUDE_CONFIG_DIR"$'\n'; fi
 fi
-L=$(mktemp "${TMPDIR:-/tmp}/agent-work.XXXXXX"); printf '#!/bin/bash\ntrap %s EXIT\n%s\n%s%s\n' "$(sq "$TRAP \"\$R\"")" "$reg" "$sub" "$cmd" > "$L"; chmod +x "$L"
+# a terminal can carry the session variables of a Claude session that has exited (ADE hands them to every sub-terminal):
+# with them the new session starts as a child of that dead session and no other session can list or message it
+SESS_UNSET='unset CLAUDE_PID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN CLAUDE_CODE_SESSION_ID CLAUDE_CODE_BRIDGE_SESSION_ID CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_ENTRYPOINT CLAUDECODE'
+L=$(mktemp "${TMPDIR:-/tmp}/agent-work.XXXXXX"); printf '#!/bin/bash\ntrap %s EXIT\n%s\n%s\n%s%s\n' "$(sq "$TRAP \"\$R\"")" "$reg" "$SESS_UNSET" "$sub" "$cmd" > "$L"; chmod +x "$L"
 # WORK_NO_OPEN=1 (tests): write the launcher, print its path, open nothing (both files are kept for the caller)
 [ "${WORK_NO_OPEN:-}" = 1 ] && { echo "launcher: $L"; MS=""; L=""; exit 0; }
 if [ "$OPEN" != window ]; then
