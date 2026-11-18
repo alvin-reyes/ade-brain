@@ -802,6 +802,7 @@ bin/schedule install</code></pre>
   <ul>
     <li>Keep it client-neutral: no client, person, host or account names outside <code>tests/</code> fixtures (<code>tests/test_root.sh</code> checks).</li>
     <li>Hub rules live in <code>templates/hub/CLAUDE.md</code>, personas in <code>personas/&lt;slug&gt;.md</code>, and folder files in <code>templates/</code>.</li>
+    <li>Production change skeletons live in <code>templates/scripts/</code>: <code>staged-change.sh</code> (check | go | undo with a backup and auto-undo) and <code>prodtest.sh</code> (read-only PASS/FAIL/WARN). The patterns: <code>docs/shipping-changes-safely.md</code>.</li>
     <li>The <code>bin/</code> scripts are covered by <code>tests/test_*.sh</code>, which run against a throwaway copy with stubbed tools. The verification command is:</li>
   </ul>
   <pre class="cmd"><code>bash tests/run.sh       <span class="c"># every tests/test_*.sh prints ok; exit 0 = green</span></code></pre>
