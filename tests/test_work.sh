@@ -129,6 +129,11 @@ echo "$out" | grep -q -- " --remote-control demo .*-- go$" || fail "remote contr
 WORK_DRY=1 bin/work --no-remote projects/demo | grep -q -- "--remote-control" && fail "--no-remote leaves it out"
 WORK_DRY=1 bin/work projects/demo --no-remote | grep -q -- "--remote-control" && fail "--no-remote after the folder leaves it out"
 WORK_DRY=1 bin/work projects/demo/ | grep -q -- " --remote-control demo" || fail "a trailing slash still names the session after the folder"
+# --name gives the session its own Remote Control name (two focus sessions on one folder)
+WORK_DRY=1 bin/work --name demo-redesign projects/demo | grep -q -- " --remote-control demo-redesign" || fail "--name sets the remote control name"
+WORK_DRY=1 bin/work projects/demo --name demo-data --prompt "go" | grep -q -- " --remote-control demo-data .*-- go$" || fail "--name after the folder, before the prompt"
+WORK_DRY=1 bin/work --name 'bad name;' projects/demo >/dev/null 2>&1; assert_eq "$?" "2" "--name refuses characters outside A-Za-z0-9._-"
+WORK_DRY=1 bin/work --name >/dev/null 2>&1; assert_eq "$?" "2" "--name needs a value"
 out=$(WORK_DRY=1 bin/work projects/demo demo-code --no-remote); echo "$out" | grep -q "cd '$R'" || fail "--no-remote after the repo still finds the repo"
 echo "$out" | grep -q -- "--remote-control" && fail "--no-remote after the repo leaves it out"
 # which claude install: HUB_CLAUDE from hub.conf, else claude; AGENT_CLAUDE or --claude picks another
@@ -168,6 +173,9 @@ for ps_out in "''" "'  7 /x/claude --remote-control demo-x'" "'  8 /x/claude --r
 done
 fake_ps "'  4242 /x/claude --remote-control demo'"
 for flag in --force --no-remote; do PATH="$P:$PATH" WORK_DRY=1 bin/work $flag projects/demo >/dev/null 2>&1; assert_eq "$?" "0" "$flag proceeds"; done
+PATH="$P:$PATH" WORK_DRY=1 bin/work --name demo-2 projects/demo >/dev/null 2>&1; assert_eq "$?" "0" "a second session with its own --name proceeds"
+fake_ps "'  4243 /x/claude --remote-control demo-2'"
+PATH="$P:$PATH" WORK_DRY=1 bin/work --name demo-2 projects/demo >/dev/null 2>&1; assert_eq "$?" "3" "a running --name is refused"
 # permission mode: focus sessions default to auto so they take the main session's messages without holding them
 out=$(WORK_DRY=1 bin/work projects/demo); echo "$out" | grep -q -- "--permission-mode auto" || fail "default permission mode is auto"
 out=$(WORK_DRY=1 bin/work --mode manual projects/demo); echo "$out" | grep -q -- "--permission-mode manual" || fail "--mode sets the permission mode"
