@@ -199,6 +199,10 @@ s["env"] = env; s["apiKeyHelper"] = helper; s["skipWebFetchPreflight"] = True
 json.dump(s, open(dst, "w"), indent=2)
 PY
 }
+# AI tools whose key bin/keys manages. A tool here need not be connected yet: a stored key enables nothing.
+key_tools() { echo "deepseek glm muse gemini"; }
+key_secret() { case "$1" in deepseek|glm) provider_field "$1" secret ;; muse) echo "meta-model-api-key" ;; gemini) echo "gemini-api-key" ;; *) return 1 ;; esac; }
+key_source() { case "$1" in deepseek) echo "platform.deepseek.com" ;; glm) echo "z.ai" ;; muse) echo "dev.meta.ai" ;; gemini) echo "aistudio.google.com" ;; *) return 1 ;; esac; }
 # Role routing (.ade/context/providers.md, "Roles"): a role is an ordered list of provider:model candidates. Defaults
 # here; HUB_ROLE_<ROLE> in hub.conf (never the environment) replaces a role's list or adds a role.
 role_default() { case "$1" in

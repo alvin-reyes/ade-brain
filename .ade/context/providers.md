@@ -58,6 +58,14 @@ same table, never a copy. Findings: `engines.md`. Decision and terms: `decisions
 - `orchestrator_endpoint_warning`: `bin/doctor` (`WARN`) and hub-root `bin/context` (`WARNING:`), host only, not in a focus
   session (`AGENT_FOLDER`).
 
+## Keys (`bin/keys`)
+- `bin/keys` lists `anthropic` (Claude login, no key) and each `key_tools` entry: `deepseek`, `glm`, `muse`
+  (`meta-model-api-key`), `gemini` (`gemini-api-key`), with stored or missing and what the tool still needs for `bin/agent`. Never a value. `key_tools`, `key_secret` and
+  `key_source` are in `bin/lib.sh`; `muse` and `gemini` have no provider row, so they show "not connected yet".
+- `bin/keys set <tool>` reads the key from a hidden prompt or stdin through `bin/secret --set`; `bin/keys forget <tool>` removes
+  it. Exit 2 for an unknown tool or extra argument, so a key on the command line is refused. Storing a key enables nothing.
+- `bin/secret --set` passes the value to `security -i` on stdin, never as an argument, and reads it back to confirm; a failed store exits 1.
+
 ## A provider session (`bin/work --provider <p>`)
 - Refused (exit 2): not allowed; no row; owner-only in a client hub; a command other than plain `claude`; a feature
   without a go; `--resume`, `--continue`, `-r`, `-c`; a model not allowed; `HUB` (environment) naming another hub

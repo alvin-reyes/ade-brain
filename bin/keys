@@ -1,0 +1,34 @@
+#!/bin/bash
+# bin/keys: the key for each AI tool, in this hub's Keychain. Never prints a value, and a stored key enables nothing.
+#   bin/keys                 each tool: stored or missing, and what it still needs
+#   bin/keys set <tool>      store or replace its key (hidden prompt, or stdin; never an argument)
+#   bin/keys forget <tool>   remove its key
+# Contract: .ade/context/providers.md, "Keys".
+set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"
+USAGE="usage: bin/keys | bin/keys set <tool> | bin/keys forget <tool> (tools: $(key_tools))"
+bad() { echo "$USAGE" >&2; exit 2; }
+keychain() { command -v security >/dev/null || { echo "keys: needs the macOS Keychain (the security command)" >&2; exit 1; }; }
+# an unknown name is not repeated: it may be a key typed in the wrong place
+tool_name() { case " $(key_tools) " in *" $1 "*) key_secret "$1" ;; *) echo "keys: unknown tool" >&2; bad ;; esac; }
+# tool_state <tool>: what stands between this tool and a run, other than its key (empty = nothing)
+tool_state() {
+  provider_field "$1" base_url >/dev/null 2>&1 || { echo "$1 is not connected yet"; return 0; }
+  local why; why="$(candidate_refusal "$1:sonnet")"
+  case "$why" in "no "*" in the Keychain"*) ;; *) printf '%s' "$why" ;; esac
+}
+case "${1:-}" in
+  "") [ $# -eq 0 ] || bad; keychain
+    printf '%-10s %s\n' anthropic "uses your Claude login (no key here)"
+    for t in $(key_tools); do
+      s="$(key_secret "$t")"; why="$(tool_state "$t")"
+      if "$H/bin/secret" --has "$s"; then st=stored; else st=missing; fi
+      printf '%-10s %-8s %s\n' "$t" "$st" "$s"
+      [ "$st" = stored ] || echo "  set it: bin/keys set $t (key from $(key_source "$t"))"
+      if [ -n "$why" ]; then echo "  not usable yet: $why"; elif [ "$st" = stored ]; then echo "  ready for bin/agent"; fi
+    done ;;
+  set) [ $# -eq 2 ] || bad; s="$(tool_name "$2")" || exit 2; keychain; exec "$H/bin/secret" --set "$s" ;;
+  forget) [ $# -eq 2 ] || bad; s="$(tool_name "$2")" || exit 2; keychain
+    "$H/bin/secret" --has "$s" || { echo "keys: no key stored for $2" >&2; exit 1; }
+    exec "$H/bin/secret" --forget "$s" ;;
+  *) bad ;;
+esac
