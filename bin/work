@@ -1,29 +1,39 @@
 #!/bin/bash
-# bin/work [--provider P] [--claude CMD] [--model M] [--effort E] [--prompt TEXT] [--name N] [--no-remote] [--agent-model [name=]M] [--agent-effort [name=]E] <folder> [repo]: deep work in a new Terminal, inside the project's checkout, with the folder's hooks.
+# bin/work [--provider P] [--claude CMD] [--model M] [--effort E] [--prompt TEXT] [--mode M] [--name N] [--no-remote] [--force] [--agent-model [name=]M] [--agent-effort [name=]E] <folder> [repo]: deep work in a new Terminal, inside the project's checkout, with the folder's hooks.
 # A folder with no repo (none, or a "(none ...)" row) works in the hub folder itself. Clones a missing checkout (owner/name as given, else HUB_CODE_OWNER/<name>) to ${AGENT_CODE_DIR:-$HOME/Project}/<name> and records the path in ACCESS.md.
-# --claude picks the Claude install (default: claude_cmd in lib.sh). --model / --effort (anywhere in the arguments) pass through to claude for this session.
+# --claude picks the Claude install (default: claude_cmd in lib.sh); a bare name runs what the caller's PATH finds, and the
+# session keeps the caller's CLAUDE_CONFIG_DIR (or none), so it runs as the same install and account. --model / --effort (anywhere in the arguments) pass through to claude for this session.
 # --prompt TEXT is the session's first message (passed last, after --, quoted for the launcher).
+# --mode M is the permission mode (default HUB_WORK_MODE from hub.conf, else auto, the main session's usual mode): a focus
+# session in the main session's mode takes its messages without holding them for approval in its own terminal, so the
+# main session is the one place to say go. --mode manual asks in the focus terminal. bypassPermissions is never allowed.
 # Remote Control is on for every session, named after the folder (projects/acme -> acme); --name N names it N instead
 # (two sessions on one folder); --no-remote turns it off.
+# A folder whose session is already running with Remote Control (a claude process with --remote-control <name>) is refused
+# with exit 3 (the name checked is --name N when given) before anything is opened or changed; --force opens another anyway.
 # --provider P (default HUB_PROVIDER from hub.conf, else anthropic) runs Claude Code against another provider's endpoint (story SP,
 # .ade/context/providers.md): only providers in hub.conf's HUB_PROVIDERS_ALLOWED; plain claude; no Remote Control, no resume;
 # its own config dir; a merged settings file whose apiKeyHelper reads the key (the key is checked once, never written).
 # --agent-model / --agent-effort (repeatable) set the folder's specialist agents: a bare value sets all, name=value one (it wins). WORK_DRY=1 only prints the command. AGENT_TERMINAL=iterm uses iTerm.
 # Inside an ADE terminal (ADE_HOOK_BIN executable; ADE_HOOK_PORT, ADE_HOOK_TOKEN, ADE_PTY_ID set) the session opens as a
-# sub-terminal of the caller's tab: "$ADE_HOOK_BIN" open --cwd <checkout> --name <folder> --focus -- bash -l <launcher>
-# (story W1). ADE's exit 5 prints the command to run there; 1 (refused) fails with a hint; 3 and 4 (unreachable) fall
-# back to a window; 2 fails.
-# AGENT_TERMINAL=terminal|iterm forces a window; AGENT_TERMINAL=ade forces ADE, with no fallback.
+# sub-terminal of the caller's tab and NEVER in a Terminal or iTerm window (owner, 2026-11-09; stories W1 and W1b):
+# - an ADE whose `help` lists "capabilities: command": "$ADE_HOOK_BIN" open --cwd <checkout> --name <folder> --focus -- bash -l <launcher>;
+#   its exit 5 prints the command to run there;
+# - an ADE with `ade open` but no typed command (v0.23.0, the stopgap): the same open with no command, then one line with
+#   the command to paste into the new sub-terminal; the launcher is kept;
+# - any other `ade open` answer, or an ADE without `ade open`: fails with ADE's message, nothing opened, no window.
+# AGENT_TERMINAL=terminal|iterm is a window outside ADE and exit 2 inside it; AGENT_TERMINAL=ade is exit 2 outside ADE.
 set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"
 # temp files (merged settings, launcher) go on any exit until the launcher is handed off; the launcher then removes them
 MS=""; L=""; trap '[ -z "$MS" ] || rm -f "$MS"; [ -z "$L" ] || rm -f "$L"' EXIT
-USAGE="usage: bin/work [--provider P] [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--name N] [--no-remote] [--agent-model [name=]M] [--agent-effort [name=]E] <projects|ops>/<name> [repo]  (AGENT_TERMINAL=terminal|iterm|ade)"
-MODEL=""; EFFORT=""; PROMPT=""; REMOTE=1; RNAME=""; CL="$(claude_cmd)"; POS=(); ASET=""; PROV="${HUB_PROVIDER:-anthropic}"
+USAGE="usage: bin/work [--provider P] [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--mode auto|manual|acceptEdits|plan] [--name N] [--no-remote] [--force] [--agent-model [name=]M] [--agent-effort [name=]E] <projects|ops>/<name> [repo]  (AGENT_TERMINAL=terminal|iterm|ade)"
+MODEL=""; EFFORT=""; PROMPT=""; MODE=""; REMOTE=1; RNAME=""; FORCE=0; CL="$(claude_cmd)"; POS=(); ASET=""; PROV="${HUB_PROVIDER:-anthropic}"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --model|--effort|--claude|--provider) [ $# -ge 2 ] || { echo "$USAGE" >&2; exit 2; }
-      case "$1" in --model) MODEL="$2" ;; --effort) EFFORT="$2" ;; --provider) PROV="$2" ;; *) CL="$2" ;; esac; shift 2 ;;
+    --model|--effort|--claude|--provider|--mode) [ $# -ge 2 ] || { echo "$USAGE" >&2; exit 2; }
+      case "$1" in --mode) MODE="$2" ;; --model) MODEL="$2" ;; --effort) EFFORT="$2" ;; --provider) PROV="$2" ;; *) CL="$2" ;; esac; shift 2 ;;
     --no-remote) REMOTE=0; shift ;;
+    --force) FORCE=1; shift ;;
     --name) [ $# -ge 2 ] && [[ "$2" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "work: --name needs a name of A-Za-z0-9._- only" >&2; exit 2; }
       RNAME="$2"; shift 2 ;;
     --prompt) [ $# -ge 2 ] && [ -n "$2" ] || { echo "$USAGE" >&2; exit 2; }; PROMPT="$2"; shift 2 ;;
@@ -39,19 +49,29 @@ done
 [[ "$CL" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "work: bad claude command '$CL'" >&2; exit 2; }
 [ -z "$MODEL" ] || [[ "$MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
 case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
+# subagents that name no model: an inherited CLAUDE_CODE_SUBAGENT_MODEL (ADE sets models) wins, else hub.conf, else sonnet.
+# Set in the launcher, never in settings (a settings env would replace ADE's). An explicit Agent or agent-file model still wins.
+SUBM="${CLAUDE_CODE_SUBAGENT_MODEL:-${HUB_SUBAGENT_MODEL:-sonnet}}"
+# names may carry a context suffix such as sonnet[1m]; nothing that could end the launcher's double quotes ($ ` " \)
+SUBRE='^[][A-Za-z0-9._:/-]+$'
+[ "$PROV" != anthropic ] || [[ "$SUBM" =~ $SUBRE ]] || { echo "work: bad subagent model '$SUBM' (CLAUDE_CODE_SUBAGENT_MODEL or HUB_SUBAGENT_MODEL)" >&2; exit 2; }
+# token limits (.ade/context/model-defaults.md): the context window the session compacts at, and its inline Bash output
+# cap. Exported by the launcher unless the session inherits a value (ADE's wins); 0 leaves Claude's default.
+CWIN="${HUB_COMPACT_WINDOW:-200000}"; BMAX="${HUB_BASH_MAX_CHARS:-8000}"
+[[ "$CWIN" =~ ^[0-9]+$ ]] || { echo "work: bad HUB_COMPACT_WINDOW '$CWIN' (tokens; 0 = Claude's default)" >&2; exit 2; }
+[[ "$BMAX" =~ ^[0-9]+$ ]] || { echo "work: bad HUB_BASH_MAX_CHARS '$BMAX' (characters; 0 = Claude's default)" >&2; exit 2; }
 # hub.conf defaults (HUB_MODEL, HUB_EFFORT, HUB_AGENT_MODEL); the command line wins
 # (a provider session never takes HUB_MODEL, which may be a full Anthropic id)
 [ -n "$MODEL" ] || [ "$PROV" != anthropic ] || MODEL="${HUB_MODEL:-}"; [ -n "$EFFORT" ] || EFFORT="${HUB_EFFORT:-}"
+[ -n "$MODE" ] || MODE="${HUB_WORK_MODE:-auto}"
+case "$MODE" in auto|manual|acceptEdits|plan) ;; *) echo "work: mode must be auto|manual|acceptEdits|plan" >&2; exit 2 ;; esac
 [ -z "$MODEL" ] || [[ "$MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
 case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
 # the provider: allowed in hub.conf, permitted for this hub, plain claude, a go for each feature used, no resume, its own models
 [[ "$PROV" =~ ^[a-z0-9-]+$ ]] || { echo "work: bad provider name '$PROV'" >&2; exit 2; }
 case " ${HUB_PROVIDERS_ALLOWED:-anthropic} " in *" $PROV "*) ;; *) echo "work: provider $PROV is not in HUB_PROVIDERS_ALLOWED (hub.conf)" >&2; exit 2 ;; esac
 if [ "$PROV" != anthropic ]; then
-  # HUB (environment) picks the hub every helper reads; a provider session only runs from the hub this script is in
-  OWN="$(cd "$(dirname "$0")/.." && pwd -P)"
-  [ -z "${HUB:-}" ] || [ "$(cd "$HUB" 2>/dev/null && pwd -P)" = "$OWN" ] ||
-    { echo "work: HUB=$HUB is not this script's hub ($OWN); a provider session runs only from its own hub" >&2; exit 2; }
+  why="$(provider_own_hub_refusal)"; [ -z "$why" ] || { echo "work: $why" >&2; exit 2; }
   provider_field "$PROV" base_url >/dev/null || { echo "work: no provider '$PROV' in bin/lib.sh" >&2; exit 2; }
   why="$(provider_hub_refusal "$PROV")"; [ -z "$why" ] || { echo "work: $why" >&2; exit 2; }
   [ "$CL" = claude ] || { echo "work: --provider $PROV needs plain claude, not '$CL' (a wrapper could send the session elsewhere)" >&2; exit 2; }
@@ -59,33 +79,49 @@ if [ "$PROV" != anthropic ]; then
   if [ -n "$EFFORT" ] || [[ "$ASET" == *"effort "* ]]; then provider_feature_go "$PROV" effort || { echo "work: $(provider_no_go_reason "$PROV" effort)" >&2; exit 2; }; fi
   for a in ${POS[@]+"${POS[@]}"}; do case "$a" in --resume|--resume=*|--continue|-r|-c)
     echo "work: a provider session does not resume history ($a would send it to $PROV); start a new session (--resume leak, .ade/context/engines.md)" >&2; exit 2 ;; esac; done
-  PMODELS="opus sonnet haiku $(for s in model opus sonnet haiku small; do provider_field "$PROV" "$s"; done | sort -u | tr '\n' ' ')"
+  PMODELS="$(provider_models "$PROV")"
   [ -z "$MODEL" ] || provider_model_ok "$PROV" "$MODEL" || { echo "work: --model $MODEL is not a $PROV model ($PMODELS)" >&2; exit 2; }
-  PU="$(printf '%s' "$PROV" | tr 'a-z-' 'A-Z_')"; PM="HUB_${PU}_MODEL"; PS="HUB_${PU}_SMALL_MODEL"
-  for v in "$PM" "$PS"; do [ -z "${!v:-}" ] || provider_model_ok "$PROV" "${!v}" || { echo "work: $v=${!v} in hub.conf is not a $PROV model ($PMODELS)" >&2; exit 2; }; done
+  PM="$(provider_model_var "$PROV")"; PS="$(provider_small_var "$PROV")"
+  why="$(provider_conf_models_refusal "$PROV")"; [ -z "$why" ] || { echo "work: $why" >&2; exit 2; }
   P_MAIN="$(provider_model_id "$PROV" "${!PM:-$(provider_field "$PROV" model)}")"; P_SMALL="$(provider_model_id "$PROV" "${!PS:-$(provider_field "$PROV" small)}")"
   REMOTE=0
 fi
 F="${POS[0]:-}"; F="${F%/}"; WANT="${POS[1]:-}"   # projects/x/ (tab completion) = projects/x
 [ -n "$F" ] && [ -d "$H/$F" ] && [ -f "$H/$F/ACCESS.md" ] || { echo "$USAGE" >&2; exit 2; }
+# one session per folder: refuse when a claude process already runs with --remote-control <name> (whole word; a grep or
+# editor that mentions it is not a session; the program must be claude*, as an exec'ing wrapper leaves it; a session
+# started with --no-remote has no name and is not seen). Full command lines (-ww): plain `ps aux` cuts long ones (a folder with many
+# agents) short. ps runs to completion before the filter starts, so the filter never sees itself. Read-only, so dry runs check too.
+if [ "$REMOTE" = 1 ] && [ "$FORCE" = 0 ]; then
+  procs="$(ps -axww -o pid=,command= 2>/dev/null)"
+  pid=$(awk -v n="${RNAME:-${F##*/}}" 'p=="" {b=$2; sub(/.*\//,"",b); if(b ~ /^claude/) for(i=3;i<NF;i++) if($i=="--remote-control" && $(i+1)==n) p=$1} END{print p}' <<<"$procs")
+  [ -z "$pid" ] || { echo "work: ${RNAME:-${F##*/}} is already running (pid $pid); use it, or stop it first (--force opens another)" >&2; exit 3; }
+fi
 # where the session opens: a sub-terminal in ADE (all four ADE variables set) or a Terminal/iTerm window; decided once
 # the arguments and the folder are checked, so a typo fails without probing ADE
 in_ade() { [ -n "${ADE_HOOK_BIN:-}" ] && [ -f "$ADE_HOOK_BIN" ] && [ -x "$ADE_HOOK_BIN" ] && [ -n "${ADE_HOOK_PORT:-}" ] &&
   [ -n "${ADE_HOOK_TOKEN:-}" ] && [ -n "${ADE_PTY_ID:-}" ]; }
-# ADE takes the session only when it can type a command (story 9): its `help` prints a line starting "capabilities:"
-# with the word "command". A build without `ade open` runs the helper in hook mode ({} and exit 0 to anything, reading
-# stdin to its end, hence </dev/null); 4a/4c without 9 answer the typed command with exit 1. Both get a window. The exit
-# status is ignored; a dry run never calls the helper
-ade_cli() { [ "${WORK_DRY:-}" = 1 ] || timeout 5 "$ADE_HOOK_BIN" help </dev/null 2>/dev/null |
-  grep -Eq '^capabilities:.*[[:space:]]command([[:space:]]|$)'; }
-case "${AGENT_TERMINAL:-}" in
-  terminal|iterm) OPEN=window ;;
-  ade) in_ade || { echo "work: AGENT_TERMINAL=ade needs an ADE terminal (ADE_HOOK_BIN, ADE_HOOK_PORT, ADE_HOOK_TOKEN and ADE_PTY_ID set)" >&2; exit 2; }
-    ade_cli || { echo "work: AGENT_TERMINAL=ade needs an ADE that types commands into a sub-terminal ('ade help' lists capabilities: command); update ADE" >&2; exit 2; }
-    OPEN=ade ;;
-  *) OPEN=window
-    if in_ade; then if ade_cli; then OPEN=ade; else echo "work: this ADE cannot type a command into a sub-terminal yet (no 'capabilities: command' in ade help); opening a Terminal window" >&2; fi; fi ;;
-esac
+# what this ADE can do, from its `help` (stdout only; stdin from /dev/null, since hook mode reads stdin to its end; at most
+# 5 s; the exit status is ignored): "command" = it types a command into the new sub-terminal (story 9: a line starting
+# "capabilities:" with the word "command"); "bare" = it has `ade open` but cannot type (stories 4a/4c, v0.23.0: a line
+# starting "usage: ade open"); "none" = no `ade open` (a hook-mode build answers {} and 0 to anything, so its open would
+# silently do nothing) or no answer
+ade_level() { local h; h="$(timeout 5 "$ADE_HOOK_BIN" help </dev/null 2>/dev/null)"
+  if printf '%s\n' "$h" | grep -Eq '^capabilities:.*[[:space:]]command([[:space:]]|$)'; then echo command
+  elif printf '%s\n' "$h" | grep -q '^usage: ade open'; then echo bare; else echo none; fi; }
+NOWIN="inside ADE bin/work never opens a window; for one, run bin/work $F from a terminal outside ADE"
+OPEN=window
+if in_ade; then
+  # inside ADE every session opens in ADE, never in a Terminal or iTerm window (owner, 2026-11-09; story W1b)
+  case "${AGENT_TERMINAL:-}" in terminal|iterm)
+    echo "work: AGENT_TERMINAL=$AGENT_TERMINAL: inside ADE every session opens in ADE; run bin/work from a terminal outside ADE for a window" >&2; exit 2 ;; esac
+  OPEN=dry
+  if [ "${WORK_DRY:-}" != 1 ]; then OPEN="$(ade_level)"   # a dry run never calls the helper
+    [ "$OPEN" != none ] || { echo "work: this ADE cannot open a sub-terminal ('$ADE_HOOK_BIN help' shows no ade open, or did not answer in 5 s); update or restart ADE; $NOWIN" >&2; exit 1; }
+  fi
+elif [ "${AGENT_TERMINAL:-}" = ade ]; then
+  echo "work: AGENT_TERMINAL=ade needs an ADE terminal (ADE_HOOK_BIN, ADE_HOOK_PORT, ADE_HOOK_TOKEN and ADE_PTY_ID set)" >&2; exit 2
+fi
 A="$H/$F/ACCESS.md"
 # Code table rows (or rows appended later with an absolute checkout) as "<repo>|<checkout>" (first = default)
 rows=$(awk -F'|' '/^## /{c=($0=="## Code")} /^\|/{n=$2; k=$3; gsub(/^[ \t]+|[ \t]+$/,"",n); gsub(/^[ \t]+|[ \t]+$/,"",k);
@@ -154,64 +190,29 @@ fi
 sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }   # single-quoted for the launcher, a ' inside kept
 TRAP='rm -f "$0"'
 if [ "$PROV" = anthropic ]; then
+  # the caller's install: a bare name runs what the caller's PATH finds, since a new window's login shell may find another
+  # claude first (an explicit path, or a name not on PATH, is kept as given)
+  case "$CL" in */*) ;; *) p="$(command -v -- "$CL" 2>/dev/null)"; [[ "$p" == /* && "$p" =~ ^[A-Za-z0-9._/-]+$ ]] && CL="$p" ;; esac
   cmd="cd $(sq "$dir") && AGENT_FOLDER='$F' $CL --settings $(sq "$H/$F/.claude/settings.json")"
 else
-  SEC="$(provider_field "$PROV" secret)"; CD="$H/.local/providers/$PROV"; SVC="$(keychain_service)"; SCRUB="$(provider_scrub_vars)"
-  # the provider config dir stays inside the hub: never a symlink out to ~/.claude or anywhere else
-  RL="$(cd "$H" && pwd -P)/.local"
-  for p in "$H/.local" "$CD" "$CD/projects"; do
-    r="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$p")"
-    case "$r" in "$RL"|"$RL"/*) ;; *) echo "work: $p resolves to $r, outside $H/.local; a provider config dir stays in the hub" >&2; exit 2 ;; esac
-  done
-  # the checkout's own settings load as project settings, below nothing that can unset a key: an Anthropic credential or a
-  # backend switch in their env would beat apiKeyHelper and go to the provider, so refuse (names only, never values)
-  why="$(WORK_SCRUB="$SCRUB" python3 - "$dir/.claude/settings.json" "$dir/.claude/settings.local.json" <<'PY'
-import json, os, sys
-bad = os.environ["WORK_SCRUB"].split()
-for p in sys.argv[1:]:
-    if not os.path.exists(p): continue
-    try: env = (json.load(open(p)) or {}).get("env") or {}
-    except Exception: print("%s is not readable JSON" % p); continue
-    hit = [k for k in bad if k in env]
-    if hit: print("%s sets %s in its env" % (p, " ".join(hit)))
-PY
-)" || why="the checkout's settings could not be checked"
-  [ -z "$why" ] || { echo "work: $why; a provider session would send that to $PROV instead of its key (remove it, or run without --provider)" >&2; exit 2; }
-  # fail closed: Claude Code never starts against another provider without its key (it would send the Anthropic login there).
-  # The key is read once into a subshell variable, checked and dropped; it is never printed, written or passed on.
+  SEC="$(provider_field "$PROV" secret)"; CD="$H/.local/providers/$PROV"; SCRUB="$(provider_scrub_vars)"
+  why="$(provider_config_refusal "$PROV")"; [ -z "$why" ] || { echo "work: $why" >&2; exit 2; }
+  why="$(provider_checkout_refusal "$PROV" "$dir")"; [ -z "$why" ] || { echo "work: $why" >&2; exit 2; }
+  # fail closed: Claude Code never starts against another provider without its key (it would send the Anthropic login there)
   if [ "${WORK_DRY:-}" != 1 ]; then
-    ( key="$(HUB="$H" AGENT_KEYCHAIN_SERVICE="$SVC" "$H/bin/secret" "$SEC" 2>/dev/null)" && [ -n "$key" ]; r=$?; unset key; exit "$r" ) ||
-      { echo "work: no $(provider_field "$PROV" label) in the Keychain; store it with: bin/secret --set $SEC" >&2; exit 1; }
+    provider_key_ok "$PROV" || { echo "work: no $(provider_field "$PROV" label) in the Keychain; store it with: bin/secret --set $SEC" >&2; exit 1; }
   fi
-  # one settings file: the folder's (hooks kept) plus the provider layer, whose env wins; never a key value. The helper pins
-  # the hub and Keychain service the pre-check used, so both read the same item; the folder's credentials and switches are dropped
+  # one settings file: the folder's (hooks kept) plus the provider layer (provider_settings_write)
   [ -f "$H/$F/.claude/settings.json" ] || { echo "work: $F has no .claude/settings.json" >&2; exit 2; }
   MS=$(mktemp "${TMPDIR:-/tmp}/agent-settings.XXXXXX") && chmod 600 "$MS" || exit 2
-  WORK_PENV="ANTHROPIC_BASE_URL=$(provider_field "$PROV" base_url)
-ANTHROPIC_MODEL=$P_MAIN
-ANTHROPIC_DEFAULT_OPUS_MODEL=$(provider_field "$PROV" opus)
-ANTHROPIC_DEFAULT_SONNET_MODEL=$(provider_field "$PROV" sonnet)
-ANTHROPIC_DEFAULT_HAIKU_MODEL=$(provider_field "$PROV" haiku)
-ANTHROPIC_SMALL_FAST_MODEL=$P_SMALL
-CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1" WORK_SCRUB="$SCRUB" python3 - "$H/$F/.claude/settings.json" "$MS" "HUB=$(sq "$H") AGENT_KEYCHAIN_SERVICE=$(sq "$SVC") $(sq "$H/bin/secret") $SEC" <<'PY' || exit 2
-import json, os, sys
-src, dst, helper = sys.argv[1:4]
-s = json.load(open(src))
-env = dict(s.get("env") or {})
-env.pop("CLAUDE_CODE_SUBAGENT_MODEL", None)   # agents' own model: values resolve through the slots
-for k in os.environ["WORK_SCRUB"].split(): env.pop(k, None)
-for l in os.environ["WORK_PENV"].splitlines():
-    k, _, v = l.partition("="); env[k] = v
-s["env"] = env; s["apiKeyHelper"] = helper; s["skipWebFetchPreflight"] = True
-json.dump(s, open(dst, "w"), indent=2)
-PY
+  provider_settings_write "$H/$F/.claude/settings.json" "$MS" "$PROV" "$P_MAIN" "$P_SMALL" || exit 2
   # its own config dir, so /model writes there and not to the owner's settings.json; env -u drops any credential or backend
   # switch the launching (login) shell holds, since those beat apiKeyHelper
   cmd="cd $(sq "$dir") && env$(printf ' -u %s' $SCRUB) AGENT_FOLDER='$F' CLAUDE_CONFIG_DIR=$(sq "$CD") $CL --settings $(sq "$MS")"
   TRAP="rm -f \"\$0\" $(sq "$MS")"
 fi
 [ -n "$agents" ] && cmd="$cmd --agents $(printf %q "$agents")"
+cmd="$cmd --permission-mode $MODE"
 [ -n "$MODEL" ] && cmd="$cmd --model $MODEL"
 [ -n "$EFFORT" ] && cmd="$cmd --effort $EFFORT"
 [ "$REMOTE" = 1 ] && cmd="$cmd --remote-control $(printf %q "${RNAME:-${F##*/}}")"
@@ -219,7 +220,10 @@ fi
 echo "$cmd"
 # a dry run shows the merged settings instead of keeping the file (the EXIT trap removes it)
 if [ "${WORK_DRY:-}" = 1 ]; then
-  [ "$OPEN" = window ] || echo "work: if this ADE lists capabilities: command, this runs: $ADE_HOOK_BIN open --cwd $dir --name ${F##*/} --focus -- bash -l <launcher>" >&2
+  if [ "$OPEN" != window ]; then
+    echo "work: if this ADE lists capabilities: command, this runs: $ADE_HOOK_BIN open --cwd $dir --name ${F##*/} --focus -- bash -l <launcher>" >&2
+    echo "work: if it does not, this runs: $ADE_HOOK_BIN open --cwd $dir --name ${F##*/} --focus (no command) and prints the command to paste there: bash -l <launcher>" >&2
+  fi
   [ -z "$MS" ] || { cat "$MS"; echo; } 2>/dev/null; exit 0
 fi
 if [ "$PROV" != anthropic ]; then   # the memory links bin/setup makes, inside the provider's config dir
@@ -229,21 +233,54 @@ if [ "$PROV" != anthropic ]; then   # the memory links bin/setup makes, inside t
     rm -f "$m"; ln -s "$2" "$m"; }
   plink "$H" "$H/memory"; plink "$dir" "$H/$F/memory"
 fi
+# a session on another Claude account than the hub's (HUB_CLAUDE_CONFIG_DIR) gets the hub's memory links there, as
+# bin/setup makes them, so what it remembers reaches the hub. Its account: the dir its wrapper exports, else the caller's
+# CLAUDE_CONFIG_DIR, else ~/.claude. Never with CLAUDE_HOME set (tests) or WORK_NO_OPEN; a dry run has exited above.
+if [ "$PROV" = anthropic ] && [ -z "${CLAUDE_HOME:-}" ] && [ "${WORK_NO_OPEN:-}" != 1 ]; then
+  SCD="$(wrapper_config_dir "$CL")"; SCD="${SCD:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}}"; HCD="$(claude_home)"
+  if [ "${SCD%/}" != "${HCD%/}" ]; then
+    if link_memory "$SCD" "$H" >/dev/null && link_memory "$SCD" "$dir" "$H/$F/memory" >/dev/null; then
+      echo "work: this session runs as $SCD, not the hub's $HCD; linked the hub's memory there" >&2
+    else echo "work: this session runs as $SCD, not the hub's $HCD, and the hub's memory could not be linked there" >&2; fi
+  fi
+fi
 # the command (it may hold quotes from the agents JSON) runs from a launcher script, so no AppleScript escaping is needed
-L=$(mktemp "${TMPDIR:-/tmp}/agent-work.XXXXXX"); printf '#!/bin/bash\ntrap %s EXIT\n%s\n' "$(sq "$TRAP")" "$cmd" > "$L"; chmod +x "$L"
-if [ "$OPEN" = ade ]; then
-  # only the launcher's path goes to ADE; its stdout is dropped, the first line of its stderr is the reason
-  why=$("$ADE_HOOK_BIN" open --cwd "$dir" --name "${F##*/}" --focus -- bash -l "$L" 2>&1 >/dev/null); rc=$?
+# the launcher registers the session in $(state_dir)/sessions/<name>.<launcher pid> while it runs (bin/sessions lists them);
+# parent = the Claude session that ran bin/work ($CLAUDE_PID), so an orchestrator can list its own children
+SD="$(state_dir)/sessions"
+reg=$(printf 'R=%q.$$\nmkdir -p %q && printf '"'"'name=%%s\\nfolder=%%s\\nlauncher=%%s\\nparent=%%s\\nstarted=%%s\\ncwd=%%s\\n'"'"' %q %q "$$" %q "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)" %q > "$R"' \
+  "$SD/${F##*/}" "$SD" "${F##*/}" "$F" "${CLAUDE_PID:--}" "$dir")
+# an Anthropic session's subagent default ($SUBM, checked above) is exported by the launcher, so a value its own shell has
+# still wins; a provider session never sets it (.ade/context/providers.md)
+sub=""; [ "$PROV" = anthropic ] && sub="export CLAUDE_CODE_SUBAGENT_MODEL=\"\${CLAUDE_CODE_SUBAGENT_MODEL:-$SUBM}\""$'\n'
+# ...and the caller's account: its CLAUDE_CONFIG_DIR, or none (unset, so a login shell's value cannot switch accounts).
+# A wrapper that exports its own still wins. A provider session sets its own dir.
+if [ "$PROV" = anthropic ]; then
+  if [ -n "${CLAUDE_CONFIG_DIR:-}" ]; then sub="${sub}export CLAUDE_CONFIG_DIR=$(sq "$CLAUDE_CONFIG_DIR")"$'\n'; else sub="${sub}unset CLAUDE_CONFIG_DIR"$'\n'; fi
+fi
+# the token limits (checked above), for every provider
+[ "$CWIN" = 0 ] || sub="${sub}export CLAUDE_CODE_AUTO_COMPACT_WINDOW=\"\${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-$CWIN}\""$'\n'
+[ "$BMAX" = 0 ] || sub="${sub}export BASH_MAX_OUTPUT_LENGTH=\"\${BASH_MAX_OUTPUT_LENGTH:-$BMAX}\""$'\n'
+# a terminal can carry the session variables of a Claude session that has exited (ADE hands them to every sub-terminal):
+# with them the new session starts as a child of that dead session and no other session can list or message it
+SESS_UNSET='unset CLAUDE_PID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN CLAUDE_CODE_SESSION_ID CLAUDE_CODE_BRIDGE_SESSION_ID CLAUDE_CODE_SESSION_ATTENDED CLAUDE_CODE_ENTRYPOINT CLAUDECODE'
+L=$(mktemp "${TMPDIR:-/tmp}/agent-work.XXXXXX"); printf '#!/bin/bash\ntrap %s EXIT\n%s\n%s\n%s%s\n' "$(sq "$TRAP \"\$R\"")" "$reg" "$SESS_UNSET" "$sub" "$cmd" > "$L"; chmod +x "$L"
+# WORK_NO_OPEN=1 (tests): write the launcher, print its path, open nothing (both files are kept for the caller)
+[ "${WORK_NO_OPEN:-}" = 1 ] && { echo "launcher: $L"; MS=""; L=""; exit 0; }
+if [ "$OPEN" != window ]; then
+  # inside ADE: never a window (W1b). Only the launcher's path goes to ADE (with "command"; "bare" sends no command); its
+  # stdout is dropped, the first line of its stderr is the reason
+  if [ "$OPEN" = command ]; then why=$("$ADE_HOOK_BIN" open --cwd "$dir" --name "${F##*/}" --focus -- bash -l "$L" 2>&1 >/dev/null); rc=$?
+  else why=$("$ADE_HOOK_BIN" open --cwd "$dir" --name "${F##*/}" --focus 2>&1 >/dev/null); rc=$?; fi
   why="${why%%$'\n'*}"; why="${why:-no message}"
-  case "$rc" in
-    0) MS=""; L=""; exit 0 ;;   # typed into the new sub-terminal: its shell runs the launcher, which removes both
-    5) echo "work: ADE opened the sub-terminal but did not type the command ($why); run it there: bash -l $(printf %q "$L")" >&2
-      MS=""; L=""; exit 5 ;;    # handed to the user: kept for that run, no second session
-    1) echo "work: ADE refused the sub-terminal ($why); to open a window instead run: AGENT_TERMINAL=terminal bin/work $F" >&2
-      exit 1 ;;                 # ADE answered no: never a window outside ADE (owner, 2026-11-09)
-    3|4) [ "${AGENT_TERMINAL:-}" != ade ] || { echo "work: ade open failed (exit $rc): $why" >&2; exit "$rc"; }
-      echo "work: ADE is unreachable (exit $rc: $why); opening a Terminal window instead" >&2 ;;
-    *) echo "work: ade open failed (exit $rc): $why" >&2; exit "$rc" ;;   # 2 (usage) or outside the contract: no fallback
+  case "$OPEN:$rc" in
+    command:0) MS=""; L=""; exit 0 ;;   # typed into the new sub-terminal: its shell runs the launcher, which removes both
+    command:5) echo "work: ADE opened the sub-terminal but did not type the command ($why); run it there: bash -l $(printf %q "$L")" >&2
+      MS=""; L=""; exit 5 ;;            # handed to the user: kept for that run, no second session
+    bare:0) echo "work: opened sub-terminal '${F##*/}' in ADE; paste this there to start the session: bash -l $(sq "$L")" >&2
+      MS=""; L=""; exit 0 ;;            # the stopgap: handed to the user, kept for that run
+    *) # 1 refused, 2 usage, 3 and 4 unreachable, 5 without a command, anything else: nothing kept, no window
+      echo "work: ade open failed (exit $rc): $why; nothing was opened; $NOWIN" >&2; exit "$rc" ;;
   esac
 fi
 if [ "${AGENT_TERMINAL:-terminal}" = iterm ]; then

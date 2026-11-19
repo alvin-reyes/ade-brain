@@ -18,3 +18,25 @@ make_hub() {
   # tests never push a real hub or touch the real sync log/lock; test_report turns auto sync on with a stub
   export AGENT_AUTO_SYNC=0 AGENT_SYNC_LOG="$(mktemp -d)/sync.log" AGENT_SYNC_LOCK="$(mktemp -d)/sync.lock"
 }
+# a fake macOS `security`: a name=value file ($STORE), every argv logged ($STORE.argv); -i reads commands from stdin
+stub_security() {
+  local d; d="$(mktemp -d)"; export STORE="$d/store"; : > "$STORE"
+  cat > "$d/security" <<'STUB'
+#!/bin/bash
+[ -n "${SECURITY_STDIN:-}" ] || echo "$*" >> "$STORE.argv"
+if [ "${1:-}" = -i ]; then
+  while IFS= read -r line; do
+    eval "$(python3 -c 'import shlex,sys; print("set -- " + " ".join(shlex.quote(x) for x in shlex.split(sys.argv[1])))' "$line")"
+    SECURITY_STDIN=1 "$0" "$@" || exit 1
+  done; exit 0
+fi
+op="$1"; shift; acct=""; val=""; w=0
+while [ $# -gt 0 ]; do case "$1" in -a) acct="$2"; shift 2;; -w) if [ $# -ge 2 ]; then val="$2"; shift 2; else w=1; shift; fi;; *) shift;; esac; done
+case "$op" in
+  add-generic-password) [ "${SECURITY_FAIL:-}" != 1 ] || exit 1; grep -v "^$acct=" "$STORE" > "$STORE.t"; mv "$STORE.t" "$STORE"; echo "$acct=$val" >> "$STORE";;
+  find-generic-password) l=$(grep "^$acct=" "$STORE") || exit 44; [ "$w" = 1 ] && echo "${l#*=}"; exit 0;;
+  delete-generic-password) grep -q "^$acct=" "$STORE" || exit 44; grep -v "^$acct=" "$STORE" > "$STORE.t"; mv "$STORE.t" "$STORE";;
+esac
+STUB
+  chmod +x "$d/security"; export PATH="$d:$PATH"
+}

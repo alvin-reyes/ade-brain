@@ -24,8 +24,8 @@ bin/setup >/dev/null || fail "second setup failed"
 assert_eq "$(readlink "$CLAUDE_HOME/skills/bmad-x")" "$HUB/.claude/skills/bmad-x" "skill link idempotent"
 # one checkout claimed by two folders: only the first (owner) is linked, the second gets a warning
 bin/new projects/dup >/dev/null; SH="$(mktemp -d)/shared"; mkdir -p "$SH"
-printf '| shared | %s | main | Alvin | none |\n' "$SH" >> projects/demo/ACCESS.md
-printf '| shared | %s | main | Alvin | none |\n' "$SH" >> projects/dup/ACCESS.md
+printf '| shared | %s | main | Owner | none |\n' "$SH" >> projects/demo/ACCESS.md
+printf '| shared | %s | main | Owner | none |\n' "$SH" >> projects/dup/ACCESS.md
 out=$(bin/setup 2>&1) || fail "setup failed with a doubly claimed checkout"
 smem="$CLAUDE_HOME/projects/$(encode_path "$SH")/memory"
 assert_eq "$(readlink "$smem")" "$HUB/projects/demo/memory" "the first claimant owns the checkout memory"
@@ -36,8 +36,8 @@ echo "$out" | grep -q "projects/dup repo shared" && fail "second claimant linked
 assert_eq "$(. bin/lib.sh; repos_of projects/demo | grep -c "$SH")" "1" "repos_of returns the owned path"
 # a folder that says "memory owned by <folder>" never takes the checkout, even when it sorts first
 bin/new projects/aaa >/dev/null; SH2="$(mktemp -d)/shared2"; mkdir -p "$SH2"
-printf '| s2 | %s | main | Alvin | memory owned by projects/zzz |\n' "$SH2" >> projects/aaa/ACCESS.md
-bin/new projects/zzz >/dev/null; printf '| s2 | %s | main | Alvin | none |\n' "$SH2" >> projects/zzz/ACCESS.md
+printf '| s2 | %s | main | Owner | memory owned by projects/zzz |\n' "$SH2" >> projects/aaa/ACCESS.md
+bin/new projects/zzz >/dev/null; printf '| s2 | %s | main | Owner | none |\n' "$SH2" >> projects/zzz/ACCESS.md
 bin/setup >/dev/null 2>&1 || fail "setup failed with a marked shared checkout"
 assert_eq "$(readlink "$CLAUDE_HOME/projects/$(encode_path "$SH2")/memory")" "$HUB/projects/zzz/memory" "the named owner keeps the checkout memory"
 echo ok

@@ -1,4 +1,4 @@
-# ai-agent-hub-template (working on the template itself)
+# ade-brain (working on the template itself)
 
 This repo is a **template**. Running `bin/init` turns a copy into a hub and replaces this file with a rendered
 `templates/hub/CLAUDE.md`. When you work on the template itself:

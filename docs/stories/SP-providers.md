@@ -340,7 +340,7 @@ SKIP AC7 checkout_base_url_conflict_refused: S0 item 21: the provider layer's en
 SKIP AC19 allowed_tools_applied: none needed for DeepSeek (engines.md, Tool restriction)
 ```
 
-Safety: `shasum ~/.claude-caiden/settings.json ~/.claude/settings.json` before and after both runs and the SKIP run:
+Safety: `shasum ~/.claude-work/settings.json ~/.claude/settings.json` before and after both runs and the SKIP run:
 `5f36b2ea290645ee34d943220a14b54ee5ea5be5` and `7d2a7b7e46a865b6ab9d9df66ce960111331333d`, unchanged.
 
 AC map (each check name has one definition and is called in `tests/test_providers.sh`; QA read the bodies of AC35 to AC45, which
@@ -413,7 +413,7 @@ SKIP AC7 checkout_base_url_conflict_refused: S0 item 21: the provider layer's en
 SKIP AC19 allowed_tools_applied: none needed for DeepSeek (engines.md, Tool restriction)
 ```
 
-Safety: `shasum ~/.claude-caiden/settings.json ~/.claude/settings.json` before and after the runs are identical
+Safety: `shasum ~/.claude-work/settings.json ~/.claude/settings.json` before and after the runs are identical
 (`5f36b2ea...` and `7d2a7b7e...`).
 
 Criteria map (QA read each check's body, not only the exit code): AC1 `provider_rows_static`; AC2 `dry_run_deepseek`; AC3
