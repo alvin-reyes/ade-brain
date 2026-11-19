@@ -4,7 +4,7 @@ make_hub; cd "$HUB"; export AGENT_STATE="$(mktemp -d)"
 bin/new projects/demo >/dev/null
 R="$(mktemp -d)/demo-code"   # checkouts live outside the hub, absolute path in ACCESS.md
 mkdir -p "$R" && git -C "$R" init -q && git -C "$R" config user.email t@t && git -C "$R" config user.name t
-printf '| demo-code | %s | main | Alvin | none |\n' "$R" >> projects/demo/ACCESS.md
+printf '| demo-code | %s | main | Owner | none |\n' "$R" >> projects/demo/ACCESS.md
 touch -t 202001010000 projects/demo/STATE.md
 # negative: no commits yet, nothing blocks and session-end writes nothing
 assert_eq "$(bin/stop-check projects/demo)" "" "no commits, no block"

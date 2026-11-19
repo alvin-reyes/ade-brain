@@ -4,7 +4,7 @@ make_hub; cd "$HUB"; . bin/lib.sh
 bin/new projects/demo >/dev/null
 R="$(mktemp -d)/demo-code"   # checkouts live outside the hub
 mkdir -p "$R" && git -C "$R" init -q
-printf '| demo-code | %s | main | Alvin | none |\n' "$R" >> projects/demo/ACCESS.md
+printf '| demo-code | %s | main | Owner | none |\n' "$R" >> projects/demo/ACCESS.md
 bin/setup >/dev/null
 mem="$CLAUDE_HOME/projects/$(encode_path "$R")/memory"
 assert_eq "$(readlink "$mem")" "$HUB/projects/demo/memory" "the repo session shares the folder memory"
@@ -25,7 +25,7 @@ WORK_DRY=1 bin/work projects/demo demo-code | grep -q "cd '$R'" || fail "named r
 WORK_DRY=1 bin/work projects/demo nope >/dev/null 2>&1; assert_eq "$?" "2" "unknown repo name"
 # a checkout path with a single quote: the launch command still cds into it
 Q="$(mktemp -d)/o'brien-code"; mkdir -p "$Q" && git -C "$Q" init -q
-bin/new projects/quote >/dev/null; printf '| quote-code | %s | main | Alvin | none |\n' "$Q" >> projects/quote/ACCESS.md
+bin/new projects/quote >/dev/null; printf '| quote-code | %s | main | Owner | none |\n' "$Q" >> projects/quote/ACCESS.md
 out=$(WORK_DRY=1 bin/work projects/quote) || fail "work with a quote in the checkout path"
 assert_eq "$(eval "${out%% && *}" && pwd)" "$(cd "$Q" && pwd)" "launch command cds into a path with a quote"
 # negatives
@@ -45,19 +45,19 @@ echo "$out" | grep -q "^cd '$HUB/ops/watch' && " || fail "placeholder row starts
 # a missing checkout is cloned to AGENT_CODE_DIR (gh stubbed) and recorded in ACCESS.md
 S="$(mktemp -d)"; C="$(mktemp -d)"
 printf '#!/bin/bash\necho "$@" > "%s/gh.args"; mkdir -p "$4"\n' "$S" > "$S/gh"; chmod +x "$S/gh"
-printf '| ghost | /nonexistent/ghost | main | Alvin | none |\n' >> projects/bare/ACCESS.md
+printf '| ghost | /nonexistent/ghost | main | Owner | none |\n' >> projects/bare/ACCESS.md
 out=$(PATH="$S:$PATH" AGENT_CODE_DIR="$C" AGENT_CODE_OWNER=ardata-tech WORK_DRY=1 bin/work projects/bare ghost)
 [ -d "$C/ghost" ] || fail "clone created the checkout"
 assert_contains "$S/gh.args" "repo clone ardata-tech/ghost $C/ghost" "gh clone args"
 assert_contains projects/bare/ACCESS.md "| $C/ghost |" "checkout path recorded in ACCESS.md"
 echo "$out" | grep -q "cd '$C/ghost'" || fail "work starts in the cloned repo"
 # a non-owner row (empty Checkout, "checkout owned by <folder>") is refused, never cloned
-awk '{print} /^\|---/ && !d {print "| shared-code |  | main | Alvin | checkout owned by projects/demo |"; d=1}' projects/bare/ACCESS.md > a.tmp && mv a.tmp projects/bare/ACCESS.md
+awk '{print} /^\|---/ && !d {print "| shared-code |  | main | Owner | checkout owned by projects/demo |"; d=1}' projects/bare/ACCESS.md > a.tmp && mv a.tmp projects/bare/ACCESS.md
 out=$(PATH="$S:$PATH" AGENT_CODE_DIR="$C" WORK_DRY=1 bin/work projects/bare shared-code 2>&1); assert_eq "$?" "2" "non-owner is refused"
 echo "$out" | grep -q "owned by projects/demo" || fail "refusal names the owner"
 [ ! -d "$C/shared-code" ] || fail "non-owner cloned a duplicate checkout"
 # owner/repo names: matched by full name or basename; the clone uses the given owner and the basename dir
-awk '{print} /^\|---/ && !d {print "| acme/widget | /nonexistent/widget | main | Alvin | none |"; d=1}' projects/bare/ACCESS.md > a.tmp && mv a.tmp projects/bare/ACCESS.md
+awk '{print} /^\|---/ && !d {print "| acme/widget | /nonexistent/widget | main | Owner | none |"; d=1}' projects/bare/ACCESS.md > a.tmp && mv a.tmp projects/bare/ACCESS.md
 for w in widget acme/widget; do
   rm -rf "$C/widget"
   out=$(PATH="$S:$PATH" AGENT_CODE_DIR="$C" WORK_DRY=1 bin/work projects/bare "$w" 2>&1) || fail "owner/name row did not resolve by [$w]: $out"
@@ -138,7 +138,7 @@ echo 'HUB_CLAUDE=claude-personal' > hub.conf
 WORK_DRY=1 bin/work projects/demo | grep -qE "' (/[^ ]*/)?claude-personal --settings" || fail "hub.conf HUB_CLAUDE picks the install"
 rm hub.conf
 AGENT_CLAUDE=claude-other WORK_DRY=1 bin/work projects/demo | grep -qE "' (/[^ ]*/)?claude-other --settings" || fail "AGENT_CLAUDE picks the install"
-WORK_DRY=1 bin/work --claude claude-koneksi projects/demo | grep -qE "' (/[^ ]*/)?claude-koneksi --settings" || fail "--claude picks the install"
+WORK_DRY=1 bin/work --claude claude-acme projects/demo | grep -qE "' (/[^ ]*/)?claude-acme --settings" || fail "--claude picks the install"
 # the same install and account as the caller: a bare name runs the claude the caller's PATH finds (a new window's login
 # shell may find another install first), and the launcher carries the caller's CLAUDE_CONFIG_DIR, or its absence
 C="$(mktemp -d)"; printf '#!/bin/bash\nexit 0\n' > "$C/claude"; chmod +x "$C/claude"; cp "$C/claude" "$C/claude-personal"
