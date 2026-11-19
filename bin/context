@@ -23,6 +23,7 @@ if [ -n "${1:-}" ]; then
   echo; echo "## Recent journal ($1)"; entries "$1" | lastn 5
   exit 0
 fi
+w="$(orchestrator_endpoint_warning)"; [ -z "$w" ] || echo "WARNING: $w"
 echo "# $(hub_name): every folder ($(utc_today))"
 for f in $(folders); do
   echo; flag=""; [ -n "$(stale_repos "$f")" ] && flag=" (state may be stale: repo commits after STATE.md)"

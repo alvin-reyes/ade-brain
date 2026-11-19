@@ -183,6 +183,38 @@ file with a short preview, which Claude reads only as needed. Code is still writ
 earlier gets the limits when it pulls the template; add `"model": "sonnet"` to its `.claude/settings.json` by hand.
 Habits that help too: one task per focus session (`bin/work --prompt "<task>"`), and folder agents' five-line replies.
 
+## Delegating by role
+
+The hub-root session stays on Anthropic (`bin/doctor` and `bin/context` warn if `ANTHROPIC_BASE_URL` points elsewhere). It
+hands read-only work to a **role**, and the hub decides which model runs it:
+
+```bash
+bin/roles                                                  # each role, its model, why any candidate was skipped
+bin/keys                                                   # each AI tool: key stored or missing, and what it still needs
+bin/keys set glm                                           # store a tool's key from a hidden prompt (deepseek, glm, muse, gemini)
+bin/agent --role reviewer --folder projects/app < task.md  # the task comes on stdin, never as an argument
+```
+
+| Role | Default candidates, in order |
+|---|---|
+| `routine` | `anthropic:sonnet`, `deepseek:sonnet` |
+| `triage` | `anthropic:haiku`, `deepseek:haiku` |
+| `reviewer` | `deepseek:sonnet`, `anthropic:sonnet` |
+| `architect`, `builder` | `anthropic:opus` |
+
+- **Change or add a role in `hub.conf` only:** `HUB_ROLE_REVIEWER="anthropic:opus"`, `HUB_ROLE_DOCS="anthropic:haiku"`.
+  Anthropic entries name `opus`, `sonnet`, `haiku` (optional `[1m]`) or a `claude-*` id. The environment cannot set these.
+- **A candidate runs only if `bin/work --provider` would allow it:** listed in `HUB_PROVIDERS_ALLOWED`, permitted for this
+  hub (DeepSeek: the owner's own hubs only), cleared for delegation, a valid model, its key stored. Otherwise the next one
+  is tried. With none usable, nothing runs (exit 2).
+- **Read-only.** A delegated agent has `Read`, `Grep` and `Glob`, so `architect` and `builder` advise here; code changes
+  stay with folder agents and focus sessions. On a provider run, deny rules keep secret files (`.env*`, `*.pem`, `*.key`,
+  `id_rsa*`, `.ssh/`, `.aws/`, `.npmrc`, `.netrc`, `credentials*`, `secrets/`) from those tools.
+- **No fallback after a start.** A run that fails or times out (`AGENT_TIMEOUT`, default 540 s, at most 570) exits 1 and
+  is not retried elsewhere, so client data never moves to another vendor unnoticed.
+- **The report is data.** It is printed between lines carrying a per-call nonce, capped at 20 KB, with the full text in
+  `.local/agent-out/` (kept 30 days). `journal/delegations-YYYY-MM.md` records each run, never the task.
+
 ## Providers behind Claude Code
 
 A focus session can run Claude Code against DeepSeek instead of Anthropic. The CLI stays Claude Code, so hooks,
@@ -195,7 +227,8 @@ A focus session can run Claude Code against DeepSeek instead of Anthropic. The C
 - **Owner's own hubs only.** DeepSeek's terms allow training on API data and store it in the People's Republic of
   China, so it is refused unless `hub.conf` has `HUB_OWNED_BY_OWNER=1` (never set it in a client hub). `bin/doctor`
   flags a client hub whose allowlist lists deepseek. See ADR 0002.
-- **The key:** `bin/secret --set deepseek-api-key`. `bin/doctor` shows whether it is stored, never its value. With no
+- **The key:** `bin/keys set deepseek` (or `bin/secret --set deepseek-api-key`). A stored key enables nothing by itself, and each
+  hub keeps its own keys in the Keychain under its `HUB_KEYCHAIN_SERVICE`. `bin/doctor` shows whether it is stored, never its value. With no
   key, `bin/work` stops before Claude Code starts.
 - **Exposure (credential option 1):** the key is read by Claude Code's `apiKeyHelper` (`bin/secret deepseek-api-key`)
   only, so it is never in the environment, argv or a file; hooks and tool commands cannot see it.

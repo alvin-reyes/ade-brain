@@ -125,9 +125,152 @@ provider_hub_refusal() {
 # provider_scrub_vars: names that beat apiKeyHelper or switch Claude Code to another backend (auth order:
 # ANTHROPIC_AUTH_TOKEN > ANTHROPIC_API_KEY > apiKeyHelper > OAuth). A provider session never passes them on.
 provider_scrub_vars() { echo "ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_CUSTOM_HEADERS CLAUDE_CODE_USE_BEDROCK CLAUDE_CODE_USE_VERTEX CLAUDE_CODE_USE_FOUNDRY CLAUDE_CODE_OAUTH_TOKEN"; }
+# Shared by bin/work --provider and bin/agent, so a provider run has one set of checks and one settings format.
+provider_sq() { printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"; }
+# provider_models <provider>: the model names it accepts, space-separated
+provider_models() { printf 'opus sonnet haiku %s' "$(local s; for s in model opus sonnet haiku small; do provider_field "$1" "$s"; done | sort -u | tr '\n' ' ')"; }
+# the hub.conf names of a provider's main and small-fast slot overrides
+provider_model_var() { printf 'HUB_%s_MODEL' "$(printf '%s' "$1" | tr 'a-z-' 'A-Z_')"; }
+provider_small_var() { printf 'HUB_%s_SMALL_MODEL' "$(printf '%s' "$1" | tr 'a-z-' 'A-Z_')"; }
+# Each *_refusal prints why the run may not go ahead (empty = it may).
+provider_conf_models_refusal() {
+  local v; for v in "$(provider_model_var "$1")" "$(provider_small_var "$1")"; do
+    [ -z "${!v:-}" ] || provider_model_ok "$1" "${!v}" || { echo "$v=${!v} in hub.conf is not a $1 model ($(provider_models "$1"))"; return 0; }
+  done
+}
+# HUB (environment) picks the hub every helper reads; a provider run only starts from the hub this script is in
+provider_own_hub_refusal() {
+  local own; own="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+  [ -z "${HUB:-}" ] || [ "$(cd "$HUB" 2>/dev/null && pwd -P)" = "$own" ] ||
+    echo "HUB=$HUB is not this script's hub ($own); a provider session runs only from its own hub"
+}
+# the provider config dir stays inside the hub: never a symlink out to ~/.claude or anywhere else
+provider_config_refusal() {
+  local H p r rl; H="$(hub_root)"; rl="$(cd "$H" && pwd -P)/.local"
+  for p in "$H/.local" "$H/.local/providers/$1" "$H/.local/providers/$1/projects"; do
+    r="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$p")"
+    case "$r" in "$rl"|"$rl"/*) ;; *) echo "$p resolves to $r, outside $H/.local; a provider config dir stays in the hub"; return 0 ;; esac
+  done
+}
+# provider_checkout_refusal <provider> <dir>: the checkout's own settings load below nothing that can unset a key: an
+# Anthropic credential or a backend switch in their env would beat apiKeyHelper and go to the provider (names only, never values)
+provider_checkout_refusal() {
+  local why; why="$(WORK_SCRUB="$(provider_scrub_vars)" python3 - "$2/.claude/settings.json" "$2/.claude/settings.local.json" <<'PY'
+import json, os, sys
+bad = os.environ["WORK_SCRUB"].split()
+for p in sys.argv[1:]:
+    if not os.path.exists(p): continue
+    try: env = (json.load(open(p)) or {}).get("env") or {}
+    except Exception: print("%s is not readable JSON" % p); continue
+    hit = [k for k in bad if k in env]
+    if hit: print("%s sets %s in its env" % (p, " ".join(hit)))
+PY
+)" || why="the checkout's settings could not be checked"
+  [ -z "$why" ] || echo "$why; a provider session would send that to $1 instead of its key (remove it, or run without --provider)"
+}
+# provider_key_ok <provider>: fail closed, since Claude Code without a key sends the Anthropic login to the provider.
+# The key is read once into a subshell variable, checked and dropped; it is never printed, written or passed on.
+provider_key_ok() {
+  local H s v; H="$(hub_root)"; s="$(provider_field "$1" secret)"; v="$(keychain_service)"
+  ( key="$(HUB="$H" AGENT_KEYCHAIN_SERVICE="$v" "$H/bin/secret" "$s" 2>/dev/null)" && [ -n "$key" ]; r=$?; unset key; exit "$r" )
+}
+# provider_settings_write <src json> <dst> <provider> <main model id> <small model id>: src plus the provider layer, whose
+# env wins; never a key value. The helper pins the hub and Keychain service the key check used; src's credentials and
+# switches are dropped.
+provider_settings_write() {
+  local H p="$3"; H="$(hub_root)"
+  WORK_PENV="ANTHROPIC_BASE_URL=$(provider_field "$p" base_url)
+ANTHROPIC_MODEL=$4
+ANTHROPIC_DEFAULT_OPUS_MODEL=$(provider_field "$p" opus)
+ANTHROPIC_DEFAULT_SONNET_MODEL=$(provider_field "$p" sonnet)
+ANTHROPIC_DEFAULT_HAIKU_MODEL=$(provider_field "$p" haiku)
+ANTHROPIC_SMALL_FAST_MODEL=$5
+CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1" WORK_SCRUB="$(provider_scrub_vars)" python3 - "$1" "$2" "HUB=$(provider_sq "$H") AGENT_KEYCHAIN_SERVICE=$(provider_sq "$(keychain_service)") $(provider_sq "$H/bin/secret") $(provider_field "$p" secret)" <<'PY'
+import json, os, sys
+src, dst, helper = sys.argv[1:4]
+s = json.load(open(src))
+env = dict(s.get("env") or {})
+env.pop("CLAUDE_CODE_SUBAGENT_MODEL", None)   # agents' own model: values resolve through the slots
+for k in os.environ["WORK_SCRUB"].split(): env.pop(k, None)
+for l in os.environ["WORK_PENV"].splitlines():
+    k, _, v = l.partition("="); env[k] = v
+s["env"] = env; s["apiKeyHelper"] = helper; s["skipWebFetchPreflight"] = True
+json.dump(s, open(dst, "w"), indent=2)
+PY
+}
+# AI tools whose key bin/keys manages. A tool here need not be connected yet: a stored key enables nothing.
+key_tools() { echo "deepseek glm muse gemini"; }
+key_secret() { case "$1" in deepseek|glm) provider_field "$1" secret ;; muse) echo "meta-model-api-key" ;; gemini) echo "gemini-api-key" ;; *) return 1 ;; esac; }
+key_source() { case "$1" in deepseek) echo "platform.deepseek.com" ;; glm) echo "z.ai" ;; muse) echo "dev.meta.ai" ;; gemini) echo "aistudio.google.com" ;; *) return 1 ;; esac; }
+# Role routing (.ade/context/providers.md, "Roles"): a role is an ordered list of provider:model candidates. Defaults
+# here; HUB_ROLE_<ROLE> in hub.conf (never the environment) replaces a role's list or adds a role.
+role_default() { case "$1" in
+  architect|builder) echo "anthropic:opus" ;;
+  routine) echo "anthropic:sonnet deepseek:sonnet" ;;
+  triage) echo "anthropic:haiku deepseek:haiku" ;;
+  reviewer) echo "deepseek:sonnet anthropic:sonnet" ;;
+  *) return 1 ;; esac; }
+role_var() { printf 'HUB_ROLE_%s' "$(printf '%s' "$1" | tr 'a-z-' 'A-Z_')"; }
+roles() { { printf '%s\n' routine triage reviewer architect builder
+  local v; for v in $(compgen -v HUB_ROLE_); do [[ "$v" =~ ^HUB_ROLE_[A-Z0-9_]+$ ]] && printf '%s\n' "${v#HUB_ROLE_}" | tr 'A-Z_' 'a-z-'; done; } | awk '!seen[$0]++'; }
+# role_candidates <role>: one provider:model per line. Exit 2, with the reason on stderr, for an unknown role or any bad
+# entry, so a typo stops the run instead of quietly changing where the work goes.
+role_candidates() {
+  local r="$1" v c n=0 list am='^((opus|sonnet|haiku)(\[1m\])?|claude-[A-Za-z0-9._-]+(\[1m\])?)$'
+  { [[ "$r" =~ ^[a-z0-9-]+$ ]] && roles | grep -qx -- "$r"; } || { echo "unknown role '$r' (roles: $(roles | tr '\n' ' '))" >&2; return 2; }
+  v="$(role_var "$r")"; if [ -n "${!v+x}" ]; then list="${!v}"; else list="$(role_default "$r")"; fi
+  for c in $list; do
+    [[ "$c" =~ ^[a-z0-9-]+:[][A-Za-z0-9._:/-]+$ ]] || { echo "role $r: bad entry '$c' (want provider:model)" >&2; return 2; }
+    if [ "${c%%:*}" = anthropic ]; then [[ "${c#*:}" =~ $am ]] || { echo "role $r: '$c' is not an Anthropic model (opus, sonnet, haiku, optional [1m], or claude-*)" >&2; return 2; }
+    else provider_field "${c%%:*}" base_url >/dev/null || { echo "role $r: no provider '${c%%:*}' in bin/lib.sh ('$c')" >&2; return 2; }; fi
+    n=$((n + 1))
+  done
+  [ "$n" -gt 0 ] || { echo "role $r: no candidates" >&2; return 2; }
+  printf '%s\n' $list
+}
+# candidate_refusal <provider:model> [checkout dir] [has|read]: why this hub may not use it (empty = it may): every check
+# bin/work --provider makes, for delegation. "has" asks only whether the key is stored; "read" (just before a run) reads it.
+candidate_refusal() {
+  local p="${1%%:*}" m="${1#*:}" dir="${2:-}" mode="${3:-has}" why
+  case " ${HUB_PROVIDERS_ALLOWED:-anthropic} " in *" $p "*) ;; *) echo "$p is not in HUB_PROVIDERS_ALLOWED (hub.conf)"; return 0 ;; esac
+  [ "$p" != anthropic ] || return 0
+  provider_field "$p" base_url >/dev/null || { echo "no provider '$p' in bin/lib.sh"; return 0; }
+  why="$(provider_hub_refusal "$p")"; [ -z "$why" ] || { echo "$why"; return 0; }
+  why="$(provider_own_hub_refusal)"; [ -z "$why" ] || { echo "$why"; return 0; }
+  [ "$(claude_cmd)" = claude ] || { echo "$p needs plain claude, not '$(claude_cmd)' (a wrapper could send the run elsewhere)"; return 0; }
+  provider_feature_go "$p" delegation || { provider_no_go_reason "$p" delegation; return 0; }
+  provider_model_ok "$p" "$m" || { echo "$m is not a $p model ($(provider_models "$p"))"; return 0; }
+  why="$(provider_conf_models_refusal "$p")"; [ -z "$why" ] || { echo "$why"; return 0; }
+  why="$(provider_config_refusal "$p")"; [ -z "$why" ] || { echo "$why"; return 0; }
+  if [ -n "$dir" ]; then why="$(provider_checkout_refusal "$p" "$dir")"; [ -z "$why" ] || { echo "$why"; return 0; }; fi
+  local s; s="$(provider_field "$p" secret)"
+  if [ "$mode" = read ]; then provider_key_ok "$p" || echo "no $(provider_field "$p" label) in the Keychain; store it with: bin/secret --set $s"
+  else "$(hub_root)/bin/secret" --has "$s" || echo "no $(provider_field "$p" label) in the Keychain; store it with: bin/secret --set $s"; fi
+}
+# role_pick <role> [checkout dir] [has|read]: sets ROLE_PICK to the first usable candidate and ROLE_SKIPS to one
+# "skipped <candidate>: <why>" line per candidate before it. 0 = picked, 1 = none usable, 2 = bad role or table.
+role_pick() {
+  local cs c why; ROLE_PICK=""; ROLE_SKIPS=""; cs="$(role_candidates "$1")" || return 2
+  for c in $cs; do
+    why="$(candidate_refusal "$c" "${2:-}" "${3:-has}")"
+    [ -n "$why" ] || { ROLE_PICK="$c"; return 0; }
+    ROLE_SKIPS="${ROLE_SKIPS}skipped $c: $why"$'\n'
+  done
+  return 1
+}
+# orchestrator_endpoint_warning: the hub-root session stays on Anthropic (ADR 0002). Prints a warning when
+# ANTHROPIC_BASE_URL points at another host. A focus session (AGENT_FOLDER) may run on a provider. Only the host is shown.
+orchestrator_endpoint_warning() {
+  local h="${ANTHROPIC_BASE_URL:-}"; [ -n "$h" ] && [ -z "${AGENT_FOLDER:-}" ] || return 0
+  h="${h#*://}"; h="${h%%[/?#]*}"; h="${h##*@}"; h="${h%%:*}"; h="$(printf '%s' "$h" | tr 'A-Z' 'a-z')"
+  case "$h" in anthropic.com|*.anthropic.com) return 0 ;; esac
+  echo "ANTHROPIC_BASE_URL points at $h: the hub-root orchestrator runs on Anthropic only (ADR 0002); use bin/agent --role for other providers"
+}
 # hub.conf (written by bin/init): who this agent is and what it can reach. Names and locations only, never secrets.
-# AGENT_* environment variables override it (tests use them). Provider choice and hub ownership come only from hub.conf.
+# AGENT_* environment variables override it (tests use them). Provider choice, role tables and hub ownership come only from hub.conf.
 unset HUB_PROVIDER HUB_PROVIDERS_ALLOWED HUB_OWNED_BY_OWNER
+for _v in $(compgen -v HUB_ROLE_); do unset "$_v"; done; unset _v   # role tables too
 [ -f "$(hub_root)/hub.conf" ] && . "$(hub_root)/hub.conf"
 hub_name() { echo "${HUB_NAME:-$(basename "$(hub_root)")}"; }
 hub_owner() { echo "${HUB_OWNER:-the hub owner}"; }

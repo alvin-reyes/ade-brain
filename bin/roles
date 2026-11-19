@@ -1,0 +1,13 @@
+#!/bin/bash
+# bin/roles: each delegation role, the model this hub would run it on, and why any earlier candidate is unavailable.
+# Never reads a key's value (bin/secret --has only). Exit 2 when a role's table in hub.conf is bad.
+set -u; . "$(dirname "$0")/lib.sh"
+[ $# -eq 0 ] || { echo "usage: bin/roles" >&2; exit 2; }
+rc=0
+for r in $(roles); do
+  role_pick "$r"; s=$?
+  case "$s" in 0) c="$ROLE_PICK" ;; 1) c="(none usable)" ;; *) c="(bad table entry)"; rc=2 ;; esac
+  printf '%-10s %s\n' "$r" "$c"
+  [ -z "$ROLE_SKIPS" ] || printf '%s' "$ROLE_SKIPS" | sed 's/^/  /'
+done
+exit "$rc"

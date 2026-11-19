@@ -10,7 +10,7 @@ setup() {
   K="$AGENT_SYNC_LOCK"; J="journal/$(date -u +%Y-%m-%d).md"; NOW=$(date +%s)
   bin/new projects/demo >/dev/null
   R="$(mktemp -d)/demo-code"; mkdir -p "$R" && git -C "$R" init -q && git -C "$R" config user.email t@t && git -C "$R" config user.name t
-  printf '| demo-code | %s | main | Alvin | none |\n' "$R" >> projects/demo/ACCESS.md
+  printf '| demo-code | %s | main | Owner | none |\n' "$R" >> projects/demo/ACCESS.md
   git add -A >/dev/null 2>&1; git commit -q --no-verify -m base >/dev/null 2>&1
 }
 # code_commit <message> <epoch>: a commit in the demo checkout dated <epoch>

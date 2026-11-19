@@ -63,10 +63,7 @@ case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be
 [[ "$PROV" =~ ^[a-z0-9-]+$ ]] || { echo "work: bad provider name '$PROV'" >&2; exit 2; }
 case " ${HUB_PROVIDERS_ALLOWED:-anthropic} " in *" $PROV "*) ;; *) echo "work: provider $PROV is not in HUB_PROVIDERS_ALLOWED (hub.conf)" >&2; exit 2 ;; esac
 if [ "$PROV" != anthropic ]; then
-  # HUB (environment) picks the hub every helper reads; a provider session only runs from the hub this script is in
-  OWN="$(cd "$(dirname "$0")/.." && pwd -P)"
-  [ -z "${HUB:-}" ] || [ "$(cd "$HUB" 2>/dev/null && pwd -P)" = "$OWN" ] ||
-    { echo "work: HUB=$HUB is not this script's hub ($OWN); a provider session runs only from its own hub" >&2; exit 2; }
+  why="$(provider_own_hub_refusal)"; [ -z "$why" ] || { echo "work: $why" >&2; exit 2; }
   provider_field "$PROV" base_url >/dev/null || { echo "work: no provider '$PROV' in bin/lib.sh" >&2; exit 2; }
   why="$(provider_hub_refusal "$PROV")"; [ -z "$why" ] || { echo "work: $why" >&2; exit 2; }
   [ "$CL" = claude ] || { echo "work: --provider $PROV needs plain claude, not '$CL' (a wrapper could send the session elsewhere)" >&2; exit 2; }
@@ -74,10 +71,10 @@ if [ "$PROV" != anthropic ]; then
   if [ -n "$EFFORT" ] || [[ "$ASET" == *"effort "* ]]; then provider_feature_go "$PROV" effort || { echo "work: $(provider_no_go_reason "$PROV" effort)" >&2; exit 2; }; fi
   for a in ${POS[@]+"${POS[@]}"}; do case "$a" in --resume|--resume=*|--continue|-r|-c)
     echo "work: a provider session does not resume history ($a would send it to $PROV); start a new session (--resume leak, .ade/context/engines.md)" >&2; exit 2 ;; esac; done
-  PMODELS="opus sonnet haiku $(for s in model opus sonnet haiku small; do provider_field "$PROV" "$s"; done | sort -u | tr '\n' ' ')"
+  PMODELS="$(provider_models "$PROV")"
   [ -z "$MODEL" ] || provider_model_ok "$PROV" "$MODEL" || { echo "work: --model $MODEL is not a $PROV model ($PMODELS)" >&2; exit 2; }
-  PU="$(printf '%s' "$PROV" | tr 'a-z-' 'A-Z_')"; PM="HUB_${PU}_MODEL"; PS="HUB_${PU}_SMALL_MODEL"
-  for v in "$PM" "$PS"; do [ -z "${!v:-}" ] || provider_model_ok "$PROV" "${!v}" || { echo "work: $v=${!v} in hub.conf is not a $PROV model ($PMODELS)" >&2; exit 2; }; done
+  PM="$(provider_model_var "$PROV")"; PS="$(provider_small_var "$PROV")"
+  why="$(provider_conf_models_refusal "$PROV")"; [ -z "$why" ] || { echo "work: $why" >&2; exit 2; }
   P_MAIN="$(provider_model_id "$PROV" "${!PM:-$(provider_field "$PROV" model)}")"; P_SMALL="$(provider_model_id "$PROV" "${!PS:-$(provider_field "$PROV" small)}")"
   REMOTE=0
 fi
@@ -190,56 +187,17 @@ if [ "$PROV" = anthropic ]; then
   case "$CL" in */*) ;; *) p="$(command -v -- "$CL" 2>/dev/null)"; [[ "$p" == /* && "$p" =~ ^[A-Za-z0-9._/-]+$ ]] && CL="$p" ;; esac
   cmd="cd $(sq "$dir") && AGENT_FOLDER='$F' $CL --settings $(sq "$H/$F/.claude/settings.json")"
 else
-  SEC="$(provider_field "$PROV" secret)"; CD="$H/.local/providers/$PROV"; SVC="$(keychain_service)"; SCRUB="$(provider_scrub_vars)"
-  # the provider config dir stays inside the hub: never a symlink out to ~/.claude or anywhere else
-  RL="$(cd "$H" && pwd -P)/.local"
-  for p in "$H/.local" "$CD" "$CD/projects"; do
-    r="$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$p")"
-    case "$r" in "$RL"|"$RL"/*) ;; *) echo "work: $p resolves to $r, outside $H/.local; a provider config dir stays in the hub" >&2; exit 2 ;; esac
-  done
-  # the checkout's own settings load as project settings, below nothing that can unset a key: an Anthropic credential or a
-  # backend switch in their env would beat apiKeyHelper and go to the provider, so refuse (names only, never values)
-  why="$(WORK_SCRUB="$SCRUB" python3 - "$dir/.claude/settings.json" "$dir/.claude/settings.local.json" <<'PY'
-import json, os, sys
-bad = os.environ["WORK_SCRUB"].split()
-for p in sys.argv[1:]:
-    if not os.path.exists(p): continue
-    try: env = (json.load(open(p)) or {}).get("env") or {}
-    except Exception: print("%s is not readable JSON" % p); continue
-    hit = [k for k in bad if k in env]
-    if hit: print("%s sets %s in its env" % (p, " ".join(hit)))
-PY
-)" || why="the checkout's settings could not be checked"
-  [ -z "$why" ] || { echo "work: $why; a provider session would send that to $PROV instead of its key (remove it, or run without --provider)" >&2; exit 2; }
-  # fail closed: Claude Code never starts against another provider without its key (it would send the Anthropic login there).
-  # The key is read once into a subshell variable, checked and dropped; it is never printed, written or passed on.
+  SEC="$(provider_field "$PROV" secret)"; CD="$H/.local/providers/$PROV"; SCRUB="$(provider_scrub_vars)"
+  why="$(provider_config_refusal "$PROV")"; [ -z "$why" ] || { echo "work: $why" >&2; exit 2; }
+  why="$(provider_checkout_refusal "$PROV" "$dir")"; [ -z "$why" ] || { echo "work: $why" >&2; exit 2; }
+  # fail closed: Claude Code never starts against another provider without its key (it would send the Anthropic login there)
   if [ "${WORK_DRY:-}" != 1 ]; then
-    ( key="$(HUB="$H" AGENT_KEYCHAIN_SERVICE="$SVC" "$H/bin/secret" "$SEC" 2>/dev/null)" && [ -n "$key" ]; r=$?; unset key; exit "$r" ) ||
-      { echo "work: no $(provider_field "$PROV" label) in the Keychain; store it with: bin/secret --set $SEC" >&2; exit 1; }
+    provider_key_ok "$PROV" || { echo "work: no $(provider_field "$PROV" label) in the Keychain; store it with: bin/secret --set $SEC" >&2; exit 1; }
   fi
-  # one settings file: the folder's (hooks kept) plus the provider layer, whose env wins; never a key value. The helper pins
-  # the hub and Keychain service the pre-check used, so both read the same item; the folder's credentials and switches are dropped
+  # one settings file: the folder's (hooks kept) plus the provider layer (provider_settings_write)
   [ -f "$H/$F/.claude/settings.json" ] || { echo "work: $F has no .claude/settings.json" >&2; exit 2; }
   MS=$(mktemp "${TMPDIR:-/tmp}/agent-settings.XXXXXX") && chmod 600 "$MS" || exit 2
-  WORK_PENV="ANTHROPIC_BASE_URL=$(provider_field "$PROV" base_url)
-ANTHROPIC_MODEL=$P_MAIN
-ANTHROPIC_DEFAULT_OPUS_MODEL=$(provider_field "$PROV" opus)
-ANTHROPIC_DEFAULT_SONNET_MODEL=$(provider_field "$PROV" sonnet)
-ANTHROPIC_DEFAULT_HAIKU_MODEL=$(provider_field "$PROV" haiku)
-ANTHROPIC_SMALL_FAST_MODEL=$P_SMALL
-CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1" WORK_SCRUB="$SCRUB" python3 - "$H/$F/.claude/settings.json" "$MS" "HUB=$(sq "$H") AGENT_KEYCHAIN_SERVICE=$(sq "$SVC") $(sq "$H/bin/secret") $SEC" <<'PY' || exit 2
-import json, os, sys
-src, dst, helper = sys.argv[1:4]
-s = json.load(open(src))
-env = dict(s.get("env") or {})
-env.pop("CLAUDE_CODE_SUBAGENT_MODEL", None)   # agents' own model: values resolve through the slots
-for k in os.environ["WORK_SCRUB"].split(): env.pop(k, None)
-for l in os.environ["WORK_PENV"].splitlines():
-    k, _, v = l.partition("="); env[k] = v
-s["env"] = env; s["apiKeyHelper"] = helper; s["skipWebFetchPreflight"] = True
-json.dump(s, open(dst, "w"), indent=2)
-PY
+  provider_settings_write "$H/$F/.claude/settings.json" "$MS" "$PROV" "$P_MAIN" "$P_SMALL" || exit 2
   # its own config dir, so /model writes there and not to the owner's settings.json; env -u drops any credential or backend
   # switch the launching (login) shell holds, since those beat apiKeyHelper
   cmd="cd $(sq "$dir") && env$(printf ' -u %s' $SCRUB) AGENT_FOLDER='$F' CLAUDE_CONFIG_DIR=$(sq "$CD") $CL --settings $(sq "$MS")"
