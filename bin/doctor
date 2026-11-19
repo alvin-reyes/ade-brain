@@ -26,6 +26,7 @@ for p in ${HUB_PROVIDERS_ALLOWED:-}; do s="$(provider_field "$p" secret)" || con
   "$H/bin/secret" --has "$s" && line OK "$l" "$s in the Keychain" || line MISSING "$l" "$s: bin/secret --set $s"
   [ -z "$(provider_hub_refusal "$p")" ] || line MISSING "client hub" "HUB_PROVIDERS_ALLOWED lists $p, which needs HUB_OWNED_BY_OWNER=1 (owner's own hubs only, ADR 0002); remove it"
 done
+w="$(orchestrator_endpoint_warning)"; [ -z "$w" ] || line WARN "orchestrator" "$w"
 [ "${DOCTOR_OFFLINE:-}" = 1 ] && exit 0
 command -v gh >/dev/null && { gh auth status >/dev/null 2>&1 && line OK "github login" "$(gh api user --jq .login 2>/dev/null)" || line MISSING "github login" "gh auth login"; }
 for r in ${HUB_REPOS:-}; do gh api "repos/$r" >/dev/null 2>&1 && line OK "repo $r" "readable" || line MISSING "repo $r" "ask for access"; done
