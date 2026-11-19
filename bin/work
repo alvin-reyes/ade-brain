@@ -1,9 +1,12 @@
 #!/bin/bash
-# bin/work [--provider P] [--claude CMD] [--model M] [--effort E] [--prompt TEXT] [--no-remote] [--force] [--agent-model [name=]M] [--agent-effort [name=]E] <folder> [repo]: deep work in a new Terminal, inside the project's checkout, with the folder's hooks.
+# bin/work [--provider P] [--claude CMD] [--model M] [--effort E] [--prompt TEXT] [--mode M] [--no-remote] [--force] [--agent-model [name=]M] [--agent-effort [name=]E] <folder> [repo]: deep work in a new Terminal, inside the project's checkout, with the folder's hooks.
 # A folder with no repo (none, or a "(none ...)" row) works in the hub folder itself. Clones a missing checkout (owner/name as given, else HUB_CODE_OWNER/<name>) to ${AGENT_CODE_DIR:-$HOME/Project}/<name> and records the path in ACCESS.md.
 # --claude picks the Claude install (default: claude_cmd in lib.sh); a bare name runs what the caller's PATH finds, and the
 # session keeps the caller's CLAUDE_CONFIG_DIR (or none), so it runs as the same install and account. --model / --effort (anywhere in the arguments) pass through to claude for this session.
 # --prompt TEXT is the session's first message (passed last, after --, quoted for the launcher).
+# --mode M is the permission mode (default HUB_WORK_MODE from hub.conf, else auto, the main session's usual mode): a focus
+# session in the main session's mode takes its messages without holding them for approval in its own terminal, so the
+# main session is the one place to say go. --mode manual asks in the focus terminal. bypassPermissions is never allowed.
 # Remote Control is on for every session, named after the folder (projects/acme -> acme); --no-remote turns it off.
 # A folder whose session is already running with Remote Control (a claude process with --remote-control <name>) is refused
 # with exit 3 before anything is opened or changed; --force opens another anyway.
@@ -22,12 +25,12 @@
 set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"
 # temp files (merged settings, launcher) go on any exit until the launcher is handed off; the launcher then removes them
 MS=""; L=""; trap '[ -z "$MS" ] || rm -f "$MS"; [ -z "$L" ] || rm -f "$L"' EXIT
-USAGE="usage: bin/work [--provider P] [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--no-remote] [--force] [--agent-model [name=]M] [--agent-effort [name=]E] <projects|ops>/<name> [repo]  (AGENT_TERMINAL=terminal|iterm|ade)"
-MODEL=""; EFFORT=""; PROMPT=""; REMOTE=1; FORCE=0; CL="$(claude_cmd)"; POS=(); ASET=""; PROV="${HUB_PROVIDER:-anthropic}"
+USAGE="usage: bin/work [--provider P] [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--mode auto|manual|acceptEdits|plan] [--no-remote] [--force] [--agent-model [name=]M] [--agent-effort [name=]E] <projects|ops>/<name> [repo]  (AGENT_TERMINAL=terminal|iterm|ade)"
+MODEL=""; EFFORT=""; PROMPT=""; MODE=""; REMOTE=1; FORCE=0; CL="$(claude_cmd)"; POS=(); ASET=""; PROV="${HUB_PROVIDER:-anthropic}"
 while [ $# -gt 0 ]; do
   case "$1" in
-    --model|--effort|--claude|--provider) [ $# -ge 2 ] || { echo "$USAGE" >&2; exit 2; }
-      case "$1" in --model) MODEL="$2" ;; --effort) EFFORT="$2" ;; --provider) PROV="$2" ;; *) CL="$2" ;; esac; shift 2 ;;
+    --model|--effort|--claude|--provider|--mode) [ $# -ge 2 ] || { echo "$USAGE" >&2; exit 2; }
+      case "$1" in --mode) MODE="$2" ;; --model) MODEL="$2" ;; --effort) EFFORT="$2" ;; --provider) PROV="$2" ;; *) CL="$2" ;; esac; shift 2 ;;
     --no-remote) REMOTE=0; shift ;;
     --force) FORCE=1; shift ;;
     --prompt) [ $# -ge 2 ] && [ -n "$2" ] || { echo "$USAGE" >&2; exit 2; }; PROMPT="$2"; shift 2 ;;
@@ -57,6 +60,8 @@ CWIN="${HUB_COMPACT_WINDOW:-200000}"; BMAX="${HUB_BASH_MAX_CHARS:-8000}"
 # hub.conf defaults (HUB_MODEL, HUB_EFFORT, HUB_AGENT_MODEL); the command line wins
 # (a provider session never takes HUB_MODEL, which may be a full Anthropic id)
 [ -n "$MODEL" ] || [ "$PROV" != anthropic ] || MODEL="${HUB_MODEL:-}"; [ -n "$EFFORT" ] || EFFORT="${HUB_EFFORT:-}"
+[ -n "$MODE" ] || MODE="${HUB_WORK_MODE:-auto}"
+case "$MODE" in auto|manual|acceptEdits|plan) ;; *) echo "work: mode must be auto|manual|acceptEdits|plan" >&2; exit 2 ;; esac
 [ -z "$MODEL" ] || [[ "$MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
 case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
 # the provider: allowed in hub.conf, permitted for this hub, plain claude, a go for each feature used, no resume, its own models
@@ -204,6 +209,7 @@ else
   TRAP="rm -f \"\$0\" $(sq "$MS")"
 fi
 [ -n "$agents" ] && cmd="$cmd --agents $(printf %q "$agents")"
+cmd="$cmd --permission-mode $MODE"
 [ -n "$MODEL" ] && cmd="$cmd --model $MODEL"
 [ -n "$EFFORT" ] && cmd="$cmd --effort $EFFORT"
 [ "$REMOTE" = 1 ] && cmd="$cmd --remote-control $(printf %q "${F##*/}")"

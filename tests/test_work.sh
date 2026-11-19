@@ -71,15 +71,15 @@ mkdir -p projects/demo/.claude/agents
 printf -- '---\nname: tester\ndescription: Runs "tests"\ntools: Read, Bash\nmodel: inherit\n---\nYou test things.\nSecond line.\n' > projects/demo/.claude/agents/tester.md
 out=$(WORK_DRY=1 bin/work projects/demo)
 echo "$out" | grep -q -- "--agents " || fail "work passes --agents"
-j=$(eval "$(printf '%s\n' "$out" | sed -E 's/^cd .* && AGENT_FOLDER=[^ ]* [^ ]* --settings [^ ]* --agents /printf %s /; s/ --remote-control [^ ]*//')")
+j=$(eval "$(printf '%s\n' "$out" | sed -E 's/^cd .* && AGENT_FOLDER=[^ ]* [^ ]* --settings [^ ]* --agents /printf %s /; s/ --permission-mode [^ ]*//; s/ --remote-control [^ ]*//')")
 assert_eq "$(echo "$j" | python3 -c 'import json,sys; d=json.load(sys.stdin)["tester"]; print(d["description"]+"|"+d["prompt"].splitlines()[0]+"|"+",".join(d["tools"]) if isinstance(d["tools"],list) else d["tools"])')" 'Runs "tests"|You test things.|Read,Bash' "agents json"
 # apostrophes and double quotes in an agent body must not break the command
 printf -- '---\nname: quoty\ndescription: Jared'"'"'s helper\n---\nDon'"'"'t say "hi" \\ there.\n' > projects/demo/.claude/agents/quoty.md
 out=$(WORK_DRY=1 bin/work projects/demo)
 printf '%s\n' "$out" | bash -n || fail "command with quotes is not valid bash"
-chk=$(printf '%s\n' "$out" | sed -E 's/^cd .* && AGENT_FOLDER=[^ ]* [^ ]* --settings [^ ]* --agents /printf %s /; s/ --remote-control [^ ]*//'); [ "$(eval "$chk" | python3 -c 'import json,sys; print(json.load(sys.stdin)["quoty"]["prompt"])')" = "Don't say \"hi\" \\ there." ] || fail "quoted JSON round trip"
+chk=$(printf '%s\n' "$out" | sed -E 's/^cd .* && AGENT_FOLDER=[^ ]* [^ ]* --settings [^ ]* --agents /printf %s /; s/ --permission-mode [^ ]*//; s/ --remote-control [^ ]*//'); [ "$(eval "$chk" | python3 -c 'import json,sys; print(json.load(sys.stdin)["quoty"]["prompt"])')" = "Don't say \"hi\" \\ there." ] || fail "quoted JSON round trip"
 # per-task subagent model/effort: bare value = every agent, name=value = one agent (wins over bare)
-aj() { printf '%s\n' "$1" | sed -E 's/^cd .* && AGENT_FOLDER=[^ ]* [^ ]* --settings [^ ]* --agents /printf %s /; s/ --(model|effort|remote-control) [^ ]*//g'; }
+aj() { printf '%s\n' "$1" | sed -E 's/^cd .* && AGENT_FOLDER=[^ ]* [^ ]* --settings [^ ]* --agents /printf %s /; s/ --(permission-mode|model|effort|remote-control) [^ ]*//g'; }
 field() { eval "$(aj "$1")" | python3 -c "import json,sys; print(json.load(sys.stdin)['$2'].get('$3',''))"; }
 out=$(WORK_DRY=1 bin/work projects/demo --agent-model haiku --agent-model quoty=opus --agent-effort tester=low)
 assert_eq "$(field "$out" tester model)" "haiku" "bare --agent-model sets every agent"
@@ -168,4 +168,12 @@ for ps_out in "''" "'  7 /x/claude --remote-control demo-x'" "'  8 /x/claude --r
 done
 fake_ps "'  4242 /x/claude --remote-control demo'"
 for flag in --force --no-remote; do PATH="$P:$PATH" WORK_DRY=1 bin/work $flag projects/demo >/dev/null 2>&1; assert_eq "$?" "0" "$flag proceeds"; done
+# permission mode: focus sessions default to auto so they take the main session's messages without holding them
+out=$(WORK_DRY=1 bin/work projects/demo); echo "$out" | grep -q -- "--permission-mode auto" || fail "default permission mode is auto"
+out=$(WORK_DRY=1 bin/work --mode manual projects/demo); echo "$out" | grep -q -- "--permission-mode manual" || fail "--mode sets the permission mode"
+out=$(HUB_WORK_MODE=plan WORK_DRY=1 bin/work projects/demo); echo "$out" | grep -q -- "--permission-mode plan" || fail "HUB_WORK_MODE sets the default"
+out=$(HUB_WORK_MODE=plan WORK_DRY=1 bin/work --mode acceptEdits projects/demo); echo "$out" | grep -q -- "--permission-mode acceptEdits" || fail "--mode wins over HUB_WORK_MODE"
+WORK_DRY=1 bin/work --mode bypassPermissions projects/demo >/dev/null 2>&1; assert_eq "$?" "2" "bypassPermissions is refused"
+WORK_DRY=1 bin/work --mode 'auto;x' projects/demo >/dev/null 2>&1; assert_eq "$?" "2" "bad mode is refused"
+WORK_DRY=1 bin/work projects/demo --mode >/dev/null 2>&1; assert_eq "$?" "2" "--mode without a value is refused"
 echo ok
