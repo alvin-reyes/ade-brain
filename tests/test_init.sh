@@ -32,7 +32,7 @@ for f in CLAUDE.md .claude/agents/devops-sre.md .claude/agents/ops-environments.
 out=$(env -u HUB WORK_DRY=1 bin/work ops/environments) || fail "deep work on the first folder"
 echo "$out" | grep -q "cd '$CO'" || fail "work opens the repo checkout"
 HUB="$D" bin/context | grep -q "^# acme-corp-devops-sre: every folder" || fail "context names the hub"
-assert_contains "journal/$(date -u +%Y-%m-%d).md" "Hub initialized from ai-agent-hub-template" "journal entry"
+assert_contains "journal/$(date -u +%Y-%m-%d).md" "Hub initialized from ade-brain" "journal entry"
 [ "$(git config core.hooksPath)" = .githooks ] || fail "hooks path"
 grep -rqi "orillia" . --exclude-dir=.git --exclude-dir=.claude --exclude-dir=tests && fail "Orillia leaked into a new hub"
 # refusals: re-init, unknown persona, bad names, a secret value instead of a name

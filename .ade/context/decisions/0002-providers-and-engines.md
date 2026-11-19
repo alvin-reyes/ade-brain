@@ -60,6 +60,21 @@ DeepSeek: reviewed 2026-11-09 from DeepSeek's own documents (a reading, not lega
 
 GLM (z.ai): not reviewed for SP (disabled). Meta: not reviewed (not offered).
 
+### Role routing and the orchestrator
+
+Owner-approved plan, 2026-11-18 (role-based model routing):
+
+- **The hub-root orchestrator runs on Anthropic only.** It names a role; `bin/agent --role` runs the task on the first
+  `provider:model` candidate this hub may use. `bin/doctor` and hub-root `bin/context` warn when `ANTHROPIC_BASE_URL`
+  points at another host; they do not block.
+- **The data-sharing rule still holds.** A candidate passes the same checks as `bin/work --provider`, so a client hub
+  never sends work to DeepSeek, even when the role table or the allowlist lists it.
+- **Delegated agents are read-only, and their output is data.** It can approve nothing.
+- **No fallback after a run starts**, so client data never moves to a second vendor unnoticed. Skipping a candidate
+  before any call is allowed.
+- Consequence: a provider-backed role sends the files it reads in the checkout to that provider, so it stays limited to
+  the owner's own hubs, and deny rules keep common secret files out of its tools. Contract: `.ade/context/providers.md`, "Roles".
+
 ## Engines (S2a)
 
 Not written yet; S2a appends it here.

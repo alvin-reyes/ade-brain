@@ -2,6 +2,7 @@
 # bin/stop-check <folder>: Stop hook. Blocks once per commit when a repo has commits newer than STATE.md.
 # Without repos it only prints a plain reminder if STATE.md was not updated today (UTC).
 . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; F="${1:-.}"; S="$H/$F/STATE.md"
+session_mark "$F" idle   # the turn ended: bin/sessions shows the focus session as idle (busy again if this hook blocks)
 [ -f "$S" ] || exit 0
 if [ -n "$(repos_of "$F")" ]; then
   line=$(stale_repos "$F" | head -1)
@@ -9,6 +10,7 @@ if [ -n "$(repos_of "$F")" ]; then
     repo="${line% *}"; hash="${line##* }"; K="$(state_dir)/stop-check/$(encode_path "$F")"
     if [ "$(cat "$K" 2>/dev/null)" != "$hash" ]; then
       mkdir -p "$(dirname "$K")"; echo "$hash" > "$K"
+      session_mark "$F" busy
       printf '{"decision":"block","reason":"Commits were made in %s since STATE.md was updated. Update %s/STATE.md (Live/Open/Waiting on) and run bin/journal %s \\"...\\" before finishing."}\n' "$repo" "$F" "$F"
     fi
   fi

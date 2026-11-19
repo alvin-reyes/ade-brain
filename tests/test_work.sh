@@ -4,7 +4,7 @@ make_hub; cd "$HUB"; . bin/lib.sh
 bin/new projects/demo >/dev/null
 R="$(mktemp -d)/demo-code"   # checkouts live outside the hub
 mkdir -p "$R" && git -C "$R" init -q
-printf '| demo-code | %s | main | Alvin | none |\n' "$R" >> projects/demo/ACCESS.md
+printf '| demo-code | %s | main | Owner | none |\n' "$R" >> projects/demo/ACCESS.md
 bin/setup >/dev/null
 mem="$CLAUDE_HOME/projects/$(encode_path "$R")/memory"
 assert_eq "$(readlink "$mem")" "$HUB/projects/demo/memory" "the repo session shares the folder memory"
@@ -25,7 +25,7 @@ WORK_DRY=1 bin/work projects/demo demo-code | grep -q "cd '$R'" || fail "named r
 WORK_DRY=1 bin/work projects/demo nope >/dev/null 2>&1; assert_eq "$?" "2" "unknown repo name"
 # a checkout path with a single quote: the launch command still cds into it
 Q="$(mktemp -d)/o'brien-code"; mkdir -p "$Q" && git -C "$Q" init -q
-bin/new projects/quote >/dev/null; printf '| quote-code | %s | main | Alvin | none |\n' "$Q" >> projects/quote/ACCESS.md
+bin/new projects/quote >/dev/null; printf '| quote-code | %s | main | Owner | none |\n' "$Q" >> projects/quote/ACCESS.md
 out=$(WORK_DRY=1 bin/work projects/quote) || fail "work with a quote in the checkout path"
 assert_eq "$(eval "${out%% && *}" && pwd)" "$(cd "$Q" && pwd)" "launch command cds into a path with a quote"
 # negatives
@@ -45,19 +45,19 @@ echo "$out" | grep -q "^cd '$HUB/ops/watch' && " || fail "placeholder row starts
 # a missing checkout is cloned to AGENT_CODE_DIR (gh stubbed) and recorded in ACCESS.md
 S="$(mktemp -d)"; C="$(mktemp -d)"
 printf '#!/bin/bash\necho "$@" > "%s/gh.args"; mkdir -p "$4"\n' "$S" > "$S/gh"; chmod +x "$S/gh"
-printf '| ghost | /nonexistent/ghost | main | Alvin | none |\n' >> projects/bare/ACCESS.md
+printf '| ghost | /nonexistent/ghost | main | Owner | none |\n' >> projects/bare/ACCESS.md
 out=$(PATH="$S:$PATH" AGENT_CODE_DIR="$C" AGENT_CODE_OWNER=ardata-tech WORK_DRY=1 bin/work projects/bare ghost)
 [ -d "$C/ghost" ] || fail "clone created the checkout"
 assert_contains "$S/gh.args" "repo clone ardata-tech/ghost $C/ghost" "gh clone args"
 assert_contains projects/bare/ACCESS.md "| $C/ghost |" "checkout path recorded in ACCESS.md"
 echo "$out" | grep -q "cd '$C/ghost'" || fail "work starts in the cloned repo"
 # a non-owner row (empty Checkout, "checkout owned by <folder>") is refused, never cloned
-awk '{print} /^\|---/ && !d {print "| shared-code |  | main | Alvin | checkout owned by projects/demo |"; d=1}' projects/bare/ACCESS.md > a.tmp && mv a.tmp projects/bare/ACCESS.md
+awk '{print} /^\|---/ && !d {print "| shared-code |  | main | Owner | checkout owned by projects/demo |"; d=1}' projects/bare/ACCESS.md > a.tmp && mv a.tmp projects/bare/ACCESS.md
 out=$(PATH="$S:$PATH" AGENT_CODE_DIR="$C" WORK_DRY=1 bin/work projects/bare shared-code 2>&1); assert_eq "$?" "2" "non-owner is refused"
 echo "$out" | grep -q "owned by projects/demo" || fail "refusal names the owner"
 [ ! -d "$C/shared-code" ] || fail "non-owner cloned a duplicate checkout"
 # owner/repo names: matched by full name or basename; the clone uses the given owner and the basename dir
-awk '{print} /^\|---/ && !d {print "| acme/widget | /nonexistent/widget | main | Alvin | none |"; d=1}' projects/bare/ACCESS.md > a.tmp && mv a.tmp projects/bare/ACCESS.md
+awk '{print} /^\|---/ && !d {print "| acme/widget | /nonexistent/widget | main | Owner | none |"; d=1}' projects/bare/ACCESS.md > a.tmp && mv a.tmp projects/bare/ACCESS.md
 for w in widget acme/widget; do
   rm -rf "$C/widget"
   out=$(PATH="$S:$PATH" AGENT_CODE_DIR="$C" WORK_DRY=1 bin/work projects/bare "$w" 2>&1) || fail "owner/name row did not resolve by [$w]: $out"
@@ -132,13 +132,42 @@ WORK_DRY=1 bin/work projects/demo/ | grep -q -- " --remote-control demo" || fail
 out=$(WORK_DRY=1 bin/work projects/demo demo-code --no-remote); echo "$out" | grep -q "cd '$R'" || fail "--no-remote after the repo still finds the repo"
 echo "$out" | grep -q -- "--remote-control" && fail "--no-remote after the repo leaves it out"
 # which claude install: HUB_CLAUDE from hub.conf, else claude; AGENT_CLAUDE or --claude picks another
-WORK_DRY=1 bin/work projects/demo | grep -q "' claude --settings" || fail "default is claude"
+# (a bare name is resolved on the caller's PATH when it is found there, so allow a directory in front of it)
+WORK_DRY=1 bin/work projects/demo | grep -qE "' (/[^ ]*/)?claude --settings" || fail "default is claude"
 echo 'HUB_CLAUDE=claude-personal' > hub.conf
-WORK_DRY=1 bin/work projects/demo | grep -q "' claude-personal --settings" || fail "hub.conf HUB_CLAUDE picks the install"
+WORK_DRY=1 bin/work projects/demo | grep -qE "' (/[^ ]*/)?claude-personal --settings" || fail "hub.conf HUB_CLAUDE picks the install"
 rm hub.conf
-AGENT_CLAUDE=claude-other WORK_DRY=1 bin/work projects/demo | grep -q "' claude-other --settings" || fail "AGENT_CLAUDE picks the install"
-WORK_DRY=1 bin/work --claude claude-koneksi projects/demo | grep -q "' claude-koneksi --settings" || fail "--claude picks the install"
+AGENT_CLAUDE=claude-other WORK_DRY=1 bin/work projects/demo | grep -qE "' (/[^ ]*/)?claude-other --settings" || fail "AGENT_CLAUDE picks the install"
+WORK_DRY=1 bin/work --claude claude-acme projects/demo | grep -qE "' (/[^ ]*/)?claude-acme --settings" || fail "--claude picks the install"
+# the same install and account as the caller: a bare name runs the claude the caller's PATH finds (a new window's login
+# shell may find another install first), and the launcher carries the caller's CLAUDE_CONFIG_DIR, or its absence
+C="$(mktemp -d)"; printf '#!/bin/bash\nexit 0\n' > "$C/claude"; chmod +x "$C/claude"; cp "$C/claude" "$C/claude-personal"
+PATH="$C:$PATH" WORK_DRY=1 bin/work projects/demo | grep -qF "' $C/claude --settings" || fail "a bare claude runs the caller's install"
+PATH="$C:$PATH" AGENT_CLAUDE=claude-personal WORK_DRY=1 bin/work projects/demo | grep -qF "' $C/claude-personal --settings" || fail "a bare wrapper name runs the caller's wrapper"
+WORK_DRY=1 bin/work --claude "$C/claude" projects/demo | grep -qF "' $C/claude --settings" || fail "an explicit path is kept"
+lch() { local o; o=$(WORK_NO_OPEN=1 "$@" bin/work --no-remote projects/demo) || return $?
+  o=$(printf '%s\n' "$o" | sed -n 's/^launcher: //p'); cat "$o"; rm -f "$o"; }
+out=$(lch env CLAUDE_CONFIG_DIR="/x/o'cfg") || fail "launcher with a config dir"
+assert_eq "$(eval "$(printf '%s\n' "$out" | grep '^export CLAUDE_CONFIG_DIR=')"; echo "$CLAUDE_CONFIG_DIR")" "/x/o'cfg" "the launcher keeps the caller's config dir (account)"
+[ "$(printf '%s\n' "$out" | grep -n 'CLAUDE_CONFIG_DIR' | cut -d: -f1)" -lt "$(printf '%s\n' "$out" | grep -n -- '--settings' | cut -d: -f1)" ] || fail "config dir set before claude starts"
+out=$(lch env -u CLAUDE_CONFIG_DIR) || fail "launcher without a config dir"
+printf '%s\n' "$out" | grep -qx 'unset CLAUDE_CONFIG_DIR' || fail "no caller config dir: the launcher unsets one its login shell has [$out]"
+printf '%s\n' "$out" | grep -q '^export CLAUDE_CONFIG_DIR' && fail "no caller config dir: none exported"
 WORK_DRY=1 bin/work --claude 'x;rm' projects/demo >/dev/null 2>&1; assert_eq "$?" "2" "unsafe claude command name"
+# one session per folder: a running --remote-control <name> process (full command line, as ps -axww shows it) is refused
+P="$(mktemp -d)"; long="$(printf 'x%.0s' $(seq 1 3000))"   # a command line far longer than plain ps aux shows
+fake_ps() { printf '#!/bin/bash\necho "$*" > "%s/ps.args"\nprintf "%%s\\n" %s\n' "$P" "$1" > "$P/ps"; chmod +x "$P/ps"; }
+fake_ps "'  4242 /x/claude --settings s --agents $long --remote-control demo -- go'"
+out=$(PATH="$P:$PATH" WORK_DRY=1 bin/work projects/demo 2>&1); assert_eq "$?" "3" "running session refused"
+echo "$out" | grep -q "demo is already running (pid 4242)" || fail "refusal names the pid: $out"
+echo "$out" | grep -q "^cd " && fail "nothing prepared for a running session"
+assert_contains "$P/ps.args" "-axww" "ps shows full command lines"
+# negatives: nothing running, a longer name, another folder, a non-claude mention, --force, --no-remote all proceed
+for ps_out in "''" "'  7 /x/claude --remote-control demo-x'" "'  8 /x/claude --remote-control other'" "'  9 grep -q --remote-control demo'" "'  10 vim notes about --remote-control'"; do
+  fake_ps "$ps_out"; PATH="$P:$PATH" WORK_DRY=1 bin/work projects/demo >/dev/null 2>&1; assert_eq "$?" "0" "proceeds with [$ps_out]"
+done
+fake_ps "'  4242 /x/claude --remote-control demo'"
+for flag in --force --no-remote; do PATH="$P:$PATH" WORK_DRY=1 bin/work $flag projects/demo >/dev/null 2>&1; assert_eq "$?" "0" "$flag proceeds"; done
 # permission mode: focus sessions default to auto so they take the main session's messages without holding them
 out=$(WORK_DRY=1 bin/work projects/demo); echo "$out" | grep -q -- "--permission-mode auto" || fail "default permission mode is auto"
 out=$(WORK_DRY=1 bin/work --mode manual projects/demo); echo "$out" | grep -q -- "--permission-mode manual" || fail "--mode sets the permission mode"

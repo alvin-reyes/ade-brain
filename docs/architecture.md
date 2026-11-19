@@ -1,4 +1,4 @@
-# ai-agent-hub-template: architecture
+# ade-brain: architecture
 
 A template for a Claude Code "agent hub": one private repo of Bash and Markdown that holds the context, state and
 history of one technical persona's work for one client. `bin/init` turns it into a hub: it writes `hub.conf` (who the

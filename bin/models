@@ -1,0 +1,71 @@
+#!/bin/bash
+# bin/models [set <scope> <model>]: show or change the models this hub's sessions and agents use, from the main session.
+# Without arguments: one line per scope (scope, hub.conf key, value, what it governs).
+# set writes hub.conf and applies it where a file holds the model:
+#   root       HUB_ROOT_MODEL      the hub root session: also "model" in .claude/settings.json
+#   focus      HUB_MODEL           focus sessions (bin/work) and the persona agent: also model: in .claude/agents/<persona>.md
+#   agents     HUB_AGENT_MODEL     the hub's named agents (every other .claude/agents/*.md) and folder specialist agents (bin/work)
+#   subagents  HUB_SUBAGENT_MODEL  subagents that name no model (bin/work sets CLAUDE_CODE_SUBAGENT_MODEL)
+#   briefing   HUB_BRIEFING_MODEL  scheduled briefings (bin/briefing)
+#   all        every scope above
+# A model is an alias (opus, sonnet, haiku, opus[1m]), a full model id, or inherit. Open sessions keep their model
+# until they restart; a refused call changes nothing.
+set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; C="$H/hub.conf"
+USAGE="usage: bin/models [set root|focus|agents|subagents|briefing|all <model>]"
+SCOPES="root focus agents subagents briefing"
+key() { case "$1" in root) echo HUB_ROOT_MODEL ;; focus) echo HUB_MODEL ;; agents) echo HUB_AGENT_MODEL ;;
+  subagents) echo HUB_SUBAGENT_MODEL ;; briefing) echo HUB_BRIEFING_MODEL ;; *) return 1 ;; esac; }
+what() { case "$1" in root) echo "the hub root session (.claude/settings.json)" ;;
+  focus) echo "focus sessions (bin/work) and the persona agent" ;; agents) echo "named agents and folder specialist agents" ;;
+  subagents) echo "subagents that name no model" ;; briefing) echo "scheduled briefings" ;; esac; }
+[ -f "$C" ] || { echo "models: no hub.conf in $H (run bin/init first)" >&2; exit 2; }
+
+if [ $# -eq 0 ]; then
+  for s in $SCOPES; do k="$(key "$s")"; v="${!k:-}"; printf '%-10s %-19s %-20s %s\n' "$s" "$k" "${v:-(default)}" "$(what "$s")"; done
+  exit 0
+fi
+[ "$1" = set ] && [ $# -eq 3 ] || { echo "$USAGE" >&2; exit 2; }
+S="$2"; M="$3"
+[[ "$M" =~ ^[][A-Za-z0-9._:/-]+$ ]] || { echo "models: bad model name '$M'" >&2; exit 2; }
+if [ "$S" = all ]; then LIST="$SCOPES"; else key "$S" >/dev/null || { echo "$USAGE" >&2; exit 2; }; LIST="$S"; fi
+
+MODELS_LIST="$LIST" MODELS_M="$M" MODELS_PERSONA="${HUB_PERSONA:-}" python3 - "$H" <<'PY' || { echo "models: could not apply the change" >&2; exit 1; }
+import glob, json, os, re, shlex, sys
+h = sys.argv[1]; m = os.environ["MODELS_M"]; scopes = os.environ["MODELS_LIST"].split()
+persona = os.environ["MODELS_PERSONA"]
+keys = {"root": "HUB_ROOT_MODEL", "focus": "HUB_MODEL", "agents": "HUB_AGENT_MODEL",
+        "subagents": "HUB_SUBAGENT_MODEL", "briefing": "HUB_BRIEFING_MODEL"}
+writes = {}   # path -> new text; all are computed first, then written, so a failure changes nothing
+
+conf = os.path.join(h, "hub.conf"); text = open(conf).read()
+for s in scopes:
+    line = f"{keys[s]}={shlex.quote(m)}"
+    pat = re.compile(rf"^{keys[s]}=.*$", re.M)
+    text = pat.sub(lambda _: line, text, count=1) if pat.search(text) else text.rstrip("\n") + "\n" + line + "\n"
+writes[conf] = text
+
+def set_fm(path):
+    t = writes.get(path) or open(path).read()
+    if not t.startswith("---\n"): return
+    end = t.index("\n---", 3)
+    head, rest = t[:end], t[end:]
+    head = re.sub(r"^model:.*$", f"model: {m}", head, flags=re.M) if re.search(r"^model:", head, re.M) else head + f"\nmodel: {m}"
+    writes[path] = head + rest
+
+agents = sorted(glob.glob(os.path.join(h, ".claude", "agents", "*.md")))
+pfile = os.path.join(h, ".claude", "agents", persona + ".md") if persona else None
+if "agents" in scopes:
+    for a in agents:
+        if a != pfile: set_fm(a)
+if "focus" in scopes and pfile and os.path.exists(pfile): set_fm(pfile)
+if "root" in scopes:
+    sp = os.path.join(h, ".claude", "settings.json")
+    d = json.load(open(sp)) if os.path.exists(sp) else {}
+    d["model"] = m
+    writes[sp] = json.dumps(d, indent=2) + "\n"
+
+for p, t in writes.items():
+    tmp = p + ".models-tmp"; open(tmp, "w").write(t); os.replace(tmp, p)
+PY
+for s in $LIST; do echo "models: $s ($(key "$s")) = $M"; done
+echo "models: open sessions keep their model until they restart"

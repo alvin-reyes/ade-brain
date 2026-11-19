@@ -387,7 +387,7 @@ provider_memory_linked() {
   assert_eq "$(readlink "$P/$(encode_path "$HUB")/memory")" "$HUB/memory" "hub memory link"
   assert_eq "$(readlink "$P/$(encode_path "$HUB/projects/demo")/memory")" "$HUB/projects/demo/memory" "folder memory link"
   local R; R="$(mktemp -d "$S/tmp/rc.XXXXXX")/rc"; mkdir -p "$R"; bin/new projects/withrepo >/dev/null
-  printf '| rc | %s | main | Alvin | none |\n' "$R" >> projects/withrepo/ACCESS.md
+  printf '| rc | %s | main | Owner | none |\n' "$R" >> projects/withrepo/ACCESS.md
   launch --provider deepseek projects/withrepo; assert_eq "$rc" "0" "repo launch exit"
   assert_eq "$(readlink "$P/$(encode_path "$R")/memory")" "$HUB/projects/withrepo/memory" "checkout memory link"
   launch --provider deepseek projects/demo; assert_eq "$rc" "0" "a second launch keeps the links"
@@ -426,7 +426,7 @@ anthropic_path_unchanged() {
     echo "$a" | grep -qF -- "--settings '$HUB/projects/demo/.claude/settings.json'" || fail "anthropic uses the folder settings"
   done
   launch projects/demo; assert_eq "$rc" "0" "anthropic launch"; assert_eq "$(calls secret)" "0" "anthropic reads no key"
-  grep -q "^trap 'rm -f \"\$0\"' EXIT$" "$SP_CAP/launcher" || fail "anthropic launcher trap unchanged"
+  grep -q "^trap 'rm -f \"\$0\" \"\$R\"' EXIT$" "$SP_CAP/launcher" || fail "anthropic launcher trap unchanged (itself and its session record)"
 }
 
 # AC31: owner rule (2026-11-09): DeepSeek only in the owner's own hubs; a client hub refuses it even when allowed
@@ -469,7 +469,7 @@ plant_value() { case "$1" in CLAUDE_CODE_USE_*) echo 1 ;; *) echo "sk-ant-FAKE-P
 # a folder whose code lives in a separate (clean) checkout, so its own settings are only merged, never loaded as project settings
 repo_folder() {  # <folder>
   local R; R="$(mktemp -d "$S/tmp/co.XXXXXX")/co"; mkdir -p "$R"; bin/new "$1" >/dev/null
-  printf '| co | %s | main | Alvin | none |\n' "$R" >> "$1/ACCESS.md"; echo "$R"
+  printf '| co | %s | main | Owner | none |\n' "$R" >> "$1/ACCESS.md"; echo "$R"
 }
 set_env_block() {  # <settings file> <KEY=VALUE...>: writes (or adds) an env block
   local f="$1"; shift; mkdir -p "$(dirname "$f")"

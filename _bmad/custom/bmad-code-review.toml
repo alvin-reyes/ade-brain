@@ -1,0 +1,9 @@
+# Token trim (owner, 9 Nov 2026): reviewer subagents run on the subagent default (ADE's, else Sonnet; 11 Nov 2026);
+# gathering, triage and presenting stay on the session's model.
+# Quick by default (11 Nov 2026): one lens instead of four or five; "thorough" in the request runs the thorough set.
+[workflow]
+review = "quick"
+persistent_facts = [
+  "Every review-lens subagent this workflow launches (quick or thorough: Blind Hunter, Edge Case Hunter, Verification Gap and the rest) runs on the subagent default model: pass no model to the Agent tool for each one, so it follows CLAUDE_CODE_SUBAGENT_MODEL (set by ADE, else the hub's HUB_SUBAGENT_MODEL, Sonnet). This replaces any rule that review subagents match the session's model. Triage and presentation stay in this session. Exception: when the user asks for an Opus review, launch the lenses on \"opus\" instead.",
+  "When this run is a quick review and the diff has more than 200 changed lines, say so when you present the findings and offer a thorough run (bmad-code-review thorough).",
+]
