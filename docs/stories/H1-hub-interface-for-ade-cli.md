@@ -48,5 +48,16 @@ Not in scope: `bin/work`, `bin/chat start` and `ade claude` with an Anthropic AP
 | 6 | `bin/inbox --count` counts unread events for main, a folder or a session name, is 0 after delivery, and writes nothing | `test_hub_interface.sh` `inbox_count_*` |
 | 7 | `bin/dispatch --list` prints ready, waiting and running lines for every BMAD folder (or the one named) and starts, locks and journals nothing | `test_hub_interface.sh` `dispatch_list_*` |
 
+## Review fix round (2026-11-22, adversarial review, high risk)
+F1 `bin/chat test` peeks (no offset) and refuses on pending updates or a failed peek; F2 `--dir` must be an empty
+directory (never `/`, `$HOME`, the hub, a checkout or an ancestor of them), the own folder is under `/tmp`; F3 the live
+test sends only the fixed task with no tools, and Claude Code asks before `bin/agent --live-test`; F4 `exec` kept,
+`agent.py` removes the run's own folder (also its watchdog); F5 a stored Anthropic key is used by the live test, and by
+role runs only with `HUB_AGENT_ANTHROPIC_KEY=1` in `hub.conf`, read once before launch (ADR 0002); F6 `curl -q`,
+`SSLKEYLOGFILE` unset; F7 refused while the chat launchd job is loaded, chat lock held for the test; F8 ready only when
+the whole trimmed strict-UTF-8 output is `READY`; F9 escapes and control characters removed before redaction, GLM-style
+keys hidden whole; F10 the contract notes `--list` runs `bin/sessions` and `--count` is per folder. These supersede the
+matching lines in Scope above; `.ade/context/hub-interface.md` is current.
+
 ## Verification
 (QA records the real output of `bash tests/run.sh` here.)

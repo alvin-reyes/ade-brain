@@ -212,9 +212,12 @@ anthropic_settings_write() {
   python3 -c 'import json, sys; json.dump({"apiKeyHelper": sys.argv[2]}, open(sys.argv[1], "w"), indent=2)' "$1" \
     "HUB=$(provider_sq "$H") AGENT_KEYCHAIN_SERVICE=$(provider_sq "$(keychain_service)") $(provider_sq "$H/bin/secret") $(key_secret anthropic)"
 }
-# redact: hides key-shaped strings and Telegram bot tokens in text the hub prints (bin/chat logs; agent.py's live test
-# uses the same patterns)
-redact() { sed -E 's#[0-9]{6,12}:[A-Za-z0-9_-]{30,}#<hidden token>#g; s#(sk|pk|ak|key)-[A-Za-z0-9_-]{8,}#<hidden key>#g; s#[A-Za-z0-9_-]{32,}#<hidden>#g'; }
+# anthropic_key_ok: the stored Anthropic API key can be read and is not empty (read once, in a subshell, never printed)
+anthropic_key_ok() { local H; H="$(hub_root)"
+  ( key="$(HUB="$H" AGENT_KEYCHAIN_SERVICE="$(keychain_service)" "$H/bin/secret" "$(key_secret anthropic)" 2>/dev/null)" && [ -n "$key" ]; r=$?; unset key; exit "$r" ); }
+# redact: stdin to stdout with escape sequences and control characters removed, then bot tokens, GLM-style keys,
+# key-shaped strings and long opaque runs hidden (the patterns live in agent.py, the live test's printer)
+redact() { python3 -I "$(dirname "${BASH_SOURCE[0]}")/agent.py" --redact; }
 # anthropic_model_ok <model>: an Anthropic model name a role or a live test may use
 anthropic_model_ok() { local am='^((opus|sonnet|haiku)(\[1m\])?|claude-[A-Za-z0-9._-]+(\[1m\])?)$'; [[ "$1" =~ $am ]]; }
 # Chat channels (story C5, ADR 0006, .ade/context/chat.md): each type's plugin, Keychain secret, the variable the
@@ -300,8 +303,8 @@ orchestrator_endpoint_warning() {
 method_pin() { echo v2.0.0; }
 method_repo() { echo "${AGENT_METHOD_REPO:-https://github.com/better-ade/ade-method}"; }
 # hub.conf (written by bin/init): who this agent is and what it can reach. Names and locations only, never secrets.
-# AGENT_* environment variables override it (tests use them). Provider choice, role tables and hub ownership come only from hub.conf.
-unset HUB_PROVIDER HUB_PROVIDERS_ALLOWED HUB_OWNED_BY_OWNER
+# AGENT_* environment variables override it (tests use them). Provider choice, role tables, hub ownership and HUB_AGENT_ANTHROPIC_KEY come only from hub.conf.
+unset HUB_PROVIDER HUB_PROVIDERS_ALLOWED HUB_OWNED_BY_OWNER HUB_AGENT_ANTHROPIC_KEY
 for _v in $(compgen -v HUB_ROLE_); do unset "$_v"; done; unset _v   # role tables too
 [ -f "$(hub_root)/hub.conf" ] && . "$(hub_root)/hub.conf"
 hub_name() { echo "${HUB_NAME:-$(basename "$(hub_root)")}"; }

@@ -51,8 +51,7 @@ default_hub_runs_routine_on_anthropic() {
   conf 'HUB_PROVIDERS_ALLOWED="anthropic"'; bin/roles > "$S/roles"
   assert_eq "$(awk '$1!~/^skipped/ && NF==2 {printf "%s=%s ", $1, $2}' "$S/roles")" "routine=anthropic:sonnet triage=anthropic:haiku reviewer=anthropic:sonnet architect=anthropic:opus builder=anthropic:opus " "default roles"
   assert_eq "$( . bin/lib.sh; for r in routine triage reviewer architect builder; do role_candidates "$r" | tr '\n' ' '; echo; done | tr '\n' '|')" "anthropic:sonnet deepseek:sonnet |anthropic:haiku deepseek:haiku |deepseek:sonnet anthropic:sonnet |anthropic:opus |anthropic:opus |" "default candidate lists"
-  # an Anthropic run only asks whether an Anthropic API key is stored (story H1); it never reads a key
-  assert_eq "$(grep '^secret' "$RT_CALLS" | sort -u)" "secret --has anthropic-api-key" "no key read for Anthropic"
+  assert_eq "$(grep -c '^secret' "$RT_CALLS")" 0 "no key looked at for Anthropic"
 }
 reviewer_on_owner_hub_runs_deepseek() {
   owner; run --role reviewer --folder projects/demo; assert_eq "$rc" 0 "exit: $(cat "$S/err")"

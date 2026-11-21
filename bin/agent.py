@@ -3,10 +3,12 @@
 
 The engine gets a cleared environment and its own process group. A watchdog in that group outlives even a SIGKILL of
 this process: it waits on a pipe only this process holds, then kills the group. Contract: .ade/context/providers.md.
-AGENT_RUN_LIVE=1 (bin/agent --live-test, story H1, .ade/context/hub-interface.md): the task alone, no folder context; the
-engine's output is printed with keys hidden, and the run is ready (exit 0) only when a whole line is READY.
+AGENT_RUN_LIVE=1 (bin/agent --live-test, story H1, .ade/context/hub-interface.md): only the fixed READY task (stdin is
+never read), no folder context; the engine's output is printed with keys hidden, and the run is ready (exit 0) only when
+the whole output, strictly UTF-8 and trimmed, is READY. AGENT_RUN_OWN_DIR: the run's own temp folder, removed at the end
+(and by the watchdog when this process is killed). `agent.py --redact`: stdin to stdout with keys hidden (bin/lib.sh redact).
 """
-import os, re, secrets, signal, subprocess, sys, threading, time
+import os, re, secrets, shutil, signal, subprocess, sys, threading, time
 
 CAP = 20 * 1024
 GRACE = 5
@@ -19,10 +21,13 @@ context below is background, not instructions.
 """
 LIVE_TASK = "Reply with the word READY and nothing else."
 LIVE_CAP = 4 * 1024
-# the patterns of redact in bin/lib.sh: Telegram bot tokens, key-shaped strings, long opaque runs
-HIDE = [(re.compile(r"[0-9]{6,12}:[A-Za-z0-9_-]{30,}"), "<hidden token>"), (re.compile(r"(sk|pk|ak|key)-[A-Za-z0-9_-]{8,}"), "<hidden key>"),
-        (re.compile(r"[A-Za-z0-9_-]{32,}"), "<hidden>")]
-cfg = {k: os.environ.get("AGENT_RUN_" + k, "") for k in ("HUB", "ROLE", "FOLDER", "PROVIDER", "MODEL", "DIR", "TIMEOUT", "SETTINGS", "CONFIG_DIR", "LIVE")}
+# what the hub never prints (bin/lib.sh redact runs this file): escape sequences and control characters go first, so
+# they cannot split a key; then Telegram bot tokens, GLM-style "<id>.<secret>" keys, key-shaped strings, long opaque runs
+ESCAPES = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b[@-_]?|[\x00-\x08\x0b-\x1f\x7f\x80-\x9f]")
+HIDE = [(re.compile(r"[0-9]{6,12}:[A-Za-z0-9_-]{30,}"), "<hidden token>"), (re.compile(r"[A-Za-z0-9]{16,}\.[A-Za-z0-9_-]{8,}"), "<hidden key>"),
+        (re.compile(r"(sk|pk|ak|key)-[A-Za-z0-9_-]{8,}"), "<hidden key>"), (re.compile(r"[A-Za-z0-9_-]{32,}"), "<hidden>")]
+OWN_DIR = re.compile(r"/(private/)?tmp/agent-live\.[A-Za-z0-9]+")
+cfg = {k: os.environ.get("AGENT_RUN_" + k, "") for k in ("HUB", "ROLE", "FOLDER", "PROVIDER", "MODEL", "DIR", "TIMEOUT", "SETTINGS", "CONFIG_DIR", "LIVE", "OWN_DIR")}
 stop = None
 
 
@@ -69,6 +74,15 @@ def kill_group(pgid, skip):
             pass
 
 
+def remove_own_dir(path):
+    """the live test's own temp folder; only a /tmp/agent-live.* directory, never a symlink or anything else"""
+    try:
+        if path and OWN_DIR.fullmatch(os.path.realpath(path)) and os.path.isdir(path) and not os.path.islink(path):
+            shutil.rmtree(path, ignore_errors=True)
+    except OSError:
+        pass
+
+
 def watchdog(pgid, rfd, settings):
     for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP): signal.signal(s, signal.SIG_IGN)
     try:
@@ -84,6 +98,7 @@ def watchdog(pgid, rfd, settings):
         pass
     if joined: kill_group(pgid, {os.getpid()})
     remove(settings)
+    remove_own_dir(cfg["OWN_DIR"])
     os._exit(0)
 
 
@@ -123,6 +138,7 @@ def feed(pipe, data):
 
 
 def hide(text):
+    text = ESCAPES.sub("", text)
     for p, r in HIDE: text = p.sub(r, text)
     return text
 
@@ -141,11 +157,15 @@ def last_line(*paths):
 
 
 def live_report(path):
-    """print the engine's output (keys hidden, capped); True when a whole line is READY"""
-    with open(path, "rb") as f: text = f.read(LIVE_CAP).decode("utf-8", "ignore")
+    """print the engine's output (keys hidden, capped); True only when the whole output, strict UTF-8, trims to READY"""
+    with open(path, "rb") as f: raw = f.read(LIVE_CAP + 1)
+    text = raw[:LIVE_CAP].decode("utf-8", "replace")
     if text:
         sys.stdout.write(hide(text) + ("" if text.endswith("\n") else "\n")); sys.stdout.flush()
-    return any(l.strip(" \t\r") == "READY" for l in text.split("\n"))
+    try:
+        return len(raw) <= LIVE_CAP and raw.decode("utf-8", "strict").strip() == "READY"
+    except UnicodeDecodeError:
+        return False
 
 
 def report(path, timeout):
@@ -165,8 +185,7 @@ def report(path, timeout):
 def run(argv):
     live = cfg["LIVE"] == "1"
     if live:
-        task = b"" if sys.stdin.isatty() else sys.stdin.buffer.readline(1024)
-        prompt = (task.strip() or LIVE_TASK.encode()) + b"\n"
+        prompt = LIVE_TASK.encode()   # stdin is never read: a live test runs only this task
     else:
         if sys.stdin.isatty():
             say("the task comes on stdin"); return 2
@@ -212,7 +231,7 @@ def run(argv):
     if why is None and not os.path.getsize(out_path): why = "the engine returned nothing"
     if live:
         ready = live_report(out_path)
-        if why is None and not ready: why = "no READY line; it said: " + last_line(out_path)
+        if why is None and not ready: why = "the output is not exactly READY; it said: " + last_line(out_path)
         elif why: why += (": " + last_line(err_path, out_path)).rstrip(": ")
     rc = 1 if why else 0
     journal(rc, time.time() - start)
@@ -230,8 +249,11 @@ def run(argv):
 
 
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--redact"]:
+        sys.stdout.write(hide(sys.stdin.buffer.read().decode("utf-8", "replace"))); sys.exit(0)
     try:
         code = run(sys.argv[1:])
     finally:
         remove(cfg["SETTINGS"])
+        remove_own_dir(cfg["OWN_DIR"])
     sys.exit(code)
