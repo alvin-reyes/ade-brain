@@ -1,6 +1,6 @@
 # 0003: Subagents on the subagent default (Sonnet unless ADE says otherwise), code on Opus
 
-- Status: Accepted (owner, 11 Nov 2026; revised the same day so ADE sets the models)
+- Status: Superseded in part by 0005 (code only by Opus). Accepted (owner, 11 Nov 2026; revised the same day so ADE sets the models)
 - Context: token use was high. Most BMAD skills launch subagents without naming a model, so in an Opus session they
   all ran on Opus. bmad-build's reviewers matched the session model, and bmad-code-review ran 4–5 lenses per review.
   ADE (the terminal) sets models when it opens a project, and a Claude settings `env` value replaces the shell's, so

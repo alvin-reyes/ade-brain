@@ -13,9 +13,9 @@ replaces the shell's, so the hub never writes model variables into `.claude/sett
   a definition's `model:` still wins. `CLAUDE_CODE_SUBAGENT_MODEL_FORCE` is never set. A hub-root session gets only
   what its environment (ADE) gives it.
 - `HUB_BRIEFING_MODEL` (`--briefing-model`, default `haiku`): `bin/briefing`.
-- BMAD (`_bmad/custom/`): `bmad-build` writes code on Opus (its implementation subagent passes `opus`); review lenses
-  in `bmad-build` and `bmad-code-review` pass no model, so they run on the subagent default; `bmad-code-review` has
-  `review = "quick"` (thorough on request). An "Opus review" request runs the lenses on `opus`. See ADR 0003.
+- BMAD (`_bmad/custom/`, from ade-method, story C1): `bmad-build` builds on the owner's builder model (default Opus 5.5)
+  and scales review to risk: low none, medium the quick review on the subagent default (no model passed), high the
+  thorough review on the builder's model. `bmad-code-review` has `review = "quick"` (thorough on request). ADRs 0003, 0005.
 
 ## Install and account of a focus session (`bin/work`, Anthropic path)
 
@@ -41,7 +41,7 @@ Measured on four hubs over 30 days (2026-11-18): 69% of context tokens were in c
   `export BASH_MAX_OUTPUT_LENGTH="${BASH_MAX_OUTPUT_LENGTH:-<value>}"`. Hub root: `bashOutputMaxChars` in its settings.
 - `HUB_ROOT_MODEL` (`--root-model M`, default `sonnet`; empty = none): `model` in the hub root's `.claude/settings.json`,
   written by `bin/init`, so the orchestrator session coordinates on Sonnet. A `--model` flag or `ANTHROPIC_MODEL` (ADE's)
-  still wins; code is still written on Opus (`bmad-build`). Hubs made earlier: add `"model": "sonnet"` by hand.
+  still wins; code is written on the builder model (`bmad-build`, default Opus 5.5; ADR 0005). Hubs made earlier: add `"model": "sonnet"` by hand.
 - These are settings keys or launcher exports, never a settings `env` block (an env value would replace ADE's).
 
 ## A session on another Claude account

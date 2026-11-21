@@ -280,9 +280,10 @@ A focus session can run Claude Code against DeepSeek instead of Anthropic. The C
   backup before any write, auto-undo when the health check fails) and `prodtest.sh` (a read-only PASS/FAIL/WARN test).
   The patterns behind them: `docs/shipping-changes-safely.md`.
 - **BMAD v6** skills in `.claude/skills/` for PRDs, specs, stories, builds and reviews, under the ADE rules (`.ade/rules.md`).
-  Token defaults (`_bmad/custom/`): code is written on Opus, review lenses pass no model (they run on the subagent
-  default: ADE's, else `HUB_SUBAGENT_MODEL`), and `bmad-code-review` is quick (one lens) unless you ask for a thorough
-  review.
+  Token defaults (`_bmad/custom/`, synced from ade-method by `bin/method sync`): code is built on the owner's builder
+  model (default Opus 5.5); review scales with risk (low none, medium the quick review, high the thorough review on the
+  builder's model); quick-review lenses pass no model, so they run on the subagent default (ADE's, else
+  `HUB_SUBAGENT_MODEL`), and `bmad-code-review` is quick unless you ask for a thorough review.
 - **Access tools**: `bin/remote` (SSH to the box), `bin/secret` (macOS Keychain), `bin/doctor` (what this Mac can reach).
 
 Does a checkout know my work? Yes, as far as the hub's files go: STATE.md, memory, the journal and ACCESS.md are
