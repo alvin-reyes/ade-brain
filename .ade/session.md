@@ -39,3 +39,4 @@
 - 2026-11-21: C3 Done: bash tests/run.sh green (30 of 30, exit 0) after the adversarial fix round; bin/dispatch starts at most 2 builders for ready low/medium tickets, high-risk and hitl wait for --approve at a terminal.
 - 2026-11-21: C6 Done: hub event log written by hooks and bin/notify, delivered on prompt, mid-work (bash pre-check, rate-limited) and once before stop; senders validated and labelled claimed; one adversarial fix round (10 findings).
 - 2026-11-21: sharded E1 (docs/stories/E1-gemini-engine-for-builders.md, 9 ACs, high): Gemini CLI as a builder/focus engine; orchestrator stays on Claude Code; GPT/Codex paused.
+- 2026-11-21: sharded E2 (Codex CLI for GPT builders/focus agents, 9 ACs, high), mirrors E1; owner lifted the GPT pause for focus agents.
