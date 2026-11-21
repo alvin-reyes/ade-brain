@@ -10,7 +10,7 @@ make_hub; cd "$HUB"
 unset CLAUDE_CONFIG_DIR HUB_CLAUDE_CONFIG_DIR
 S="$(mktemp -d)"; mkdir -p "$S/tmp" "$S/home"; export TMPDIR="$S/tmp" HOME="$S/home"   # never the tester's HOME
 # every temp dir this suite (and make_hub) made goes when it exits
-trap 'rm -rf "$S" "$(dirname "$HUB")" "$CLAUDE_HOME" "$(dirname "$AGENT_SYNC_LOG")" "$(dirname "$AGENT_SYNC_LOCK")"' EXIT
+trap 'rm -rf "$S" "$(dirname "$HUB")" "$CLAUDE_HOME" "$(dirname "$AGENT_SYNC_LOG")" "$(dirname "$AGENT_SYNC_LOCK")" "$(dirname "$METHOD_FIXTURE")"' EXIT
 bin/new projects/demo >/dev/null
 export SP_ROOT="$S" SP_CAP="$S/cap" SP_CALLS="$S/calls" SP_KEYFILE="$S/key" SP_STORED="$S/stored" SP_NONCE="fake-$$-$RANDOM"
 KEY="sk-SPTEST-$RANDOM$RANDOM-c0ffee"; printf '%s' "$KEY" > "$SP_KEYFILE"; chmod 600 "$SP_KEYFILE"; : > "$SP_CALLS"

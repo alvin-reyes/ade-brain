@@ -464,6 +464,8 @@ file_mtime() { _stat "$_SF_M" "$1" 2>/dev/null; }
 file_inode() { _stat %i "$1" 2>/dev/null; }
 file_mode() { _stat "$_SF_P" "$1" 2>/dev/null; }   # the permission bits in octal, e.g. 700
 file_owner() { _stat %u "$1" 2>/dev/null; }
+# utc_epoch <YYYY-MM-DDTHH:MM:SS>: that UTC time in seconds (GNU date -d or BSD date -j); nothing when unreadable
+utc_epoch() { date -u -d "$1" +%s 2>/dev/null || date -j -u -f "%Y-%m-%dT%H:%M:%S" "$1" +%s 2>/dev/null; }
 # Desktop notifications: macOS only (osascript); elsewhere nothing (bin/monitor writes an event instead).
 desktop_notify() { [ "$(platform)" = macos ] || return 0
   osascript -e "display notification \"$(printf '%s' "$2" | tr -d '"\\')\" with title \"$(printf '%s' "$1" | tr -d '"\\')\"" 2>/dev/null; }

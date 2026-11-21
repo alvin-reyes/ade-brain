@@ -14,6 +14,7 @@ make_hub() {
   # the macOS behaviour (Keychain, launchd, Terminal) with the stubs the tests give, on any machine; tests/test_platform.sh
   # runs the Linux behaviour (story V1). GNU or BSD tools underneath are the machine's own.
   export AGENT_PLATFORM=macos
+  unset XDG_CONFIG_HOME   # the file store and systemd units go under the test's HOME, never a runner's real config
   HUB="$(mktemp -d)/hub"; mkdir -p "$HUB"
   (cd "$REPO" && tar cf - --exclude ./repos --exclude ./.git --exclude ./hub.conf --exclude ./.local --exclude ./.superpowers .) | (cd "$HUB" && tar xf -)
   rm -f "$HUB"/journal/[0-9]*.md   # test hubs start with an empty journal; the real journal/ is never touched
