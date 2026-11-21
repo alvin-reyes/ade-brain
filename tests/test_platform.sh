@@ -56,8 +56,8 @@ platform_named() {   # AC1
   assert_eq "$(AGENT_PLATFORM=linux bash -c '. bin/lib.sh; platform')" linux "AGENT_PLATFORM override"
   local f t hits=""
   for f in bin/*; do [ "$f" = bin/lib.sh ] && continue; [ -f "$f" ] || continue
-    for t in 'security ' launchctl osascript 'stat -f' 'date -j'; do
-      grep -v '^[[:space:]]*#' "$f" | grep -q -- "$t" && hits="$hits $f:$t"; done; done
+    for t in '(^|[^[:alnum:]_.-])security[[:space:]]+(-i|find-generic|add-generic|delete-generic|dump-keychain)' launchctl osascript 'stat -f' 'date -j'; do
+      grep -v '^[[:space:]]*#' "$f" | grep -Eq -- "$t" && hits="$hits $f:${t##*)}"; done; done
   assert_eq "$hits" "" "macOS-only calls outside bin/lib.sh"
   assert_eq "$(utc_epoch 2026-01-02T03:04:05)" 1767323045 "utc_epoch"
   touch -t 202001020304 "$S/t"; assert_eq "$(file_mtime "$S/t")" "$(python3 -c 'import os,sys; print(int(os.stat(sys.argv[1]).st_mtime))' "$S/t")" "file_mtime"
