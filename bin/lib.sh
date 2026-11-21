@@ -368,7 +368,7 @@ method_repo() { echo "${AGENT_METHOD_REPO:-https://github.com/better-ade/ade-met
 # hub.conf (written by bin/init): who this agent is and what it can reach. Names and locations only, never secrets.
 # AGENT_* environment variables override it (tests use them). Provider choice, role tables and hub ownership come only from hub.conf.
 unset HUB_PROVIDER HUB_PROVIDERS_ALLOWED HUB_OWNED_BY_OWNER HUB_GEMINI_CLIENT_APPROVED
-for _v in $(compgen -v HUB_ROLE_); do unset "$_v"; done; unset _v   # role tables too
+for _v in $(compgen -v HUB_ROLE_) $(compgen -v HUB_BROWSER_PROFILE_); do unset "$_v"; done; unset _v   # role tables and browser profile switches too
 [ -f "$(hub_root)/hub.conf" ] && . "$(hub_root)/hub.conf"
 hub_name() { echo "${HUB_NAME:-$(basename "$(hub_root)")}"; }
 hub_owner() { echo "${HUB_OWNER:-the hub owner}"; }
@@ -569,4 +569,27 @@ secret_names() {
     file) d="$(secret_file_root)/$(keychain_service)"; [ -d "$d" ] && for f in "$d"/*; do [ -f "$f" ] && basename "$f"; done | grep -v '\.tmp\.[0-9]*$' | sort ;;
   esac
   return 0
+}
+# Browser profiles (story V3, .ade/context/browser.md): one per folder, opt-in in hub.conf, never shared.
+browser_root() { echo "${AGENT_BROWSER_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/ade/browser}"; }
+# browser_profile_var <folder>: HUB_BROWSER_PROFILE_<agent name upper-case, - and . as _> (projects/acme -> ..._ACME)
+browser_profile_var() { printf 'HUB_BROWSER_PROFILE_%s' "$(agent_name "$1" | tr 'a-z.-' 'A-Z__')"; }
+browser_profile_on() { local v; v="$(browser_profile_var "$1")"; [ "${!v:-}" = 1 ]; }
+browser_profile_path() { echo "$(browser_root)/$(agent_name "$1")"; }
+# browser_profile_dir <folder>: the profile folder, made 0700; refused (exit 1) when it, or the root, is a link or not
+# a 0700 folder of this user's
+browser_profile_dir() {
+  local r d x; r="$(browser_root)"; d="$(browser_profile_path "$1")"
+  for x in "$r" "$d"; do
+    [ ! -L "$x" ] || { echo "browser: $x is a link; a profile stays in its own folder" >&2; return 1; }
+    [ -d "$x" ] || ( umask 077; mkdir -p "$x" ) || { echo "browser: cannot make $x" >&2; return 1; }
+    [ "$(file_mode "$x")" = 700 ] && [ "$(file_owner "$x")" = "$(id -u)" ] || { echo "browser: $x must be a 0700 folder of yours: chmod 700 $x" >&2; return 1; }
+  done
+  echo "$d"
+}
+# browser_chromium: Playwright's Chromium (PLAYWRIGHT_BROWSERS_PATH, else ~/.cache/ms-playwright), the one bin/server
+# installs and the Playwright MCP drives; a system Chromium does not count
+browser_chromium() {
+  local c; for c in "${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}"/chromium-*/chrome-linux*/chrome; do [ -x "$c" ] && { echo "$c"; return 0; }; done
+  return 1
 }

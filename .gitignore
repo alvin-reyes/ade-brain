@@ -10,3 +10,5 @@ repos/
 projects/*/.local/
 .local/
 .claude/settings.local.json
+projects/*/reports/browser/
+ops/*/reports/browser/

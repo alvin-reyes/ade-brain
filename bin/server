@@ -6,7 +6,8 @@
 #      firewall (ufw active, allowing SSH only), upgrades (unattended security upgrades on). A failing row stops the
 #      install before anything changes, unless it is accepted with --accept-risk <row> (repeatable);
 #   2. the missing packages of a fixed list (apt; the distribution's versions), then the missing tools at pinned
-#      versions (server_pin): gitleaks (checksum-verified, ~/.local/bin), bun, Claude Code (their own installers);
+#      versions (server_pin): gitleaks (checksum-verified, ~/.local/bin), bun, Claude Code (their own installers),
+#      Playwright's Chromium with its system dependencies (story V3);
 #      what is already there is left alone, so a rerun changes nothing;
 #   3. the code folder (AGENT_CODE_DIR, default ~/Project; bin/work clones each checkout there on first use) and the
 #      hub's scheduled jobs (bin/schedule install, when any job is absent);
@@ -14,14 +15,15 @@
 #   Nothing listens on a public port: Telegram, Remote Control and git all connect out.
 #   --dry-run prints every command that would change the machine (lines starting "+ ") and changes nothing; it exits
 #   as the install would (1 when a safety row fails).
-# status: services, last sync, last monitor run, disk space; never a secret.
+# status: services, last sync, last monitor run, disk space, the browser; never a secret.
 # Exit: 0 done, 1 unsafe or a step failed, 2 usage, root, no sudo or not Linux.
 set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"
 USAGE="usage: bin/server install [--dry-run] [--accept-risk ssh-password|ssh-root|firewall|upgrades]... | bin/server status"
 ROWS="ssh-password ssh-root firewall upgrades"
 # the fixed package list (apt) and the pinned tool versions
-server_packages() { echo "git python3 tmux curl ca-certificates nodejs npm ufw unattended-upgrades"; }
-server_pin() { case "$1" in gitleaks) echo 8.30.1 ;; bun) echo 1.3.9 ;; claude) echo 2.1.330 ;; *) return 1 ;; esac; }
+# (xvfb x11vnc novnc websockify: the SSH-tunnelled sign-in view of bin/browser login, story V3)
+server_packages() { echo "git python3 tmux curl ca-certificates nodejs npm ufw unattended-upgrades xvfb x11vnc novnc websockify"; }
+server_pin() { case "$1" in gitleaks) echo 8.30.1 ;; bun) echo 1.3.9 ;; claude) echo 2.1.330 ;; playwright) echo 1.64.1 ;; *) return 1 ;; esac; }
 DRY=0; ACCEPT=" "
 run() { if [ "$DRY" = 1 ]; then printf '+'; printf ' %q' "$@"; echo; else "$@"; fi; }
 row() { printf '%-9s %-13s %s\n' "$1" "$2" "$3"; }
@@ -93,6 +95,9 @@ case "${1:-}" in
     if have gitleaks; then echo "gitleaks: present"; else install_gitleaks || exit 1; fi
     if have bun; then echo "bun: present"; else run bash -c "curl -fsSL https://bun.sh/install | bash -s bun-v$(server_pin bun)" || { echo "server: bun install failed" >&2; exit 1; }; fi
     if have claude; then echo "claude: present"; else run bash -c "curl -fsSL https://claude.ai/install.sh | bash -s $(server_pin claude)" || { echo "server: Claude Code install failed" >&2; exit 1; }; fi
+    # the browser (story V3): Playwright's Chromium, headless, and its system libraries (Playwright runs sudo apt-get)
+    if browser_chromium >/dev/null; then echo "chromium: present"
+    else run npx -y "playwright@$(server_pin playwright)" install --with-deps chromium || { echo "server: Chromium install failed" >&2; exit 1; }; fi
     echo "== hub"
     CD="${AGENT_CODE_DIR:-$HOME/Project}"
     if [ -d "$CD" ]; then echo "code folder: $CD"; else run mkdir -p "$CD" || exit 1; fi
@@ -111,6 +116,7 @@ case "${1:-}" in
     row "" "last sync" "$(when "$L/sync.log")"
     row "" "last monitor" "$(when "$L/monitor.log")"
     d="$(df -Pk "$HOME" 2>/dev/null | awk 'NR==2 {printf "%.1f GB free of %.1f GB (%s used)", $4/1048576, $2/1048576, $5}')"
-    row "" "disk" "${d:-unknown}" ;;
+    row "" "disk" "${d:-unknown}"
+    if c="$(browser_chromium)"; then row "" "browser" "ready (headless Chromium, $c)"; else row "" "browser" "missing (bin/server install)"; fi ;;
   *) echo "$USAGE" >&2; exit 2 ;;
 esac

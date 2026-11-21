@@ -46,6 +46,8 @@ case "$u" in
   *) echo "fake curl: unexpected $u" >&2; exit 22 ;;
 esac
 STUB
+# npx playwright install --with-deps chromium (story V3): a Playwright-style Chromium under ~/.cache/ms-playwright
+printf '#!/bin/bash\necho "npx $*" >> "$S/calls"; c="$HOME/.cache/ms-playwright/chromium-1234/chrome-linux"; mkdir -p "$c"; printf "#!/bin/bash\\n" > "$c/chrome"; chmod +x "$c/chrome"\n' > "$S/bin/npx"
 printf '#!/bin/bash\n[ "${1:-}" = -u ] && [ -e "$S/root" ] && { echo 0; exit 0; }\nexec /usr/bin/id "$@"\n' > "$S/bin/id"
 printf '#!/bin/bash\n[ "${1:-}" = -m ] && { echo x86_64; exit 0; }\nexec /usr/bin/uname "$@"\n' > "$S/bin/uname"
 chmod +x "$S"/bin/*
@@ -62,21 +64,22 @@ printf '%s  gitleaks_8.30.1_linux_x64.tar.gz\n' "$(python3 -c 'import hashlib, s
 safe() { printf 'port 22\npasswordauthentication no\npermitrootlogin no\n' > "$S/sshd.conf"
   printf 'Status: active\n\nTo                         Action      From\n--                         ------      ----\nOpenSSH                    ALLOW       Anywhere\nOpenSSH (v6)               ALLOW       Anywhere (v6)\n' > "$S/ufw.status"
   echo enabled > "$S/uu"; printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' > "$S/apt/20auto-upgrades"; }
-reset() { rm -rf "$S/calls" "$S/installed" "$S/root" "$S/nosudo" "$S/units" "$HOME/.local" "$HOME/.bun" "$HOME/Project" "$S/active"; : > "$S/calls"; safe; }
+reset() { rm -rf "$S/calls" "$S/installed" "$S/root" "$S/nosudo" "$S/units" "$HOME/.local" "$HOME/.bun" "$HOME/.cache" "$HOME/Project" "$S/active"; : > "$S/calls"; safe; }
 install() { bin/server install "$@" > "$S/out" 2> "$S/err"; rc=$?; }
-changes() { grep -E '^(apt-get install|sudo apt-get install|curl|systemctl --user enable|loginctl enable)' "$S/calls"; }
+changes() { grep -E '^(apt-get install|sudo apt-get install|curl|npx|systemctl --user enable|loginctl enable)' "$S/calls"; }
 
 installs_missing_from_fixed_list() {   # AC1
   reset; echo git > "$S/installed"; install; assert_eq "$rc" 0 "install: $(cat "$S/err" "$S/out")"
-  grep -q '^apt-get install -y -q --no-install-recommends python3 tmux curl ca-certificates nodejs npm ufw unattended-upgrades$' "$S/calls" || fail "only the missing packages: $(grep apt-get "$S/calls")"
+  grep -q '^apt-get install -y -q --no-install-recommends python3 tmux curl ca-certificates nodejs npm ufw unattended-upgrades xvfb x11vnc novnc websockify$' "$S/calls" || fail "only the missing packages: $(grep apt-get "$S/calls")"
   [ -x "$HOME/.local/bin/gitleaks" ] || fail "gitleaks installed"; grep -q 'releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz' "$S/calls" || fail "gitleaks pinned"
   grep -q 'curl -fsSL https://bun.sh/install' "$S/calls" && [ "$("$HOME/.bun/bin/bun")" = bun-v1.3.9 ] || fail "bun pinned: $("$HOME/.bun/bin/bun" 2>&1)"
   [ "$("$HOME/.local/bin/claude")" = 2.1.330 ] || fail "claude pinned"
+  grep -q '^npx -y playwright@1.64.1 install --with-deps chromium$' "$S/calls" || fail "Chromium and its system dependencies (V3)"
   [ -d "$HOME/Project" ] || fail "code folder"
   [ -f "$S/units/ade-hub-monitor.timer" ] || fail "bin/schedule install ran"
   : > "$S/calls"; install; assert_eq "$rc" 0 "rerun: $(cat "$S/err")"
   assert_eq "$(changes)" "" "a rerun installs nothing"
-  grep -q "all present" "$S/out" && grep -q "gitleaks: present" "$S/out" && grep -q "claude: present" "$S/out" || fail "rerun says so: $(cat "$S/out")"
+  grep -q "all present" "$S/out" && grep -q "gitleaks: present" "$S/out" && grep -q "claude: present" "$S/out" && grep -q "chromium: present" "$S/out" || fail "rerun says so: $(cat "$S/out")"
   reset; cp "$S/dl/sums" "$S/dl/sums.keep"; printf '%064d  gitleaks_8.30.1_linux_x64.tar.gz\n' 0 > "$S/dl/sums"
   install; assert_eq "$rc" 1 "a gitleaks tarball that does not match its checksum"; [ ! -e "$HOME/.local/bin/gitleaks" ] || fail "an unverified gitleaks was installed"
   cp "$S/dl/sums.keep" "$S/dl/sums"
@@ -124,6 +127,7 @@ dry_run_changes_nothing() {   # AC6
   assert_eq "$(changes)" "" "a dry run installs nothing"; [ ! -e "$S/units" ] && [ ! -d "$HOME/Project" ] && [ ! -e "$HOME/.local/bin/gitleaks" ] || fail "a dry run changed the machine"
   grep -q '^+ sudo apt-get install -y -q --no-install-recommends git ' "$S/out" || fail "prints the apt command: $(cat "$S/out")"
   grep -q '^+ curl -fsSL -o .*gitleaks_8.30.1_linux_x64.tar.gz' "$S/out" && grep -q "^+ bash -c curl.*bun.sh/install" "$S/out" && grep -q "^+ bash -c curl.*claude.ai/install.sh" "$S/out" || fail "prints the tool installs: $(cat "$S/out")"
+  grep -q '^+ npx -y playwright@1.64.1 install --with-deps chromium$' "$S/out" || fail "prints the Chromium install"
   grep -q "^+ mkdir -p $HOME/Project" "$S/out" && grep -q "^+ $HUB/bin/schedule install" "$S/out" || fail "prints the hub steps: $(cat "$S/out")"
   printf 'passwordauthentication yes\npermitrootlogin no\n' > "$S/sshd.conf"; bin/server install --dry-run > "$S/out" 2>&1; assert_eq "$?" 1 "dry run on an unsafe host exits as the install would"
   grep -q '^+ sudo apt-get install' "$S/out" || fail "still prints the plan"; assert_eq "$(changes)" "" "still changes nothing"

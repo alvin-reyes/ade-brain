@@ -1,0 +1,62 @@
+#!/bin/bash
+# bin/browser mcp|login|forget|status: browser automation on the server (story V3; `ade browser ...` runs it).
+# Contract: .ade/context/browser.md. Agents use the ade-skills `browser` plugin's Playwright MCP, headless Chromium;
+# its ask-first rules are the plugin's and stay unchanged (no form submit, purchase or message without the owner's word).
+#   mcp <folder>            the Playwright MCP arguments for that folder, one JSON object {"args": [...]}: headless
+#                           Chromium; --isolated (no logins) by default; --user-data-dir <its profile> only when hub.conf
+#                           has HUB_BROWSER_PROFILE_<NAME>=1 (NAME = the folder's agent name, upper-case, - as _);
+#                           --output-dir <hub>/<folder>/reports/browser for screenshots and downloads (never outside it)
+#   login <folder> <url>    the owner signs in to a tool in that folder's profile: Chromium on a private display (Xvfb),
+#                           shown by x11vnc on localhost behind a one-time password and noVNC (websockify) on
+#                           127.0.0.1:HUB_BROWSER_VIEW_PORT (6080), reached only through an SSH tunnel; never a public
+#                           port. Press Enter (or close the browser) when done: everything it started is stopped.
+#   forget <folder>         delete that folder's profile
+#   status                  whether Chromium (Playwright's) is installed
+# Profiles: ${XDG_CONFIG_HOME:-~/.config}/ade/browser/<name>/ (AGENT_BROWSER_DIR), 0700, one per folder, never shared.
+# Exit: 0 done, 1 failed or not ready, 2 usage, unknown folder, profile mode off.
+set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"
+USAGE="usage: bin/browser mcp <folder> | login <folder> <url> | forget <folder> | status"
+folder() { [[ "${1:-}" =~ ^(projects|ops)/[A-Za-z0-9][A-Za-z0-9._-]*$ ]] && [ -f "$H/$1/ACCESS.md" ] || { echo "browser: no folder '${1:-}'" >&2; exit 2; }; }
+view_port() { local p="${HUB_BROWSER_VIEW_PORT:-6080}"; [[ "$p" =~ ^[0-9]{4,5}$ ]] || { echo "browser: HUB_BROWSER_VIEW_PORT must be a port number" >&2; exit 2; }; echo "$p"; }
+# out_dir <folder>: <hub>/<folder>/reports/browser, made, and refused when it resolves outside the folder (a link)
+out_dir() { local d="$H/$1/reports/browser" r f; mkdir -p "$d" || exit 1
+  r="$(cd "$d" && pwd -P)"; f="$(cd "$H/$1" && pwd -P)"
+  case "$r" in "$f"/*) echo "$d" ;; *) echo "browser: $d resolves to $r, outside $1; screenshots and downloads stay in the folder" >&2; exit 1 ;; esac; }
+case "${1:-}" in
+  mcp) [ $# -eq 2 ] || { echo "$USAGE" >&2; exit 2; }; folder "$2"; o="$(out_dir "$2")" || exit 1
+    if browser_profile_on "$2"; then p="$(browser_profile_dir "$2")" || exit 1; mode="--user-data-dir"; else p=""; mode="--isolated"; fi
+    python3 -c 'import json, sys
+mode, prof, out = sys.argv[1:4]
+args = ["--browser", "chromium", "--headless"] + (["--user-data-dir", prof] if mode == "--user-data-dir" else ["--isolated"]) + ["--output-dir", out]
+print(json.dumps({"args": args}))' "$mode" "$p" "$o" ;;
+  login) [ $# -eq 3 ] || { echo "$USAGE" >&2; exit 2; }; folder "$2"; U="$3"
+    [[ "$U" =~ ^https?://[^[:space:]\'\"]+$ ]] || { echo "browser: the sign-in page must be an http(s) URL" >&2; exit 2; }
+    browser_profile_on "$2" || { echo "browser: profile mode is off for $2 (isolated, no logins); turn it on with $(browser_profile_var "$2")=1 in hub.conf" >&2; exit 2; }
+    C="$(browser_chromium)" || { echo "browser: Chromium is not installed (bin/server install)" >&2; exit 1; }
+    for t in Xvfb x11vnc websockify; do command -v "$t" >/dev/null 2>&1 || { echo "browser: $t is not installed (bin/server install)" >&2; exit 1; }; done
+    P="$(browser_profile_dir "$2")" || exit 1; WP="$(view_port)"
+    N=99; while [ -e "/tmp/.X$N-lock" ] && [ "$N" -lt 140 ]; do N=$((N + 1)); done; VP=$((5900 + N))
+    T="$(mktemp -d)" && chmod 700 "$T" || exit 1
+    PW="$(python3 -c 'import secrets; print(secrets.token_urlsafe(9))')"; ( umask 077; printf '%s\n' "$PW" > "$T/pw" )
+    PIDS=""; trap 'for p in $PIDS; do kill "$p" 2>/dev/null; done; wait 2>/dev/null; rm -rf "$T"' EXIT
+    Xvfb ":$N" -screen 0 1280x800x24 -nolisten tcp >/dev/null 2>&1 & PIDS="$PIDS $!"
+    sleep 1
+    DISPLAY=":$N" "$C" --user-data-dir="$P" --no-first-run --no-default-browser-check --new-window "$U" >/dev/null 2>&1 & CP=$!; PIDS="$PIDS $CP"
+    # the password file is read once and deleted by x11vnc (rm:), so the password is never in an argument
+    x11vnc -display ":$N" -localhost -rfbport "$VP" -passwdfile "rm:$T/pw" -forever -shared -quiet >/dev/null 2>&1 & PIDS="$PIDS $!"
+    NV="${HUB_NOVNC_DIR:-/usr/share/novnc}"
+    websockify --web "$NV" "127.0.0.1:$WP" "127.0.0.1:$VP" >/dev/null 2>&1 & PIDS="$PIDS $!"
+    echo "browser: $2's profile is open on $U, on this machine only (127.0.0.1:$WP)."
+    echo "  On your own computer:  ssh -N -L $WP:127.0.0.1:$WP $(id -un)@<this server>"
+    echo "  Then open:             http://localhost:$WP/vnc.html   (password: $PW)"
+    echo "  Sign in yourself, then press Enter here (or close the browser) to close the view."
+    while kill -0 "$CP" 2>/dev/null; do read -r -t 2 _ && break; [ $? -gt 128 ] || break; done
+    echo "browser: closed; the session is kept in $2's profile" ;;
+  forget) [ $# -eq 2 ] || { echo "$USAGE" >&2; exit 2; }; folder "$2"; d="$(browser_profile_path "$2")"
+    [ -e "$d" ] || { echo "browser: $2 has no profile"; exit 0; }
+    [ ! -L "$d" ] && [ -d "$d" ] || { echo "browser: $d is not a profile folder; not touched" >&2; exit 1; }
+    rm -rf "$d" && echo "browser: forgot $2's profile" ;;
+  status) [ $# -eq 1 ] || { echo "$USAGE" >&2; exit 2; }
+    if C="$(browser_chromium)"; then echo "ready  chromium $C"; else echo "missing  chromium (bin/server install)"; exit 1; fi ;;
+  *) echo "$USAGE" >&2; exit 2 ;;
+esac
