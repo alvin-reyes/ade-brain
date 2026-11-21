@@ -34,4 +34,5 @@
 - 2026-11-21: C1 Done: bash tests/run.sh green (29 of 29, exit 0); bin/method sync|check at ade-method v2.0.0, ADR 0005.
 - 2026-11-21: sharded C6 (docs/stories/C6-focus-agents-notify-each-other.md, 9 ACs, high): one hub event log written by hooks (idle, ended, pushed, contract) and bin/notify; delivered by bin/changes, a rate-limited PostToolUse bin/inbox and a once-only Stop block.
 - 2026-11-21: sharded server mode V1-V3 (docs/stories/V1-V3): Linux platform layer (secrets via pass or a 0700 file store, systemd user units, tmux focus sessions), ade server install for an Ubuntu VPS (no public ports, safety checks), headless browser with isolated or per-folder profiles and an SSH-tunnelled sign-in view.
+- 2026-11-21: decision 0006 (orchestrators and channels): an orchestrator is a named long-running session per hub with a list of channels; telegram is the first channel type; C5 reworked (10 ACs); ade-cli A2 adds ade orchestrator.
 - 2026-11-21: C4 Done: bash tests/run.sh green (29 of 29, exit 0); the brain indexes each checkout's .ade/context and .ade/knowledge read-only.
