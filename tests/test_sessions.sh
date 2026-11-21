@@ -27,6 +27,12 @@ f=$(env -u CLAUDE_PID bash -c "$(declare -f launch); launch"); PATH="$S:$PATH" b
 wait_for '[ -f "$ST/sessions/demo.$lp" ]' || fail "registered without a parent"
 bin/sessions | grep -q "^demo  *projects/demo  *[0-9][0-9]*  *-  *20" || fail "no parent shows as -: $(bin/sessions)"
 kill "$(pgrep -P "$lp" | head -1)"; wait "$lp" 2>/dev/null
+# --name N registers the session as N (bin/dispatch matches a running ticket by NAME and FOLDER)
+f=$(WORK_NO_OPEN=1 bin/work --force --name t-1.1 --role builder --claude claude-stub projects/demo 2>/dev/null | sed -n 's/^launcher: //p')
+PATH="$S:$PATH" bash "$f" & lp=$!
+wait_for '[ -f "$ST/sessions/t-1.1.$lp" ]' || fail "a --name session is registered under its name"
+bin/sessions | grep -q "^t-1.1  *projects/demo  *[0-9][0-9]*  *[^ ][^ ]*  *20.* builder " || fail "listed by its --name with its role: $(bin/sessions)"
+kill "$(pgrep -P "$lp" | head -1)"; wait "$lp" 2>/dev/null
 # live status: the folder hooks mark the session's own entry busy (prompt) and idle (stop); bin/sessions shows it
 printf '#!/bin/bash\nenv | grep "^CLAUDE" > "$AGENT_STATE/env.txt"\n"$HUB/bin/changes" projects/demo </dev/null >/dev/null 2>&1; touch "$AGENT_STATE/s1"\nfor _ in $(seq 1 100); do [ -e "$AGENT_STATE/go" ] && break; sleep 0.1; done\n"$HUB/bin/stop-check" projects/demo </dev/null >/dev/null 2>&1; touch "$AGENT_STATE/s2"\nexec sleep 20\n' > "$S/claude-hooks"; chmod +x "$S/claude-hooks"
 f=$(CLAUDE_PID=777 CLAUDE_CONFIG_DIR=/keep/me WORK_NO_OPEN=1 bin/work --force --claude claude-hooks projects/demo 2>/dev/null | sed -n 's/^launcher: //p'); [ -x "$f" ] || fail "launcher written (hooks stub)"

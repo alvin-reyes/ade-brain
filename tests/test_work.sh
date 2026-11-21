@@ -134,6 +134,7 @@ WORK_DRY=1 bin/work --name demo-redesign projects/demo | grep -q -- " --remote-c
 WORK_DRY=1 bin/work projects/demo --name demo-data --prompt "go" | grep -q -- " --remote-control demo-data .*-- go$" || fail "--name after the folder, before the prompt"
 WORK_DRY=1 bin/work --name 'bad name;' projects/demo >/dev/null 2>&1; assert_eq "$?" "2" "--name refuses characters outside A-Za-z0-9._-"
 WORK_DRY=1 bin/work --name >/dev/null 2>&1; assert_eq "$?" "2" "--name needs a value"
+for n in -x --dangerously-skip-permissions .x; do WORK_DRY=1 bin/work --name "$n" projects/demo >/dev/null 2>&1; assert_eq "$?" "2" "--name '$n' (no leading letter or digit) is refused"; done
 out=$(WORK_DRY=1 bin/work projects/demo demo-code --no-remote); echo "$out" | grep -q "cd '$R'" || fail "--no-remote after the repo still finds the repo"
 echo "$out" | grep -q -- "--remote-control" && fail "--no-remote after the repo leaves it out"
 # which claude install: HUB_CLAUDE from hub.conf, else claude; AGENT_CLAUDE or --claude picks another

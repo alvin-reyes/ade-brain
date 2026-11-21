@@ -1,4 +1,5 @@
 {
+  "permissions": { "ask": ["Bash(*bin/dispatch --approve*)", "Bash(*ade dispatch --approve*)", "Bash(script *)"] },
   "hooks": {
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "\"{{HUB}}\"/bin/context {{FOLDER}} --rules" }] }],
     "PreCompact": [{ "hooks": [{ "type": "command", "command": "\"{{HUB}}\"/bin/journal {{FOLDER}} \"(compaction: STATE.md and this entry should say what was in progress)\"" }] }],

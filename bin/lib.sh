@@ -29,14 +29,16 @@ folders() { local h; h="$(hub_root)"; for d in "$h"/projects/* "$h"/ops/*; do [ 
 agent_name() { case "$1" in projects/*) echo "${1#projects/}";; ops/*) echo "ops-${1#ops/}";; esac; }
 state_dir() { echo "${AGENT_STATE:-$HOME/.agent-hub/$(hub_name)}"; }
 # session_mark <folder> <busy|idle>: a focus session started by bin/work notes its status and the time in its own
-# registry entry ($(state_dir)/sessions/<name>.<launcher pid>; the launcher is an ancestor of the hook that calls this).
+# registry entry ($(state_dir)/sessions/<name>.<launcher pid>, name = its --name or the folder name; the launcher is an ancestor of the hook that calls this).
 # Called outside a focus session (the hub root, a plain terminal) it finds no entry and does nothing. Never fails.
 session_mark() {
   local sd n p e i; sd="$(state_dir)/sessions"; n="${1##*/}"; p=$$
   [ -n "$n" ] && [ -d "$sd" ] || return 0
   for i in 1 2 3 4 5 6 7 8; do
     p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' '); [[ "$p" =~ ^[0-9]+$ ]] && [ "$p" -gt 1 ] || return 0
-    e="$sd/$n.$p"; [ -f "$e" ] || continue
+    # the entry is <name>.<launcher pid>; name is the folder's or the session's --name, so match the pid and the folder
+    e=""; for c in "$sd"/*."$p"; do [ -f "$c" ] && [ "$(sed -n 's/^folder=//p' "$c" | head -1)" = "$1" ] && { e="$c"; break; }; done
+    [ -n "$e" ] || { [ -f "$sd/$n.$p" ] && e="$sd/$n.$p"; } || continue
     { grep -v -e '^status=' -e '^last=' "$e"; printf 'status=%s\nlast=%s\n' "$2" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"; } > "$sd/.mark.$$" 2>/dev/null &&
       mv "$sd/.mark.$$" "$e" 2>/dev/null || rm -f "$sd/.mark.$$"
     return 0
