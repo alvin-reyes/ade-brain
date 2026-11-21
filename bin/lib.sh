@@ -202,9 +202,21 @@ json.dump(s, open(dst, "w"), indent=2)
 PY
 }
 # AI tools whose key bin/keys manages. A tool here need not be connected yet: a stored key enables nothing.
-key_tools() { echo "deepseek glm muse gemini telegram"; }
-key_secret() { case "$1" in deepseek|glm) provider_field "$1" secret ;; muse) echo "meta-model-api-key" ;; gemini) echo "gemini-api-key" ;; telegram) channel_secret telegram ;; *) return 1 ;; esac; }
-key_source() { case "$1" in deepseek) echo "platform.deepseek.com" ;; glm) echo "z.ai" ;; muse) echo "dev.meta.ai" ;; gemini) echo "aistudio.google.com" ;; telegram) echo "@BotFather in Telegram" ;; *) return 1 ;; esac; }
+key_tools() { echo "anthropic deepseek glm muse gemini telegram"; }
+key_secret() { case "$1" in anthropic) echo "anthropic-api-key" ;; deepseek|glm) provider_field "$1" secret ;; muse) echo "meta-model-api-key" ;; gemini) echo "gemini-api-key" ;; telegram) channel_secret telegram ;; *) return 1 ;; esac; }
+key_source() { case "$1" in anthropic) echo "console.anthropic.com" ;; deepseek) echo "platform.deepseek.com" ;; glm) echo "z.ai" ;; muse) echo "dev.meta.ai" ;; gemini) echo "aistudio.google.com" ;; telegram) echo "@BotFather in Telegram" ;; *) return 1 ;; esac; }
+# anthropic_settings_write <dst>: the settings of an Anthropic run with a stored API key (story H1): Claude Code reads the
+# key through apiKeyHelper (bin/secret anthropic-api-key, the hub and Keychain service pinned), never an environment variable
+anthropic_settings_write() {
+  local H; H="$(hub_root)"
+  python3 -c 'import json, sys; json.dump({"apiKeyHelper": sys.argv[2]}, open(sys.argv[1], "w"), indent=2)' "$1" \
+    "HUB=$(provider_sq "$H") AGENT_KEYCHAIN_SERVICE=$(provider_sq "$(keychain_service)") $(provider_sq "$H/bin/secret") $(key_secret anthropic)"
+}
+# redact: hides key-shaped strings and Telegram bot tokens in text the hub prints (bin/chat logs; agent.py's live test
+# uses the same patterns)
+redact() { sed -E 's#[0-9]{6,12}:[A-Za-z0-9_-]{30,}#<hidden token>#g; s#(sk|pk|ak|key)-[A-Za-z0-9_-]{8,}#<hidden key>#g; s#[A-Za-z0-9_-]{32,}#<hidden>#g'; }
+# anthropic_model_ok <model>: an Anthropic model name a role or a live test may use
+anthropic_model_ok() { local am='^((opus|sonnet|haiku)(\[1m\])?|claude-[A-Za-z0-9._-]+(\[1m\])?)$'; [[ "$1" =~ $am ]]; }
 # Chat channels (story C5, ADR 0006, .ade/context/chat.md): each type's plugin, Keychain secret, the variable the
 # plugin reads its token from, and the variable that moves its state folder (bot token, access.json, inbox).
 channel_types() { echo "telegram"; }
