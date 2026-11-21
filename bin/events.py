@@ -11,6 +11,8 @@ calling folder's checkouts, one per line, from repos_of), AGENT_EVENTS_ROTATE (t
                                the chat, one "<inode> <end>\t[<agent>] <kind>: <text>" line each (oldest first)
   events.py ack INODE END      bin/chat forward: that line was sent; the next outbox starts after it
   events.py latest             each folder's newest event to main, one "<folder>\t<kind>\t<text>" line (bin/chat agents)
+  events.py repair [--check]   bin/recover (story R1): drop a torn last line (under the log's lock) and reset every
+                               cursor past the log's end to its end; one line per repair (--check: changes nothing)
 
 Event text is data: nothing here runs it, and every delivered line says so. Every call shares one deadline
 (start + 1.5 s) for reading stdin, each git call and waiting for the log's lock."""
@@ -440,6 +442,34 @@ def latest():
     return 0
 
 
+def repair(check):
+    """a crash can leave the log's last line half-written (a writer killed mid-write, a full disk) and a cursor past
+    the end (a log truncated or restored). Readers already skip a torn line; this removes it, and moves such cursors
+    to the end, so nothing is read twice or waits on bytes that never come."""
+    if not os.path.isfile(LOG) or os.path.islink(LOG): return 0
+    fd = os.open(LOG, os.O_RDWR | os.O_NOFOLLOW)
+    try:
+        if not check and not _lock(fd): print("event log: busy, not repaired"); return 1
+        size = os.fstat(fd).st_size
+        if size:
+            os.lseek(fd, max(0, size - (1 << 20)), 0); tail = os.read(fd, 1 << 20)
+            if not tail.endswith(b"\n"):
+                keep = size - len(tail) + tail.rfind(b"\n") + 1 if b"\n" in tail else 0
+                print("event log: %s a torn last line (%d bytes)" % ("has" if check else "dropped", size - keep))
+                if not check: os.ftruncate(fd, keep); os.fsync(fd)
+                size = keep
+        ino = os.fstat(fd).st_ino
+    finally:
+        os.close(fd)
+    curs = [q for q in glob.glob(os.path.join(SEEN, "*")) if not q.endswith(".at") and not q.endswith(".new")]
+    for q in curs + [FORWARD]:
+        c = _pos(q)
+        if c and c[0] == ino and c[1] > size:
+            print("event log: %s cursor %s past the end" % ("a" if check else "reset", os.path.basename(q)))
+            if not check: save(q, (ino, size))
+    return 0
+
+
 def main(a):
     if not ST: return 1
     if a[:1] == ["write"]:
@@ -457,6 +487,7 @@ def main(a):
     if a[:1] == ["outbox"]: return outbox()
     if a[:1] == ["ack"] and len(a) == 3 and a[1].isdigit() and a[2].isdigit(): save(FORWARD, (int(a[1]), int(a[2]))); return 0
     if a[:1] == ["latest"]: return latest()
+    if a[:1] == ["repair"]: return repair(a[1:] == ["--check"])
     own = a[1] if len(a) > 1 else ""
     try:
         if a[:1] == ["hook-tool"]: hook_tool(own); return 0

@@ -20,6 +20,10 @@
 #                                 to approve, 2 to deny (ref <ref>)"; prints the ref
 #   answer --sender <id> <reply>  record the owner's answer (1, 2, approve, deny, optionally a ref; or a button's data)
 #   asked <ref>                   pending, approved or denied
+#   say <text>                    send one message to the paired owner (story R1); a failed send is kept in
+#                                 <state dir>/chat/pending/ and sent by the next forward. Exit 0 sent, 1 kept, 2 not paired
+# Story R1: start runs bin/recover first. A service start (AGENT_CHAT_SERVICE=1, the launchd job) that finds 3 service
+# starts in the last 10 minutes gives up: journal, "login expired: run `claude` once" to the chat, the job disabled.
 # --sender is the user_id of the inbound channel message: only a paired owner (access.json allowFrom) counts.
 # Never skips permissions: dangerously/bypassPermissions in an argument, a HUB setting or the claude wrapper exits 2.
 # Each channel's token goes from the Keychain (bin/secret) into a 0600 .env in that channel's own state folder, which a
@@ -27,7 +31,7 @@
 set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; S="$(state_dir)"; PIDF="$S/chat/chat.pid"; LOCK="$S/chat/lock"
 LA="${AGENT_LAUNCHAGENTS:-$HOME/Library/LaunchAgents}"; LABEL="ai.agent-hub.$(hub_name).chat"
 NAME="${HUB_ORCHESTRATOR:-$(hub_name)}"
-usage() { echo "usage: bin/chat start | stop | status [--card] | setup [channel] | agents | to --sender <id> <agent> <text> | forward | ask <question> | answer --sender <id> <reply> | asked <ref> (channels: $(channel_types))" >&2; exit 2; }
+usage() { echo "usage: bin/chat start | stop | status [--card] | setup [channel] | agents | to --sender <id> <agent> <text> | forward | ask <question> | answer --sender <id> <reply> | asked <ref> | say <text> (channels: $(channel_types))" >&2; exit 2; }
 CHANNELS="${HUB_CHANNELS-telegram}"
 check_channels() {
   [ -n "${CHANNELS// /}" ] || { echo "chat: HUB_CHANNELS is empty (known channel types: $(channel_types))" >&2; exit 2; }
@@ -98,6 +102,18 @@ case "${1:-}" in
     [[ "$NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "chat: HUB_ORCHESTRATOR must start with a letter or digit (letters, digits, . _ -)" >&2; exit 2; }
     [ -z "${HUB_MODEL:-}" ] || [[ "$HUB_MODEL" =~ ^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]*$ ]] || { echo "chat: bad HUB_MODEL" >&2; exit 2; }
     check_channels
+    "$H/bin/recover" >&2 || true
+    # a crash loop (an expired login exits at once): after 3 service starts in 10 minutes, stop and say so
+    SF="$S/chat/service-starts"; now="$(date +%s)"; mkdir -p "$S/chat" && chmod 700 "$S/chat"
+    if [ "${AGENT_CHAT_SERVICE:-}" = 1 ]; then
+      n="$(awk -v t="$((now - 600))" '$1 >= t' "$SF" 2>/dev/null | grep -c .)"
+      if [ "$n" -ge 3 ]; then : > "$S/chat/gave-up"
+        "$H/bin/journal" . "chat: login expired? the orchestrator stopped after $n starts in 10 minutes (run claude once, then bin/schedule install)"
+        "$H/bin/chat" say "⚠ login expired: run \`claude\` once at the hub, then bin/schedule install (the orchestrator stopped after $n starts in 10 minutes)" >/dev/null 2>&1
+        echo "chat: stopped after $n starts in 10 minutes (login expired?): run claude once, then bin/schedule install" >&2
+        U="gui/$(id -u)"; launchctl disable "$U/$LABEL" 2>/dev/null; launchctl bootout "$U/$LABEL" 2>/dev/null; exit 1; fi
+      echo "$now" >> "$SF"
+    else rm -f "$SF" "$S/chat/gave-up"; fi
     other="$(hub_name_claim)" || { echo "chat: the hub name $(hub_name) is already used by the hub at $other (same state folder, Keychain service and launchd label): set HUB_NAME in hub.conf" >&2; exit 2; }
     take_lock || { p="$(running_pid)" && { echo "chat: already running (pid $p, since $(since)); bin/chat stop first" >&2; exit 1; }
       echo "chat: another bin/chat start holds the lock $LOCK (pid $(cat "$LOCK/pid" 2>/dev/null)); if none runs, remove that folder" >&2; exit 1; }
@@ -129,7 +145,8 @@ case "${1:-}" in
     done
     # the forwarder: the agents' events to main reach the chat while the session lives (story C7)
     fe="${AGENT_CHAT_FORWARD_EVERY:-15}"; case "$fe" in ''|*[!0-9]*) fe=15 ;; esac
-    if [ "$fe" -gt 0 ]; then ( exec </dev/null >/dev/null 2>&1; while kill -0 $$ 2>/dev/null; do sleep "$fe"; kill -0 $$ 2>/dev/null && "$H/bin/chat" forward; done ) & fi
+    if [ "$fe" -gt 0 ]; then ( exec </dev/null >/dev/null 2>&1; w="$fe"; while kill -0 $$ 2>/dev/null; do sleep "$w"
+      kill -0 $$ 2>/dev/null || break; "$H/bin/chat" forward; r=$?; [ "$r" = 1 ] && r=1 || r=0; w="$(chat_backoff "$w" "$r")"; done ) & fi
     echo "$$ $(date -u +%Y-%m-%dT%H:%MZ)" > "$PIDF"; echo $$ > "$LOCK/pid"
     echo "chat: $NAME on $CHANNELS (pid $$, mode $MODE)" >&2
     # the lock stays with the session (same pid); it is stale once the session is gone
@@ -170,12 +187,17 @@ EOF
   to) [ "${2:-}" = --sender ] && [ $# -eq 5 ] || usage; is_owner "$3" || exit 2
     if ! f="$(resolve "$4")"; then echo "chat: no single agent named '$4'; the agents:" >&2; agents_view table "" >&2; exit 2; fi
     "$H/bin/notify" --from main "$f" "$5" ;;
+  say) [ $# -eq 2 ] && [ -n "$2" ] || usage; [ -f "$(access_file)" ] || exit 2
+    printf '%s\n' "$2" | chat_send && exit 0
+    mkdir -p "$S/chat/pending" && chmod 700 "$S/chat" && printf '%s\n' "$2" > "$S/chat/pending/$(date +%s).$$.txt"; exit 1 ;;
   forward) [ $# -eq 1 ] || usage; mkdir -p "$S/chat" && chmod 700 "$S/chat" || exit 1; FL="$S/chat/forward.lock"
     # one forwarder at a time; a lock whose holder is gone is taken over
     if ! mkdir "$FL" 2>/dev/null; then p="$(cat "$FL/pid" 2>/dev/null)"
       case "$p" in ''|*[!0-9]*) ;; *) kill -0 "$p" 2>/dev/null && exit 0 ;; esac
       rm -rf "${FL:?}"; mkdir "$FL" 2>/dev/null || exit 0; fi
     echo $$ > "$FL/pid"; trap 'rm -rf "${FL:?}"' EXIT
+    # messages kept while the channel was down go first, oldest first, each removed once sent
+    for m in "$S"/chat/pending/*.txt; do [ -f "$m" ] || continue; chat_send < "$m" || exit 1; rm -f "${m:?}"; done
     out="$(ev_py outbox)" || { echo "chat: the event log is unreadable" >&2; exit 1; }
     while IFS="$(printf '\t')" read -r cur text; do [ -n "$cur" ] || continue
       printf '%s\n' "$text" | chat_send || exit 1

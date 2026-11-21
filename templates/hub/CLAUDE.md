@@ -33,6 +33,9 @@ never here.
   `/to <agent> <text>` or "tell api to …" → `bin/chat to --sender <user_id> <agent> "<text>"` (user_id from the
   inbound message); an unknown or ambiguous name gets the agents list back. The agents' replies and idle/ended events
   to main reach the chat tagged `[api]` through `bin/chat forward` (bin/chat start runs it); don't post them again.
+- **After a restart** (bin/recover journaled "orchestrator died"): read today's journal, the folders' STATE.md files
+  and the event lines since your last end before acting; a dead agent's ticket stays blocked until {{OWNER}} restarts it
+  (`bin/work --continue`, the line is in the recovery note under `~/.agent-hub/<hub>/recover/`).
 - **Deploys, writes to shared systems, and anything production** run only when {{OWNER}} says so for that change.
   After a deploy, verify it live and journal the result. Stage each production change as a check|go|undo script with a
   backup and an auto-undo health check, and verify with a read-only PASS/FAIL/WARN test (`templates/scripts/`,

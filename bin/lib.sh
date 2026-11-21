@@ -223,6 +223,10 @@ channel_state_env() { case "$1" in telegram) echo "TELEGRAM_STATE_DIR" ;; *) ret
 # Allow / Deny buttons on Claude Code's permission prompts itself; its reply tool sends none, so bin/chat ask uses
 # numbered replies). "all" lets bin/chat ask send Approve / Deny buttons.
 channel_buttons() { case "$1" in telegram) echo "permission" ;; *) return 1 ;; esac; }
+# chat_backoff <seconds> <failed 0|1>: the forwarder's next wait (story R1): doubled after a failed send, up to 8 times
+# AGENT_CHAT_FORWARD_EVERY (default 15), back to it after a run that worked
+chat_backoff() { local b="${AGENT_CHAT_FORWARD_EVERY:-15}" n; case "$b" in ''|*[!0-9]*|0) b=15 ;; esac
+  if [ "$2" = 1 ]; then n=$(( $1 * 2 )); [ "$n" -le $((b * 8)) ] || n=$((b * 8)); echo "$n"; else echo "$b"; fi; }
 # Role routing (.ade/context/providers.md, "Roles"): a role is an ordered list of provider:model candidates. Defaults
 # here; HUB_ROLE_<ROLE> in hub.conf (never the environment) replaces a role's list or adds a role.
 role_default() { case "$1" in

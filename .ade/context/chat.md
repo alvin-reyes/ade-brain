@@ -77,3 +77,14 @@
   `<state dir>/chat/asks/<ref>` (the question) and `<ref>.answer` (`approved|denied <UTC>`); a ref is five letters
   a-z without l. `answer` takes `1|2|approve|deny|yes|no [ref]` or the callback data; a bare answer needs exactly one
   pending ask; an answered ask never changes; each answer is one journal line `chat: <approved|denied> <ref>: <question>`.
+
+## Recovery (story R1)
+- `bin/chat say <text>`: one message to the paired owner. Exit 0 sent; 1 not sent, kept in
+  `<state dir>/chat/pending/<epoch>.<pid>.txt` (sent first, oldest first, by the next `forward`, removed once sent);
+  2 not paired (no `access.json`), nothing kept.
+- The forwarder loop backs off while sends fail: `chat_backoff` in `bin/lib.sh` doubles the wait up to 8 x
+  `AGENT_CHAT_FORWARD_EVERY` (15 -> 30 -> 60 -> 120 s) and returns to it after a run that worked.
+- `bin/chat start` runs `bin/recover` first. A service start (`AGENT_CHAT_SERVICE=1`, set by the launchd job) counts
+  itself in `<state dir>/chat/service-starts`; with 3 already in the last 10 minutes it gives up: `<state dir>/chat/gave-up`,
+  a journal line, "login expired: run claude once ..." to the chat, `launchctl disable` + `bootout` of the job,
+  exit 1. A start from a terminal clears both files. Tests never reach the Bot API (`AGENT_TELEGRAM_API` in `make_hub`).

@@ -262,7 +262,7 @@ infra            ops/infra                  4103     -        2026-11-21T10:06:0
 T
 STUB
   printf '#!/bin/bash\nfor a in "$@"; do printf "[%%s]" "$a"; done >> "$FAKE/notify.log"; echo >> "$FAKE/notify.log"\n' > bin/notify
-  chmod +x bin/sessions bin/notify; : > "$FAKE/notify.log"; rm -rf "$AGENT_STATE/events.jsonl" "$AGENT_STATE/events-seen" "$AGENT_STATE/chat/asks"
+  chmod +x bin/sessions bin/notify; : > "$FAKE/notify.log"; rm -rf "$AGENT_STATE/events.jsonl" "$AGENT_STATE/events-seen" "$AGENT_STATE/chat/asks" "$AGENT_STATE/chat/pending" "$AGENT_STATE/chat/forward.cursor"
 }
 c7_done() { cp "$FAKE/sessions.real" bin/sessions; cp "$FAKE/notify.real" bin/notify; unset AGENT_CHAT_SEND AGENT_CHAT_BUTTONS; }
 ev() { H="$HUB" ST="$AGENT_STATE" python3 -I bin/events.py write "$@" || fail "event write $*"; }

@@ -1,0 +1,103 @@
+#!/bin/bash
+# bin/recover [--check]: bring the hub back after a crash (story R1, contract .ade/context/recover.md). Run at login
+# (the launchd recover job), by bin/chat start before the orchestrator starts, and by hand. Each repair prints one
+# line and journals one line; anything found goes in a recovery note, <state dir>/recover/<UTC>.md. Never commits,
+# resets or stashes anything, and never marks a ticket Done. A second run finds nothing: "nothing to recover".
+#   orchestrator  a chat pid file whose process is gone: removed; the channel gets "restarted, N agents running, M waiting"
+#   agents        a focus session entry whose bin/work launcher is gone (bin/sessions keeps those in sessions-dead/):
+#                 journaled, its ticket (a builder's) marked blocked "agent died", main notified, its uncommitted
+#                 work listed with its diff stat and kept, and the bin/work --continue line to restart it noted
+#   locks         sync, dispatch, chat start and chat forward locks whose owner is gone (the S1b owner rule)
+#   event log     a torn last line dropped, cursors past the end reset to the end
+#   disk          less than AGENT_DISK_MIN_MB (default 200) MB free for the hub or its state: one alert until it clears
+#   chat service  (--check only) bin/chat start gave up after 3 service starts in 10 minutes (login expired?)
+# --check (bin/doctor) prints one row per check and changes nothing.
+set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; S="$(state_dir)"
+CHECK=0; case "${1:-}" in --check) CHECK=1 ;; "") ;; *) echo "usage: bin/recover [--check]" >&2; exit 2 ;; esac
+NAME="${HUB_ORCHESTRATOR:-$(hub_name)}"; NOTE=""; FOUND=0
+row() { printf '%-8s %-22s %s\n' "$1" "recover $2" "$3"; }
+# found <journal and note line> [note detail...]: a repair, printed, journaled and noted
+found() { FOUND=1; echo "$1"; "$H/bin/journal" . "recover: $1" 2>/dev/null; NOTE="$NOTE- $1"$'\n'; shift
+  local d; for d in "$@"; do NOTE="$NOTE$d"$'\n'; done; }
+# say <text>: to the paired owner through bin/chat say (kept for later when the channel is down); journaled either way
+say() { [ -f "$S/channels/telegram/access.json" ] || return 0; "$H/bin/chat" say "$1" >/dev/null 2>&1; local rc=$?
+  [ "$rc" != 1 ] || { echo "chat unreachable: the message is kept for bin/chat forward"; "$H/bin/journal" . "recover: chat unreachable: the message is kept (bin/chat forward sends it)" 2>/dev/null; }; }
+live_launcher() { [[ "$1" =~ ^[0-9]+$ ]] && ps -o command= -p "$1" 2>/dev/null | grep -q -- '-work\.'; }
+is_session() { ps -p "$1" -o command= 2>/dev/null | awk -v n="$NAME" '{for(i=1;i<NF;i++) if($i=="--remote-control" && $(i+1)==n) r=1} / --channels /{c=1} END{exit !(r&&c)}'; }
+
+if [ "$CHECK" = 0 ]; then
+  mkdir -p "$S" || exit 1; RL="$S/recover.lock"
+  sync_lock_take "$RL" 0 || { echo "another bin/recover is running"; exit 0; }
+  trap 'sync_lock_release "$RL"' EXIT
+fi
+
+# -- orchestrator: its pid file names no live channel session
+DIED=0; PIDF="$S/chat/chat.pid"
+if [ -f "$PIDF" ]; then p="$(awk '{print $1; exit}' "$PIDF")"; since="$(awk '{print $2; exit}' "$PIDF")"
+  if ! { [[ "$p" =~ ^[0-9]+$ ]] && is_session "$p"; }; then
+    if [ "$CHECK" = 1 ]; then row WARN orchestrator "died (pid $p, since ${since:-?}): bin/recover"
+    else rm -f "$PIDF"; DIED=1; found "orchestrator died (pid $p, since ${since:-?}); its pid file is removed"; fi
+  else [ "$CHECK" = 0 ] || row OK orchestrator "running (pid $p)"; fi
+else [ "$CHECK" = 0 ] || row OK orchestrator "no dead orchestrator"; fi
+
+# -- agents: entries whose launcher is gone, in sessions/ (not yet pruned) or sessions-dead/ (pruned by bin/sessions)
+nd=0
+for e in "$S"/sessions/* "$S"/sessions-dead/*; do [ -f "$e" ] || continue
+  get() { sed -n "s/^$1=//p" "$e" | head -1; }
+  live_launcher "$(get launcher)" && continue
+  n="$(get name)"; f="$(get folder)"; cwd="$(get cwd)"; role="$(get role)"; nd=$((nd + 1))
+  if [ "$CHECK" = 1 ]; then row WARN "agent $n" "died ($f): bin/recover"; continue; fi
+  ro=""; [ -z "$role" ] || [ "$role" = - ] || ro="--role $role "
+  det=("  restart: bin/work --continue ${ro}--name $n $f")
+  # its ticket: a builder's session is named after the ticket ref (bin/dispatch); blocked, never Done
+  tk=""; if [ "$role" = builder ] && [ -f "$cwd/_bmad/ade-runtime.mjs" ] && command -v node >/dev/null 2>&1; then
+    if node "$cwd/_bmad/ade-runtime.mjs" tickets --project-root "$cwd" mark "$n" blocked --blocked "agent died" >/dev/null 2>&1
+    then tk="; ticket $n marked blocked: agent died"; else tk="; ticket $n could not be marked blocked"; fi; fi
+  found "agent $n died ($f)$tk; nothing committed for it" "${det[@]}"
+  # uncommitted work in its checkout: kept as it is, listed
+  if [ -n "$cwd" ] && git -C "$cwd" rev-parse --git-dir >/dev/null 2>&1; then st="$(git -C "$cwd" status --porcelain 2>/dev/null)"
+    if [ -n "$st" ]; then
+      found "uncommitted work kept in $cwd ($(printf '%s\n' "$st" | grep -c .) files, not reset or stashed)" \
+        "$(git -C "$cwd" diff --stat 2>/dev/null | sed 's/^/    /')" "$(printf '%s\n' "$st" | sed 's/^/    /')"; fi; fi
+  case "$f" in projects/*|ops/*) [ -d "$H/$f" ] && "$H/bin/notify" --from "$f" main "blocked: agent $n died; restart: bin/work --continue ${ro}--name $n $f" >/dev/null 2>&1 ;; esac
+  rm -f "${e:?}"
+done
+[ "$CHECK" = 0 ] || [ "$nd" -gt 0 ] || row OK agents "none died"
+
+# -- locks whose owner is gone (the S1b owner rule: _sync_lock_stale in bin/lib.sh)
+ns=0
+for l in "$S/chat/lock" "$S/chat/forward.lock" "$S/dispatch.lock" "$(sync_lock_path)"; do [ -d "$l" ] || continue
+  _sync_lock_stale "$l" || continue; ns=$((ns + 1))
+  if [ "$CHECK" = 1 ]; then row WARN locks "stale: $l (owner gone): bin/recover"
+  else lg=:; _sync_lock_reap "$l" "$lg" && found "removed stale lock $l (its owner is gone)"; fi
+done
+[ "$CHECK" = 0 ] || [ "$ns" -gt 0 ] || row OK locks "none stale"
+
+# -- the event log: whole lines only, no cursor past the end
+if [ "$CHECK" = 1 ]; then r="$(H="$H" ST="$S" python3 -I "$(dirname "$0")/events.py" repair --check 2>/dev/null)"
+  if [ -n "$r" ]; then printf '%s\n' "$r" | while IFS= read -r x; do row WARN "event log" "$x: bin/recover"; done; else row OK "event log" "whole lines"; fi
+else r="$(H="$H" ST="$S" python3 -I "$(dirname "$0")/events.py" repair 2>/dev/null)"
+  while IFS= read -r x; do [ -z "$x" ] || found "$x"; done <<< "$r"; fi
+
+# -- disk: free space for the hub and its state
+min="${AGENT_DISK_MIN_MB:-200}"; case "$min" in ''|*[!0-9]*) min=200 ;; esac; low=""
+for d in "$H" "$S"; do a="$(df -Pk "$d" 2>/dev/null | awk 'NR==2{print int($4/1024)}')"
+  [ -n "$a" ] && [ "$a" -lt "$min" ] && { low="$d has $a MB free"; break; }; done
+DM="$S/recover/disk-alert"
+if [ "$CHECK" = 1 ]; then if [ -n "$low" ]; then row WARN disk "disk full: $low (writers fail closed until space is freed)"; else row OK disk "over $min MB free"; fi
+elif [ -n "$low" ]; then
+  if [ ! -e "$DM" ]; then mkdir -p "$S/recover" 2>/dev/null; : > "$DM" 2>/dev/null
+    found "disk full: $low"; say "⚠ disk full: $low. Free space; writers stop rather than write half a file."; fi
+else rm -f "$DM"; fi
+
+# -- the chat service gave up (bin/chat start, 3 service starts in 10 minutes)
+if [ "$CHECK" = 1 ]; then if [ -f "$S/chat/gave-up" ]; then row WARN "chat service" "stopped restarting: login expired? run claude once, then bin/schedule install"
+  else row OK "chat service" "not stopped"; fi; exit 0; fi
+
+if [ "$DIED" = 1 ]; then na=$("$H/bin/sessions" 2>/dev/null | awk 'NR>1' | grep -c .); nw=0
+  for q in "$S"/chat/asks/*; do [ -f "$q" ] || continue; case "$q" in *.answer) continue ;; esac; [ -f "$q.answer" ] || nw=$((nw + 1)); done
+  a="agents"; [ "$na" = 1 ] && a="agent"; say "restarted, $na $a running, $nw waiting"; fi
+if [ "$FOUND" = 0 ]; then echo "nothing to recover"; exit 0; fi
+mkdir -p "$S/recover" && N="$S/recover/$(date -u +%Y%m%dT%H%M%SZ).$$.md" &&
+  printf '# Recovery %s UTC\n\n%s' "$(date -u '+%Y-%m-%d %H:%M')" "$NOTE" > "$N" && echo "recovery note: $N"
+exit 0

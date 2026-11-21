@@ -2,11 +2,12 @@
 # bin/schedule install|uninstall|status: the hub's launchd jobs: the morning briefing (weekdays at
 # HUB_BRIEFING_HOUR:HUB_BRIEFING_MINUTE local time), monitor (bin/monitor every 30 minutes) and sync (bin/sync --auto
 # every 30 minutes; not installed, and removed on install, when hub.conf has HUB_AUTO_SYNC=0) and chat (bin/chat start,
-# kept alive; installed only when hub.conf has HUB_CHAT=telegram, removed on install otherwise).
+# kept alive; installed only when hub.conf has HUB_CHAT=telegram, removed on install otherwise) and recover (bin/recover
+# once at login, story R1).
 # Re-run install after pulling new jobs into the hub.
 . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; LA="${AGENT_LAUNCHAGENTS:-$HOME/Library/LaunchAgents}"; U="gui/$(id -u)"
-ALL="briefing monitor sync chat"; LOGS="$(state_dir)/logs"
-JOBS="briefing monitor"; OFF=""
+ALL="briefing monitor sync chat recover"; LOGS="$(state_dir)/logs"
+JOBS="briefing monitor recover"; OFF=""
 if [ "${HUB_AUTO_SYNC:-1}" = 0 ]; then OFF="sync"; else JOBS="$JOBS sync"; fi
 CLASH=""; [ "${1:-}" = install ] && [ "${HUB_CHAT:-}" = telegram ] && { CLASH="$(hub_name_claim)" || true; }
 if [ "${HUB_CHAT:-}" = telegram ] && [ -z "$CLASH" ]; then JOBS="$JOBS chat"; else OFF="$OFF chat"
