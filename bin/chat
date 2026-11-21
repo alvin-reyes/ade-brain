@@ -1,17 +1,20 @@
 #!/bin/bash
 # bin/chat start|stop|status|setup [channel]: the hub's orchestrator (its main session at the hub root) with its chat
 # channels attached, so the owner can reach it from Telegram (story C5, ADR 0006). Contract: .ade/context/chat.md.
-#   start   run claude at the hub root with --channels <plugin> for each HUB_CHANNELS type (default telegram), in the hub's
-#           permission mode (HUB_CHAT_MODE, else HUB_WORK_MODE, else auto) and with Remote Control named HUB_ORCHESTRATOR
-#           (default the hub name). One at a time. launchd runs it (bin/schedule install with HUB_CHAT=telegram).
-#   stop    end it (and unload the launchd job, which would restart it; bin/schedule install loads it again)
-#   status  running or stopped, since when, and each channel's access policy (a name only, never ids or the token)
+#   start   run claude at the hub root with --channels <plugin> for each HUB_CHANNELS type (default telegram), in
+#           HUB_CHAT_MODE (default manual: every permission prompt goes to the owner) with Remote Control named
+#           HUB_ORCHESTRATOR (default the hub name). One at a time. Without a terminal (launchd: bin/schedule install with
+#           HUB_CHAT=telegram) it starts only when each channel's policy is allowlist with no groups.
+#   stop    end it, and disable and unload the launchd job, which would restart it (bin/schedule install enables it again)
+#   status  running or stopped, since when, whether the channel connected, and each channel's policy and group count
+#           (never ids or the token)
 #   setup   the one-time steps: bot, token, plugin, pairing, allowlist, a test message
-# Never skips permissions: --dangerously-skip-permissions, --allow-dangerously-skip-permissions or bypassPermissions in an
-# argument, a HUB setting or the claude wrapper is refused with exit 2. Each channel's token comes from the Keychain
-# (bin/secret) into that session's environment only: never a file, an argument or the log. A missing token exits 1.
-set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; S="$(state_dir)"; PIDF="$S/chat/chat.pid"
+# Never skips permissions: dangerously/bypassPermissions in an argument, a HUB setting or the claude wrapper exits 2.
+# Each channel's token goes from the Keychain (bin/secret) into a 0600 .env in that channel's own state folder, which a
+# watcher deletes once the plugin has read it (it writes bot.pid), or after 60 s. Never the environment, argv or log.
+set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; S="$(state_dir)"; PIDF="$S/chat/chat.pid"; LOCK="$S/chat/lock"
 LA="${AGENT_LAUNCHAGENTS:-$HOME/Library/LaunchAgents}"; LABEL="ai.agent-hub.$(hub_name).chat"
+NAME="${HUB_ORCHESTRATOR:-$(hub_name)}"
 usage() { echo "usage: bin/chat start | stop | status | setup [channel] (channels: $(channel_types))" >&2; exit 2; }
 CHANNELS="${HUB_CHANNELS-telegram}"
 check_channels() {
@@ -21,13 +24,31 @@ check_channels() {
 }
 # channel_dir <channel>: this orchestrator's own state folder for it (two hubs never share a bot token or allowlist)
 channel_dir() { echo "$S/channels/$1"; }
-# the pid of the running chat session, if any: the pid file names a live process whose command has --channels
+# is_session <pid>: a live process that is this hub's channel session (--channels and --remote-control <NAME>)
+is_session() { ps -p "$1" -o command= 2>/dev/null | awk -v n="$NAME" '{for(i=1;i<NF;i++) if($i=="--remote-control" && $(i+1)==n) r=1} / --channels /{c=1} END{exit !(r&&c)}'; }
 running_pid() { local p; [ -f "$PIDF" ] || return 1; p="$(awk '{print $1; exit}' "$PIDF")"
-  case "$p" in ''|*[!0-9]*) return 1 ;; esac
-  ps -p "$p" -o command= 2>/dev/null | grep -q -- "--channels" || return 1; echo "$p"; }
+  case "$p" in ''|*[!0-9]*) return 1 ;; esac; is_session "$p" || return 1; echo "$p"; }
 since() { awk '{print $2; exit}' "$PIDF"; }
+# connected <channel>: the plugin wrote a bot.pid since this session started, and that process lives
+connected() { local b; b="$(channel_dir "$1")/bot.pid"; [ -f "$b" ] && [ ! "$PIDF" -nt "$b" ] || return 1
+  b="$(awk '{print $1; exit}' "$b")"; case "$b" in ''|*[!0-9]*) return 1 ;; esac; kill -0 "$b" 2>/dev/null; }
+# access_of <channel>: "<policy> <groups>" from the plugin's access.json (policy only when a known name), else nothing
+access_of() { local f; f="$(channel_dir "$1")/access.json"; [ -f "$f" ] || return 1
+  python3 -I -c 'import json,sys
+try: d=json.load(open(sys.argv[1]))
+except Exception: d=None
+if not isinstance(d,dict): print("unknown unknown"); sys.exit(0)
+v=d.get("dmPolicy", d.get("policy")); g=d.get("groups") or {}
+print((v if v in ("pairing","allowlist","disabled") else "unknown"), (len(g) if isinstance(g,(dict,list)) else "unknown"))' "$f" 2>/dev/null; }
 refuse_skip() { echo "chat: refused: the orchestrator never skips permissions ($1)" >&2; exit 2; }
 skips() { case "$1" in *dangerously*|*bypassPermissions*) return 0 ;; esac; return 1; }
+# the start lock: a folder holding the holder's pid; a holder that is gone, or is neither bin/chat nor a session, is stale
+take_lock() { local p; mkdir -p "$S/chat" && chmod 700 "$S/chat" || return 1
+  mkdir "$LOCK" 2>/dev/null && { echo $$ > "$LOCK/pid"; return 0; }
+  p="$(cat "$LOCK/pid" 2>/dev/null)"; case "$p" in ''|*[!0-9]*) return 1 ;; esac
+  kill -0 "$p" 2>/dev/null && ps -p "$p" -o command= 2>/dev/null | grep -qE 'bin/chat|--channels' && return 1
+  rm -rf "$LOCK"; mkdir "$LOCK" 2>/dev/null && echo $$ > "$LOCK/pid"; }
+refuse() { rm -rf "$LOCK"; echo "chat: $1" >&2; exit "${2:-1}"; }
 
 case "${1:-}" in
   start) shift
@@ -36,51 +57,62 @@ case "${1:-}" in
     for v in $(compgen -v | grep -E '^(HUB_|AGENT_CLAUDE$)'); do skips "${!v}" && refuse_skip "$v"; done
     CL="$(claude_cmd)"
     case "$CL" in *[[:space:]]*) echo "chat: the claude command must be one word (HUB_CLAUDE / AGENT_CLAUDE)" >&2; exit 2 ;; esac
+    # best effort: a small wrapper script that names a skip flag is refused (a binary or an indirect wrapper is not seen)
     w="$(command -v -- "$CL" 2>/dev/null)"
     if [ -n "$w" ] && [ -f "$w" ] && [ "$(wc -c < "$w")" -lt 65536 ] && grep -qE 'dangerously|bypassPermissions' "$w" 2>/dev/null; then
       refuse_skip "the claude wrapper $CL"; fi
-    MODE="${HUB_CHAT_MODE:-${HUB_WORK_MODE:-auto}}"
+    MODE="${HUB_CHAT_MODE:-manual}"
     case "$MODE" in auto|manual|acceptEdits|plan) ;; *) echo "chat: mode must be auto|manual|acceptEdits|plan (HUB_CHAT_MODE)" >&2; exit 2 ;; esac
-    NAME="${HUB_ORCHESTRATOR:-$(hub_name)}"
     [[ "$NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "chat: HUB_ORCHESTRATOR must start with a letter or digit (letters, digits, . _ -)" >&2; exit 2; }
     [ -z "${HUB_MODEL:-}" ] || [[ "$HUB_MODEL" =~ ^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]*$ ]] || { echo "chat: bad HUB_MODEL" >&2; exit 2; }
     check_channels
-    if p="$(running_pid)"; then echo "chat: already running (pid $p, since $(since)); bin/chat stop first" >&2; exit 1; fi
-    command -v -- "$CL" >/dev/null 2>&1 || { echo "chat: $CL not found" >&2; exit 1; }
-    # every token first, so a missing one launches nothing; a token in the caller's shell is never used
+    other="$(hub_name_claim)" || { echo "chat: the hub name $(hub_name) is already used by the hub at $other (same state folder, Keychain service and launchd label): set HUB_NAME in hub.conf" >&2; exit 2; }
+    take_lock || { p="$(running_pid)" && { echo "chat: already running (pid $p, since $(since)); bin/chat stop first" >&2; exit 1; }
+      echo "chat: another bin/chat start holds the lock $LOCK (pid $(cat "$LOCK/pid" 2>/dev/null)); if none runs, remove that folder" >&2; exit 1; }
+    if p="$(running_pid)"; then refuse "already running (pid $p, since $(since)); bin/chat stop first"; fi
+    command -v -- "$CL" >/dev/null 2>&1 || refuse "$CL not found"
+    command -v bun >/dev/null 2>&1 || refuse "bun not found (the Telegram plugin runs on it: https://bun.sh, then ~/.bun/bin on PATH)"
+    TTY=0; [ -t 0 ] && TTY=1
     for c in $CHANNELS; do unset "$(channel_token_env "$c")" "$(channel_state_env "$c")"
-      "$H/bin/secret" --has "$(channel_secret "$c")" || { echo "chat: no $c bot token in the Keychain: run bin/keys set $c (bin/chat setup $c)" >&2; exit 1; }; done
+      # without a terminal nobody can watch a pairing: only an allowlist with no groups may run unattended
+      if [ "$TTY" = 0 ]; then a="$(access_of "$c")" || refuse "$c is not paired yet: run bin/chat start in a Terminal first (bin/chat setup $c)"
+        [ "$a" = "allowlist 0" ] || refuse "$c must be locked to an allowlist with no groups before it runs unattended (now: policy ${a% *}, groups ${a#* }): /telegram:access policy allowlist"; fi
+      "$H/bin/secret" --has "$(channel_secret "$c")" || refuse "no $c bot token in the Keychain: run bin/keys set $c (bin/chat setup $c)"; done
     cmd=("$CL"); for c in $CHANNELS; do cmd+=(--channels "$(channel_plugin "$c")"); done
     cmd+=(--permission-mode "$MODE" --remote-control "$NAME"); [ -z "${HUB_MODEL:-}" ] || cmd+=(--model "$HUB_MODEL")
-    mkdir -p "$S/chat" && chmod 700 "$S/chat" || exit 1
-    cd "$H" || exit 1
+    CD="$(claude_home)"; [ "$CD" = "$HOME/.claude" ] || export CLAUDE_CONFIG_DIR="$CD"
+    cd "$H" || refuse "cannot enter $H"
     # launchd gives no terminal, and claude's interface needs one: script(1) gives it a pseudo-terminal, fed a stdin
-    # that never ends while this process lives (an end of input would reach claude as Ctrl-D). Opened before any token
-    # is in the environment, so the feeder never holds one.
-    if [ ! -t 0 ]; then exec 0< <(exec >/dev/null 2>&1; while kill -0 $$ 2>/dev/null; do sleep 5; done); cmd=(script -q /dev/null "${cmd[@]}"); fi
-    for c in $CHANNELS; do d="$(channel_dir "$c")"; mkdir -p "$d" && chmod 700 "$d" || exit 1; export "$(channel_state_env "$c")=$d"
-      t="$("$H/bin/secret" "$(channel_secret "$c")" 2>/dev/null)" && [ -n "$t" ] || { echo "chat: could not read the $c bot token: run bin/keys set $c" >&2; exit 1; }
-      export "$(channel_token_env "$c")=$t"; unset t; done
-    echo "$$ $(date -u +%Y-%m-%dT%H:%MZ)" > "$PIDF"
+    # that never ends while this process lives (an end of input would reach claude as Ctrl-D)
+    if [ "$TTY" = 0 ]; then exec 0< <(exec >/dev/null 2>&1; while kill -0 $$ 2>/dev/null; do sleep 5; done); cmd=(script -q /dev/null "${cmd[@]}"); fi
+    ttl="${AGENT_CHAT_ENV_TTL:-60}"; case "$ttl" in ''|*[!0-9]*) ttl=60 ;; esac; [ "$ttl" -le 60 ] || ttl=60
+    for c in $CHANNELS; do d="$(channel_dir "$c")"; mkdir -p "$d" && chmod 700 "$d" || refuse "cannot make $d"
+      export "$(channel_state_env "$c")=$d"; rm -f "$d/bot.pid" "$d/.env"
+      t="$("$H/bin/secret" "$(channel_secret "$c")" 2>/dev/null)" && [ -n "$t" ] || refuse "could not read the $c bot token: run bin/keys set $c"
+      # the token goes to a 0600 file only (printf is a builtin: no argument of any process carries it)
+      ( umask 077; printf '%s=%s\n' "$(channel_token_env "$c")" "$t" > "$d/.env" ) || { unset t; rm -f "$d/.env"; refuse "cannot write $d/.env"; }
+      unset t
+      # deleted once the plugin has read it (it writes bot.pid when it starts), or after the time limit
+      ( exec </dev/null >/dev/null 2>&1; i=0; while [ "$i" -lt $((ttl * 2)) ] && [ ! -f "$d/bot.pid" ]; do sleep 0.5; i=$((i+1)); done; rm -f "$d/.env" ) &
+    done
+    echo "$$ $(date -u +%Y-%m-%dT%H:%MZ)" > "$PIDF"; echo $$ > "$LOCK/pid"
     echo "chat: $NAME on $CHANNELS (pid $$, mode $MODE)" >&2
-    exec "${cmd[@]}" ;;
+    # the lock stays with the session (same pid); it is stale once the session is gone
+    if [ "$TTY" = 0 ]; then exec "${cmd[@]}" >/dev/null 2>&1; else exec "${cmd[@]}"; fi ;;
   stop) [ $# -eq 1 ] || usage
-    if [ -f "$LA/$LABEL.plist" ] && [ "${SCHEDULE_DRY:-}" != 1 ]; then
-      launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null && echo "unloaded $LABEL (bin/schedule install loads it again)"; fi
-    if p="$(running_pid)"; then kill "$p" 2>/dev/null; rm -f "$PIDF"; echo "stopped (pid $p)"; else rm -f "$PIDF"; echo "not running"; fi ;;
+    if [ -f "$LA/$LABEL.plist" ]; then U="gui/$(id -u)"
+      launchctl disable "$U/$LABEL" 2>/dev/null; launchctl bootout "$U/$LABEL" 2>/dev/null
+      echo "disabled $LABEL (bin/schedule install enables it again)"; fi
+    if p="$(running_pid)"; then kill "$p" 2>/dev/null; i=0
+      while kill -0 "$p" 2>/dev/null; do i=$((i+1)); [ $i -lt 100 ] || { echo "chat: pid $p still runs after 10 s; the pid file is kept" >&2; exit 1; }; sleep 0.1; done
+      rm -f "$PIDF"; rm -rf "$LOCK"; echo "stopped (pid $p)"
+    else echo "not running"; fi ;;
   status) [ $# -eq 1 ] || usage
-    NAME="${HUB_ORCHESTRATOR:-$(hub_name)}"
-    if p="$(running_pid)"; then echo "$NAME: running (pid $p, since $(since))"; else echo "$NAME: stopped"; fi
+    if p="$(running_pid)"; then ok=1; for c in $CHANNELS; do connected "$c" 2>/dev/null || ok=0; done
+      if [ "$ok" = 1 ]; then echo "$NAME: running (pid $p, since $(since))"; else echo "$NAME: running, channel not connected (pid $p, since $(since))"; fi
+    else echo "$NAME: stopped"; fi
     for c in $CHANNELS; do case " $(channel_types) " in *" $c "*) ;; *) echo "$c: unknown channel type"; continue ;; esac
-      f="$(channel_dir "$c")/access.json"
-      if [ ! -f "$f" ]; then echo "$c: not paired yet (bin/chat setup $c)"; continue; fi
-      # the policy name only, and only a known one: ids, tokens and anything else in the file are never shown
-      pol="$(python3 -I -c 'import json,sys
-try: d=json.load(open(sys.argv[1]))
-except Exception: d={}
-v=d.get("dmPolicy", d.get("policy")) if isinstance(d,dict) else None
-print(v if v in ("pairing","allowlist","disabled") else "unknown")' "$f" 2>/dev/null)"
-      echo "$c: policy ${pol:-unknown}"; done ;;
+      if a="$(access_of "$c")"; then echo "$c: policy ${a% *}, groups: ${a#* }"; else echo "$c: not paired yet (bin/chat setup $c)"; fi; done ;;
   setup) [ $# -le 2 ] || usage; c="${2:-telegram}"
     case " $(channel_types) " in *" $c "*) ;; *) echo "chat: unknown channel type (known channel types: $(channel_types))" >&2; exit 2 ;; esac
     if "$H/bin/secret" --has "$(channel_secret "$c")" 2>/dev/null; then st="stored"; else st="missing"; fi
@@ -88,10 +120,10 @@ print(v if v in ("pairing","allowlist","disabled") else "unknown")' "$f" 2>/dev/
 Telegram for this hub's orchestrator ($(hub_name)); token: $st. Do these once, in your own terminal:
 1. In Telegram, message @BotFather: /newbot, pick a name and a username ending in "bot". Copy the token it gives you.
 2. bin/keys set telegram   (paste the token at the hidden prompt; never in a chat or a file)
-3. In any claude session: /plugin install telegram@claude-plugins-official   (user scope)
-4. bin/chat start   (in a Terminal at the hub root, the first time, so you can accept its prompts)
+3. Install bun (https://bun.sh; the plugin runs on it). In any claude session: /plugin install telegram@claude-plugins-official   (user scope)
+4. bin/chat start   (in a Terminal at the hub root, the first time, so you can answer its prompts)
 5. Message your bot in Telegram; it replies with a pairing code. In the session: /telegram:access pair <code>
-6. Lock it to you: /telegram:access policy allowlist
+6. Lock it to you: /telegram:access policy allowlist   (no groups: an unattended start refuses otherwise)
 7. Send a test message from Telegram and check the session answers. Then quit it, set HUB_CHAT=telegram in hub.conf
    and run bin/schedule install, so launchd keeps it running. bin/chat status shows it.
 This orchestrator's channel state stays in $(channel_dir "$c"), never in the shared ~/.claude/channels/$c.

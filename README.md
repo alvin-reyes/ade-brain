@@ -266,7 +266,7 @@ A focus session can run Claude Code against DeepSeek instead of Anthropic. The C
   `bin/monitor` every 30 minutes; and `bin/sync --auto` every 30 minutes; with `HUB_CHAT=telegram`, the chat job.
 - **Chat (Telegram)**: `bin/chat setup` lists the one-time steps (a bot from @BotFather, `bin/keys set telegram`, the
   `telegram@claude-plugins-official` plugin, pairing, `/telegram:access policy allowlist`). `bin/chat start|stop|status`
-  runs the hub's main session with the channel attached, in the hub's permission mode, never skipping permissions;
+  runs the hub's main session with the channel attached, in `manual` mode (`HUB_CHAT_MODE`), never skipping permissions;
   only your paired account gets in (`.ade/context/chat.md`).
 - **Auto sync**: `bin/sync --auto` commits and pushes the hub's files unattended: one run at a time, skipped while git
   is busy, refused without gitleaks or without the git hooks (`bin/setup`), every commit to push scanned first, one

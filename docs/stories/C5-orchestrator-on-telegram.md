@@ -18,8 +18,8 @@ in; permission prompts are relayed to the owner; nothing skips permissions.
 - `bin/chat start`: launches `claude --channels plugin:telegram@claude-plugins-official` at the hub root in the hub's
   permission mode (never `--dangerously-skip-permissions`, refused if passed), with Remote Control as today.
 - The bot token lives in the hub's Keychain (`bin/keys` tool `telegram`, secret `telegram-bot-token`); `bin/chat` reads
-  it with `bin/secret` at launch and passes it only to that session as `TELEGRAM_BOT_TOKEN`; it is never written to a
-  file, argv or the log. A missing token refuses before launch.
+  it with `bin/secret` at launch and hands it to the plugin in a short-lived 0600 `.env` in the channel's own state
+  folder, deleted once read (owner decision 2026-11-21); it is never in the environment, argv or the log. A missing token refuses before launch.
 - launchd job `ai.agent-hub.<hub>.chat` (template `launchd/chat.plist.template`, installed by `bin/schedule install`
   only when `HUB_CHAT=telegram` in hub.conf) keeps it running and restarts it.
 - `bin/chat setup` walks the owner through: create the bot with @BotFather, `bin/keys set telegram`, install the plugin
@@ -32,7 +32,7 @@ in; permission prompts are relayed to the owner; nothing skips permissions.
 | AC | Criterion | Test |
 |---|---|---|
 | 1 | `start` runs claude with `--channels plugin:telegram@claude-plugins-official` at the hub root, in the hub's permission mode | `start_launches_channel_session` |
-| 2 | The token reaches only that process's environment; it is in no argv, file or log | `token_only_in_session_env` |
+| 2 | The token reaches the plugin only through a short-lived 0600 `.env` in the channel's state folder, deleted once the plugin has read it (or after 60 s); it is in no environment (a child of the session never sees it), argv, other file or log | `token_short_lived_file` |
 | 3 | No token in the Keychain: exit 1, "run bin/keys set telegram", nothing launched | `missing_token_refuses` |
 | 4 | `--dangerously-skip-permissions` (argument or HUB setting) is refused with exit 2 | `skip_permissions_refused` |
 | 5 | A second `start` while one runs exits 1 naming the running pid | `single_instance` |

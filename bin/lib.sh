@@ -211,6 +211,13 @@ channel_types() { echo "telegram"; }
 channel_plugin() { case "$1" in telegram) echo "plugin:telegram@claude-plugins-official" ;; *) return 1 ;; esac; }
 channel_secret() { case "$1" in telegram) echo "telegram-bot-token" ;; *) return 1 ;; esac; }
 channel_token_env() { case "$1" in telegram) echo "TELEGRAM_BOT_TOKEN" ;; *) return 1 ;; esac; }
+# hub_name_claim: this hub owns its name on this machine (the state folder, Keychain service and launchd labels all
+# derive from it). The first hub to claim it is recorded in <state dir>/hub-path; a different hub that still exists
+# there makes this print that hub's path and return 1 (two folders both named "hub": set HUB_NAME in one of them).
+hub_name_claim() { local f me o; f="$(state_dir)/hub-path"; me="$(cd "$(hub_root)" && pwd -P)" || return 0
+  mkdir -p "$(state_dir)" || return 0
+  if [ -f "$f" ]; then o="$(cat "$f")"; [ "$o" = "$me" ] && return 0; [ -d "$o" ] && { echo "$o"; return 1; }; fi
+  echo "$me" > "$f"; }
 channel_state_env() { case "$1" in telegram) echo "TELEGRAM_STATE_DIR" ;; *) return 1 ;; esac; }
 # Role routing (.ade/context/providers.md, "Roles"): a role is an ordered list of provider:model candidates. Defaults
 # here; HUB_ROLE_<ROLE> in hub.conf (never the environment) replaces a role's list or adds a role.
