@@ -84,7 +84,8 @@ case "${1:-}" in
     cd "$H" || refuse "cannot enter $H"
     # launchd gives no terminal, and claude's interface needs one: script(1) gives it a pseudo-terminal, fed a stdin
     # that never ends while this process lives (an end of input would reach claude as Ctrl-D)
-    if [ "$TTY" = 0 ]; then exec 0< <(exec >/dev/null 2>&1; while kill -0 $$ 2>/dev/null; do sleep 5; done); cmd=(script -q /dev/null "${cmd[@]}"); fi
+    if [ "$TTY" = 0 ]; then exec 0< <(exec >/dev/null 2>&1; while kill -0 $$ 2>/dev/null; do sleep 5; done); 
+      if script_is_util_linux; then cmd=(script -q -e -c "$(printf '%q ' "${cmd[@]}")" /dev/null); else cmd=(script -q /dev/null "${cmd[@]}"); fi; fi
     ttl="${AGENT_CHAT_ENV_TTL:-60}"; case "$ttl" in ''|*[!0-9]*) ttl=60 ;; esac; [ "$ttl" -le 60 ] || ttl=60
     for c in $CHANNELS; do d="$(channel_dir "$c")"; mkdir -p "$d" && chmod 700 "$d" || refuse "cannot make $d"
       export "$(channel_state_env "$c")=$d"; rm -f "$d/bot.pid" "$d/.env"
