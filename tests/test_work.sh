@@ -184,4 +184,101 @@ out=$(HUB_WORK_MODE=plan WORK_DRY=1 bin/work --mode acceptEdits projects/demo); 
 WORK_DRY=1 bin/work --mode bypassPermissions projects/demo >/dev/null 2>&1; assert_eq "$?" "2" "bypassPermissions is refused"
 WORK_DRY=1 bin/work --mode 'auto;x' projects/demo >/dev/null 2>&1; assert_eq "$?" "2" "bad mode is refused"
 WORK_DRY=1 bin/work projects/demo --mode >/dev/null 2>&1; assert_eq "$?" "2" "--mode without a value is refused"
+# story C2: --role <role> resolves with role_pick to a provider and model, then takes the --provider/--model path
+# stub bin/secret in the hub copy: names in $WT_STORED are stored; WT_SECRET_MODE=empty reads an empty key
+WT="$(mktemp -d)"; export WT_STORED="$WT/stored"; : > "$WT_STORED"; cp bin/secret "$WT/secret.real"
+cat > bin/secret <<'STUB'
+#!/bin/bash
+case "$1" in --has) grep -qx "$2" "$WT_STORED"; exit;; esac
+grep -qx "$1" "$WT_STORED" || exit 1
+[ "${WT_SECRET_MODE:-}" = empty ] || printf '%s' "sk-WORKTEST-c0ffee"
+STUB
+chmod +x bin/secret
+owner_conf() { printf '%s\n' 'HUB_PROVIDERS_ALLOWED="anthropic deepseek"' 'HUB_OWNED_BY_OWNER=1' "$@" > hub.conf; }
+role_sets_provider_and_model() {
+  rm -f hub.conf; local pick out; pick="$( . bin/lib.sh; role_pick builder; echo "$ROLE_PICK")"
+  out=$(WORK_DRY=1 bin/work --role builder projects/demo 2>&1) || fail "--role builder failed: $out"
+  echo "$out" | grep -q -- "--model ${pick#*:}\( \|\$\)" || fail "the session takes role_pick's model ${pick#*:}: $out"
+  [ "${pick%%:*}" != anthropic ] || ! echo "$out" | grep -q "CLAUDE_CONFIG_DIR=" || fail "an anthropic pick runs no provider: $out"
+}
+role_follows_hub_conf() {
+  owner_conf 'HUB_ROLE_BUILDER="deepseek:deepseek-v4-pro anthropic:opus"'; echo deepseek-api-key > "$WT_STORED"
+  local out; out=$(WORK_DRY=1 bin/work --role builder projects/demo 2>&1) || fail "--role with a deepseek pick failed: $out"
+  echo "$out" | grep -qF "CLAUDE_CONFIG_DIR='$HUB/.local/providers/deepseek' claude --settings" || fail "the session runs on deepseek: $out"
+  echo "$out" | grep -q -- "--model deepseek-v4-pro" || fail "the session takes the hub.conf model: $out"
+  echo "$out" | grep -q -- "--remote-control" && fail "a provider session has no Remote Control"
+  : > "$WT_STORED"; out=$(WORK_DRY=1 bin/work --role builder projects/demo 2>&1) || fail "fallback to anthropic failed: $out"
+  echo "$out" | grep -q -- "--model opus" && ! echo "$out" | grep -q "providers/deepseek" || fail "no deepseek key: the next candidate (anthropic:opus) is used: $out"
+  rm -f hub.conf
+}
+role_excludes_model_and_provider() {
+  rm -f hub.conf; local a
+  for a in "--model opus" "--provider anthropic"; do
+    WORK_DRY=1 bin/work --role builder $a projects/demo >/dev/null 2>&1; assert_eq "$?" "2" "--role with $a"
+    WORK_DRY=1 bin/work $a --role builder projects/demo >/dev/null 2>&1; assert_eq "$?" "2" "$a before --role"
+  done
+  WORK_DRY=1 bin/work projects/demo --role >/dev/null 2>&1; assert_eq "$?" "2" "--role without a value"
+}
+unknown_role_refused() {
+  rm -f hub.conf; local out; out=$(WORK_DRY=1 bin/work --role nope projects/demo 2>&1); assert_eq "$?" "2" "unknown role"
+  echo "$out" | grep -q "nope" && echo "$out" | grep -q "builder" && echo "$out" | grep -q "reviewer" || fail "names the known roles: $out"
+  echo "$out" | grep -q "^cd " && fail "nothing prepared for an unknown role"
+}
+no_usable_candidate() {
+  printf '%s\n' 'HUB_ROLE_BUILDER="deepseek:deepseek-flash deepseek:deepseek-v4-pro"' > hub.conf   # deepseek not allowed
+  local out; out=$(WORK_NO_OPEN=1 bin/work --role builder projects/demo 2>&1); assert_eq "$?" "1" "no usable candidate"
+  echo "$out" | grep -q "skipped deepseek:deepseek-flash: deepseek is not in HUB_PROVIDERS_ALLOWED" || fail "first skip reason: $out"
+  echo "$out" | grep -q "skipped deepseek:deepseek-v4-pro: deepseek is not in HUB_PROVIDERS_ALLOWED" || fail "second skip reason: $out"
+  echo "$out" | grep -q "^cd \|^launcher: " && fail "nothing opens with no usable candidate: $out"
+  rm -f hub.conf
+}
+role_keeps_provider_gates() {
+  owner_conf 'HUB_ROLE_BUILDER="deepseek:deepseek-flash"'; echo deepseek-api-key > "$WT_STORED"
+  local out; out=$(WT_SECRET_MODE=empty WORK_NO_OPEN=1 bin/work --role builder projects/demo 2>&1); assert_eq "$?" "1" "empty key refused"
+  echo "$out" | grep -q "work: no .* in the Keychain; store it with: bin/secret --set deepseek-api-key" || fail "bin/work's key gate: $out"
+  echo "$out" | grep -q "^cd \|^launcher: " && fail "nothing launched without a key: $out"
+  # a provider that is no go for focus is skipped like any refused candidate: exit 1 when none is left, else the next one
+  out=$(with_focus_nogo 2>&1); assert_eq "$?" "1" "the only candidate is no go for focus"
+  echo "$out" | grep -q "skipped deepseek:deepseek-flash: " || fail "the focus no-go is a skip reason: $out"
+  owner_conf 'HUB_ROLE_BUILDER="deepseek:deepseek-flash anthropic:opus"'
+  out=$(with_focus_nogo 2>&1) || fail "focus no-go falls back to the next candidate: $out"
+  echo "$out" | grep -q -- "--model opus" && ! echo "$out" | grep -q "providers/deepseek" || fail "fell back to anthropic:opus: $out"
+  # plain claude is judged on the install this session runs (--claude), not the hub default
+  out=$(env -u AGENT_CLAUDE WORK_DRY=1 bin/work --role builder --claude mywrapper projects/demo 2>&1) || fail "--claude wrapper falls back: $out"
+  echo "$out" | grep -q "mywrapper --settings" && echo "$out" | grep -q -- "--model opus" || fail "--claude wrapper: anthropic:opus: $out"
+  owner_conf 'HUB_ROLE_BUILDER="deepseek:deepseek-flash anthropic:opus"' 'HUB_CLAUDE=mywrapper'
+  out=$(env -u AGENT_CLAUDE WORK_DRY=1 bin/work --role builder --claude claude projects/demo 2>&1) || fail "--claude claude on a wrapper hub: $out"
+  echo "$out" | grep -q "providers/deepseek" || fail "--claude claude on a wrapper hub picks deepseek: $out"
+  : > "$WT_STORED"; rm -f hub.conf
+}
+with_focus_nogo() { local b; b="$(mktemp)"; cp bin/lib.sh "$b"; sed -i '' '/deepseek:focus)/d' bin/lib.sh
+  WORK_DRY=1 bin/work --role builder projects/demo; local r=$?; cp "$b" bin/lib.sh; rm -f "$b"; return "$r"; }
+role_one_m_context() {
+  printf '%s\n' 'HUB_ROLE_BUILDER="anthropic:opus[1m]"' > hub.conf
+  local out; out=$(WORK_DRY=1 bin/work --role builder projects/demo 2>&1) || fail "anthropic:opus[1m] pick: $out"
+  echo "$out" | grep -qF -- "--model opus\[1m\]" || fail "the session opens on opus[1m] (quoted for the launcher): $out"
+  rm -f hub.conf
+}
+sessions_show_role() {
+  rm -f hub.conf; local st f lp out; st="$(mktemp -d)"
+  printf '#!/bin/bash\nexec sleep 30\n' > "$WT/claude-stub"; chmod +x "$WT/claude-stub"
+  f=$(AGENT_STATE="$st" WORK_NO_OPEN=1 bin/work --force --role builder --claude claude-stub projects/demo 2>/dev/null | sed -n 's/^launcher: //p')
+  [ -x "$f" ] || fail "launcher written for --role"
+  AGENT_STATE="$st" PATH="$WT:$PATH" bash "$f" & lp=$!
+  for _ in $(seq 1 50); do [ -f "$st/sessions/demo.$lp" ] && break; sleep 0.1; done
+  out=$(AGENT_STATE="$st" bin/sessions)
+  kill "$(pgrep -P "$lp" | head -1)" 2>/dev/null; wait "$lp" 2>/dev/null
+  echo "$out" | head -1 | grep -q " STARTED  *ROLE  *STATUS " || fail "header has ROLE: $out"
+  echo "$out" | grep -q "^demo  *projects/demo .*Z  *builder  *- " || fail "the session shows its role: $out"
+}
+builder_default_opus() {
+  printf '%s\n' 'HUB_MODEL=sonnet' > hub.conf
+  assert_eq "$( . bin/lib.sh; role_pick builder; echo "$ROLE_PICK")" "anthropic:opus" "default builder pick"
+  local out; out=$(WORK_DRY=1 bin/work --role builder projects/demo 2>&1) || fail "default builder: $out"
+  echo "$out" | grep -q -- "--model opus" || fail "default builder opens on opus (the role wins over HUB_MODEL): $out"
+  rm -f hub.conf
+}
+for t in role_sets_provider_and_model role_follows_hub_conf role_excludes_model_and_provider unknown_role_refused \
+  no_usable_candidate role_keeps_provider_gates sessions_show_role builder_default_opus role_one_m_context; do "$t"; done
+cp "$WT/secret.real" bin/secret
 echo ok

@@ -1,6 +1,6 @@
 # C2: `bin/work --role` opens a focus agent on its role's model
 
-Status: Ready for development (2026-11-21). Risk: medium.
+Status: **Done (2026-11-21)**: `bash tests/run.sh` green (28 of 28 test files ok, exit 0) after the quick review's 3 fixes. Risk: medium.
 Owner's intent (2026-11-21): the orchestrator and builders run on the models the owner picks, any provider; default
 Anthropic Opus 5.5. Roles table: `bin/lib.sh` `role_pick` (contract `.ade/context/providers.md`, "Roles").
 Verification command: `bash tests/run.sh`.
@@ -20,3 +20,6 @@ model, through the existing `--provider`/`--model` path and all its gates (key p
 | 6 | The chosen provider's gates still apply (a missing key refuses before launch) | `role_keeps_provider_gates` |
 | 7 | `bin/sessions` shows the role for a session started with `--role` | `sessions_show_role` |
 | 8 | Default `builder` with no hub.conf entry is `anthropic:opus` | `builder_default_opus` |
+
+## Verification
+Reviewer run (2026-11-21, after merging main): `bash tests/run.sh` → 28 ok, 0 FAIL, exit 0. Quick review: 3 findings fixed (`[1m]` models, focus gate falls back, `--claude` used for the pick).
