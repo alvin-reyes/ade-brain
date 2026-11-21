@@ -1,4 +1,4 @@
-# 0004: Three repos: methodology, brain, skills
+# 0004: The better-ade repos: method, agents, brain, skills, app
 
 - Status: Accepted for ade-method and ade-brain (owner, 2026-11-21). ade-skills: Proposed, until its first plugin ships
   (design note `docs/plans/2026-11-21-ade-skills.md`).
@@ -6,12 +6,13 @@
   by section 5, lean mode, which exists only here), and model assignments were split across ADE, ade-method and the hub.
   Merging the two repos was considered and rejected: ADE vendors ade-method into every project at a pinned ref, while
   ade-brain is copied once per hub and changes daily on main.
-- Decision: one job per repo, all three in the better-ade GitHub org.
+- Decision: one job per repo, all in the better-ade GitHub org.
 
 | Repo | Job | Holds | Never holds |
 |---|---|---|---|
-| ade-method | How agents work | roles, `rules.md`, BMAD v4, the *format* of the context store and decision log | stored context, secrets |
+| ade-method | How agents work | `rules.md`, the 4 core roles (product, architect, developer, reviewer), BMAD v6 overrides and skill lists, the *format* of the context store | stored context, secrets, BMAD v4 |
 | ade-brain | What agents know | memory, journal, folder `STATE.md`, brain index, session logs, personas, and the orchestrator (`bin/work`, `sessions`, `models`, `keys`, `agent`, `sync`) | the methodology (it takes `rules.md` from ade-method) |
+| ade-agent-registry | Specialist agents, loaded only when a task needs one | frontend, backend, devops, sysadmin, qa, security-reviewer, analyst, monitor, support | the core roles (ade-method) |
 | ade-skills | What agents can do | predefined skills, plugins and MCP server configs devs use (git, Gmail, ClickUp, custom MCP servers); devs add more by PR | BMAD (ADE ships v6), secrets |
 
   1. **Project context stays in each project's repo.** `.ade/context/` and `.ade/knowledge/` are checked in with the code,
@@ -22,6 +23,14 @@
   3. **Secrets live only in ade-brain's Keychain service** (`bin/keys`, `bin/secret`). ade-skills names a key, never
      holds one, and follows ADR 0002's rule that a key is never placed in the environment: OAuth for remote MCP servers
      where offered, otherwise a helper command that calls `bin/secret`.
+
+| ade-terminal | The app (was better-agentic-ide) | terminals, picker, project setup; vendors ade-method | the method itself |
+| ade-website | The public site | ade.ardata.tech; copies the installers from ade-terminal | project documents |
+
+  4. **Later decisions (owner, 2026-11-21):** ade-method v2 was rebuilt from scratch (v1 tagged `v1-final`); BMAD v6
+     only, tracking the latest upstream; review scales with risk; the orchestrator and builders run on any provider,
+     default Anthropic Opus 5.5; every work order is a BMAD ticket (trackers such as ClickUp as stores, via plugins);
+     users include tech support people. A task queue (ade-queue) was considered and dropped.
 
 - Consequences:
   - Follow-up stories: (a) `bin/brain index` reads `.ade/context/**` and `.ade/knowledge/**` from each folder's
