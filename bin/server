@@ -5,7 +5,9 @@
 #   1. the host's safety, one row each, read-only: ssh-password (SSH password login off), ssh-root (root login off),
 #      firewall (ufw active, allowing SSH only), upgrades (unattended security upgrades on). A failing row stops the
 #      install before anything changes, unless it is accepted with --accept-risk <row> (repeatable);
-#   2. the missing packages of a fixed list (apt; the distribution's versions), then the missing tools at pinned
+#   2. the missing packages of a fixed list (apt; the distribution's versions): ade's tool set (git python3 tmux gh) and
+#      the hub's needs, plus the file viewer's extras (bat glow poppler-utils chafa yazi) where the archive has them
+#      (each one it lacks is skipped with a note), then the missing tools at pinned
 #      versions (server_pin): gitleaks (checksum-verified, ~/.local/bin), bun, Claude Code (their own installers),
 #      Playwright's Chromium with its system dependencies (story V3);
 #      what is already there is left alone, so a rerun changes nothing;
@@ -21,8 +23,11 @@ set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"
 USAGE="usage: bin/server install [--dry-run] [--accept-risk ssh-password|ssh-root|firewall|upgrades]... | bin/server status"
 ROWS="ssh-password ssh-root firewall upgrades"
 # the fixed package list (apt) and the pinned tool versions
-# (xvfb x11vnc novnc websockify: the SSH-tunnelled sign-in view of bin/browser login, story V3)
-server_packages() { echo "git python3 tmux curl ca-certificates nodejs npm ufw unattended-upgrades xvfb x11vnc novnc websockify"; }
+# required (ade's tool set first: git python3 tmux gh; xvfb x11vnc novnc websockify: the SSH-tunnelled sign-in view of
+# bin/browser login, story V3), then the extras for ade's file viewer, installed where this system's archive has them
+# (apt-cache) and skipped with a note otherwise
+server_packages() { echo "git python3 tmux gh curl ca-certificates nodejs npm ufw unattended-upgrades xvfb x11vnc novnc websockify"; }
+server_extras() { echo "bat glow poppler-utils chafa yazi"; }
 server_pin() { case "$1" in gitleaks) echo 8.30.1 ;; bun) echo 1.3.9 ;; claude) echo 2.1.330 ;; playwright) echo 1.64.1 ;; *) return 1 ;; esac; }
 DRY=0; ACCEPT=" "
 run() { if [ "$DRY" = 1 ]; then printf '+'; printf ' %q' "$@"; echo; else "$@"; fi; }
@@ -51,7 +56,11 @@ safety() {   # prints the rows; returns 1 when a row fails and is not accepted
   done
   return "$bad"
 }
-apt_missing() { local p m=""; for p in $(server_packages); do dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q 'ok installed' || m="$m $p"; done; echo "${m# }"; }
+installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'ok installed'; }
+apt_missing() { local p m=""; for p in $(server_packages); do installed "$p" || m="$m $p"; done; echo "${m# }"; }
+# extras_missing: the extras not installed that the archive has; a note on stderr for each it lacks
+extras_missing() { local p m=""; for p in $(server_extras); do installed "$p" && continue
+    if apt-cache show "$p" >/dev/null 2>&1; then m="$m $p"; else echo "$p: not packaged for this system; skipped" >&2; fi; done; echo "${m# }"; }
 have() { command -v "$1" >/dev/null 2>&1 || [ -x "$HOME/.local/bin/$1" ] || [ -x "$HOME/.bun/bin/$1" ]; }
 sha256() { if command -v sha256sum >/dev/null; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
 install_gitleaks() {   # the release tarball and its checksums file, verified, into ~/.local/bin
@@ -88,9 +97,9 @@ case "${1:-}" in
       echo "(dry run: the install would stop here; the rest is what it would do once safe)"
     fi
     echo "== packages"
-    m="$(apt_missing)"
+    m="$(apt_missing)"; x="$(extras_missing 2>&1 >/dev/null)"; [ -z "$x" ] || echo "$x"; m="$m $(extras_missing 2>/dev/null)"; m="$(echo $m)"
     if [ -n "$m" ]; then run sudo apt-get update -q && run sudo apt-get install -y -q --no-install-recommends $m || { echo "server: apt-get install failed" >&2; exit 1; }
-    else echo "all present: $(server_packages)"; fi
+    else echo "all present: $(server_packages) (and every packaged extra: $(server_extras))"; fi
     echo "== tools"
     if have gitleaks; then echo "gitleaks: present"; else install_gitleaks || exit 1; fi
     if have bun; then echo "bun: present"; else run bash -c "curl -fsSL https://bun.sh/install | bash -s bun-v$(server_pin bun)" || { echo "server: bun install failed" >&2; exit 1; }; fi
