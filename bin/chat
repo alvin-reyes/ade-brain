@@ -84,7 +84,8 @@ case "${1:-}" in
     cd "$H" || refuse "cannot enter $H"
     # launchd gives no terminal, and claude's interface needs one: script(1) gives it a pseudo-terminal, fed a stdin
     # that never ends while this process lives (an end of input would reach claude as Ctrl-D)
-    if [ "$TTY" = 0 ]; then exec 0< <(exec >/dev/null 2>&1; while kill -0 $$ 2>/dev/null; do sleep 5; done); cmd=(script -q /dev/null "${cmd[@]}"); fi
+    if [ "$TTY" = 0 ]; then exec 0< <(exec >/dev/null 2>&1; while kill -0 $$ 2>/dev/null; do sleep 5; done); 
+      if script_is_util_linux; then cmd=(script -q -e -c "$(printf '%q ' "${cmd[@]}")" /dev/null); else cmd=(script -q /dev/null "${cmd[@]}"); fi; fi
     ttl="${AGENT_CHAT_ENV_TTL:-60}"; case "$ttl" in ''|*[!0-9]*) ttl=60 ;; esac; [ "$ttl" -le 60 ] || ttl=60
     for c in $CHANNELS; do d="$(channel_dir "$c")"; mkdir -p "$d" && chmod 700 "$d" || refuse "cannot make $d"
       export "$(channel_state_env "$c")=$d"; rm -f "$d/bot.pid" "$d/.env"
@@ -100,9 +101,14 @@ case "${1:-}" in
     # the lock stays with the session (same pid); it is stale once the session is gone
     if [ "$TTY" = 0 ]; then exec "${cmd[@]}" >/dev/null 2>&1; else exec "${cmd[@]}"; fi ;;
   stop) [ $# -eq 1 ] || usage
-    if [ -f "$LA/$LABEL.plist" ]; then U="gui/$(id -u)"
-      launchctl disable "$U/$LABEL" 2>/dev/null; launchctl bootout "$U/$LABEL" 2>/dev/null
-      echo "disabled $LABEL (bin/schedule install enables it again)"; fi
+    # the scheduled job would restart it: disabled through the platform layer (launchd, or systemd on Linux, story V1)
+    if [ "$(platform)" = macos ]; then
+      if [ -f "$LA/$LABEL.plist" ]; then launchd_disable "$LABEL"; launchd_bootout "$LABEL"
+        echo "disabled $LABEL (bin/schedule install enables it again)"; fi
+    else CU="ade-$(hub_name)-chat.service"
+      if [ -e "$(systemd_user_dir)/$CU" ]; then systemd_user disable --now "$CU" >/dev/null 2>&1
+        echo "disabled $CU (bin/schedule install enables it again)"; fi
+    fi
     if p="$(running_pid)"; then kill "$p" 2>/dev/null; i=0
       while kill -0 "$p" 2>/dev/null; do i=$((i+1)); [ $i -lt 100 ] || { echo "chat: pid $p still runs after 10 s; the pid file is kept" >&2; exit 1; }; sleep 0.1; done
       rm -f "$PIDF"; rm -rf "$LOCK"; echo "stopped (pid $p)"
