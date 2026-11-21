@@ -25,7 +25,16 @@ def owners():
 
 
 def send(argv):
-    ref = argv[1] if argv[:1] == ["--buttons"] and len(argv) > 1 else None
+    ref = done = None; skip = 0; i = 0
+    while i < len(argv):
+        if argv[i] == "--buttons" and i + 1 < len(argv): ref = argv[i + 1]; i += 2
+        elif argv[i] == "--done" and i + 1 < len(argv): done = argv[i + 1]; i += 2
+        elif argv[i] == "--skip-first": skip = 1; i += 1
+        else: return 2
+    got = set()
+    if done:
+        try: got = set(l.strip() for l in open(done).read().splitlines()[skip:] if l.strip())
+        except OSError: pass
     fake = os.environ.get("AGENT_CHAT_SEND", "")
     data = sys.stdin.read()
     token = ""
@@ -39,6 +48,7 @@ def send(argv):
     if not to: print("chat: not paired (no allowFrom in access.json): nothing sent", file=sys.stderr); return 1
     ok = True
     for chat_id in to:
+        if chat_id in got: continue   # it reached this owner on an earlier try
         p = {"chat_id": chat_id, "text": text[:4096]}
         if ref:
             p["reply_markup"] = {"inline_keyboard": [[{"text": "Approve", "callback_data": "ask:approve:" + ref},
@@ -46,18 +56,25 @@ def send(argv):
         body = json.dumps(p, ensure_ascii=False)
         if fake:
             import subprocess
-            try: ok = subprocess.run([fake], input=body.encode(), timeout=30).returncode == 0 and ok
-            except Exception: ok = False
+            try: one = subprocess.run([fake], input=body.encode(), timeout=30).returncode == 0
+            except Exception: one = False
+            ok = one and ok; mark(done, chat_id, one)
             continue
         api = os.environ.get("AGENT_TELEGRAM_API", "https://api.telegram.org").rstrip("/")
         req = urllib.request.Request("%s/bot%s/sendMessage" % (api, token), data=body.encode(),
                                      headers={"Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=20) as r: ok = json.load(r).get("ok") is True and ok
+            with urllib.request.urlopen(req, timeout=20) as r: one = json.load(r).get("ok") is True
         except Exception as e:
             # never the URL: it holds the token
-            print("chat: send failed (%s)" % e.__class__.__name__, file=sys.stderr); ok = False
+            print("chat: send failed (%s)" % e.__class__.__name__, file=sys.stderr); one = False
+        ok = one and ok; mark(done, chat_id, one)
     return 0 if ok else 1
+
+
+def mark(done, chat_id, sent):
+    if done and sent:
+        with open(done, "a") as f: f.write(chat_id + "\n")
 
 
 def width(s):
