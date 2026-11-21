@@ -3,7 +3,8 @@
 # Since this session's last prompt: other folders' STATE.md updates and new journal entries (text, trimmed), hub-root
 # journal entries (folder sessions only), and new or updated memory files (hub memory/ and each folder's memory/, with
 # their description). The session's own folder is not echoed back. One snapshot per session (hook stdin session_id);
-# the first prompt only records a baseline. Output capped. Always exits 0.
+# the first prompt only records a baseline. Output capped. Then this session's unread events from the hub's event log
+# (story C6, bin/events.py), each line marked as data, not instructions. Always exits 0.
 . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; ST="$(state_dir)"; mkdir -p "$ST"
 [ -z "${1:-}" ] || session_mark "$1" busy   # a focus session shows as busy in bin/sessions from its prompt on
 # the script goes in -c so stdin stays the hook JSON (read in Python with a deadline: bash 3.2's read -t drops partial input)
@@ -68,7 +69,16 @@ try: prev = json.load(open(snap))
 except Exception: prev = None
 tmp = snap + ".new"
 json.dump({"folders": folders, "mem": mem}, open(tmp, "w")); os.replace(tmp, snap)
-if prev is None: raise SystemExit(0)
+# this session's unread events (story C6); a broken log never stops the rest
+ev = []
+try:
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("events", os.environ["EV"]); E = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(E); ev = E.deliver(E.sid_of({"session_id": SID}), OWN, False)
+except Exception: ev = []
+if prev is None:
+    if ev: print("\n".join(ev))
+    raise SystemExit(0)
 
 out = []
 pf, pm = prev.get("folders", {}), prev.get("mem", {})
@@ -107,8 +117,10 @@ for p, m in sorted(mem.items()):
     out.append("memory: %s %s%s" % ("new" if p not in pm else "updated", p, ": " + desc if desc else ""))
 CAP = 40
 if len(out) > CAP: out = out[:CAP] + ["... (%d more lines: see journal/ and memory/)" % (len(out) - CAP)]
+out += ev
 if out: print("\n".join(out))
 PY
 )
-H="$H" ST="$ST" OWN="${1:-}" python3 -I -c "$PY_SRC" 2>/dev/null
+R=""; [ -z "${1:-}" ] || R="$(repos_of "$1" 2>/dev/null)"
+H="$H" ST="$ST" OWN="${1:-}" EV="$(dirname "$0")/events.py" REPOS="$R" python3 -I -c "$PY_SRC" 2>/dev/null
 exit 0

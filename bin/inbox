@@ -1,0 +1,10 @@
+#!/bin/bash
+# bin/inbox [folder]: PostToolUse hook (hub root and every folder; no model). Records a Bash `git push` as a `pushed`
+# event (repo, branch) and an Edit/Write under a checkout's .ade/context/ as a `contract` event (repo, path), then
+# delivers this session's unread events from $(state_dir)/events.jsonl as additionalContext JSON, at most once per 60 s
+# per session (hook stdin session_id), each line marked as data, not instructions. Story C6, .ade/context/events.md.
+# Reads stdin for at most 1 s; always exits 0 (a broken log never blocks a session).
+. "$(dirname "$0")/lib.sh" 2>/dev/null || exit 0
+F="${1:-}"; R=""; [ -z "$F" ] || R="$(repos_of "$F" 2>/dev/null)"
+H="$(hub_root)" ST="$(state_dir)" REPOS="$R" python3 -I "$(dirname "$0")/events.py" hook-tool "$F" 2>/dev/null
+exit 0
