@@ -652,10 +652,15 @@ secret_names() {
 }
 # Browser profiles (story V3, .ade/context/browser.md): one per folder, opt-in in hub.conf, never shared.
 browser_root() { echo "${AGENT_BROWSER_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/ade/browser}"; }
-# browser_profile_var <folder>: HUB_BROWSER_PROFILE_<agent name upper-case, - and . as _> (projects/acme -> ..._ACME)
-browser_profile_var() { printf 'HUB_BROWSER_PROFILE_%s' "$(agent_name "$1" | tr 'a-z.-' 'A-Z__')"; }
+# browser_profile_key <folder>: the full folder path with / as - (projects/acme -> projects-acme, ops/x -> ops-x), so
+# projects/ops-x and ops/x never share a profile or a switch
+browser_profile_key() { echo "${1/\//-}"; }
+# browser_profile_var <folder>: HUB_BROWSER_PROFILE_<key upper-case, - as _> (projects/acme -> ..._PROJECTS_ACME)
+browser_profile_var() { printf 'HUB_BROWSER_PROFILE_%s' "$(browser_profile_key "$1" | tr 'a-z-' 'A-Z_')"; }
 browser_profile_on() { local v; v="$(browser_profile_var "$1")"; [ "${!v:-}" = 1 ]; }
-browser_profile_path() { echo "$(browser_root)/$(agent_name "$1")"; }
+browser_profile_path() { echo "$(browser_root)/$(browser_profile_key "$1")"; }
+# browser_mcp_pkg: the one pinned Playwright MCP: bin/browser run execs it, bin/server installs its own Playwright's Chromium
+browser_mcp_pkg() { echo "@playwright/mcp@0.0.84"; }
 # browser_profile_dir <folder>: the profile folder, made 0700; refused (exit 1) when it, or the root, is a link or not
 # a 0700 folder of this user's
 browser_profile_dir() {
