@@ -79,12 +79,17 @@
   pending ask; an answered ask never changes; each answer is one journal line `chat: <approved|denied> <ref>: <question>`.
 
 ## Recovery (story R1)
-- `bin/chat say <text>`: one message to the paired owner. Exit 0 sent; 1 not sent, kept in
-  `<state dir>/chat/pending/<epoch>.<pid>.txt` (sent first, oldest first, by the next `forward`, removed once sent);
-  2 not paired (no `access.json`), nothing kept.
+- `bin/chat say <text>`: one message to the paired owners. Exit 0 sent to all; 1 not sent to all, kept in
+  `<state dir>/chat/pending/<epoch>.<pid>.txt` with `<m>.done` (the owners it reached, never sent it again) and
+  `<m>.tries`; 2 not paired (no `access.json`), nothing kept. `forward` tries each pending message first, but one that
+  fails never holds back the rest or the agents' events; after 10 tries or a day it is dropped (journal `chat: dropped
+  a message after N tries`). The agents' events get the same per-owner record (`chat/forward.done`, `forward.tries`):
+  after 10 failed tries the line is dropped, journaled, and the cursor moves on.
 - The forwarder loop backs off while sends fail: `chat_backoff` in `bin/lib.sh` doubles the wait up to 8 x
   `AGENT_CHAT_FORWARD_EVERY` (15 -> 30 -> 60 -> 120 s) and returns to it after a run that worked.
-- `bin/chat start` runs `bin/recover` first. A service start (`AGENT_CHAT_SERVICE=1`, set by the launchd job) counts
-  itself in `<state dir>/chat/service-starts`; with 3 already in the last 10 minutes it gives up: `<state dir>/chat/gave-up`,
+- `bin/chat start` runs `bin/recover` once its hub-name claim succeeds. A service start (`AGENT_CHAT_SERVICE=1`, set by
+  the launchd job) records itself in `<state dir>/chat/service-starts`; a heartbeat writes `chat/alive` ("<start>
+  <last seen>") every 10 s while the session lives. A start after 3 sessions in a row that each lived under 60 s
+  (`chat/service-quick`) gives up: `<state dir>/chat/gave-up`,
   a journal line, "login expired: run claude once ..." to the chat, `launchctl disable` + `bootout` of the job,
-  exit 1. A start from a terminal clears both files. Tests never reach the Bot API (`AGENT_TELEGRAM_API` in `make_hub`).
+  exit 1. A start from a terminal, or `bin/schedule install` with chat on, clears these files. Tests never reach the Bot API (`AGENT_TELEGRAM_API` in `make_hub`).

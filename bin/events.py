@@ -106,7 +106,7 @@ def for_me(ev, own, repos):
 
 
 def _open():
-    fd = os.open(LOG, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    fd = os.open(LOG, os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)   # read: the last byte (append)
     if not stat.S_ISREG(os.fstat(fd).st_mode): os.close(fd); raise OSError("not a file")
     return fd
 
@@ -136,6 +136,9 @@ def append(ev):
             os.replace(LOG, LOG + ".1")   # readers see a new inode; waiting writers reopen (above)
             nfd = _open()                 # a writer that just started may have made it already: append to it
             os.close(fd); fd = nfd
+        # a torn last line (a writer killed mid-write): start after a line end, so this event is a whole line
+        end = os.fstat(fd).st_size
+        if end and os.pread(fd, 1, end - 1) != b"\n": line = b"\n" + line
         return os.write(fd, line) == len(line)
     finally:
         os.close(fd)
@@ -454,10 +457,14 @@ def repair(check):
         if size:
             os.lseek(fd, max(0, size - (1 << 20)), 0); tail = os.read(fd, 1 << 20)
             if not tail.endswith(b"\n"):
-                keep = size - len(tail) + tail.rfind(b"\n") + 1 if b"\n" in tail else 0
-                print("event log: %s a torn last line (%d bytes)" % ("has" if check else "dropped", size - keep))
-                if not check: os.ftruncate(fd, keep); os.fsync(fd)
-                size = keep
+                if b"\n" not in tail:
+                    # never cut before the window read: the torn bytes stay (writers start a new line after them)
+                    print("event log: not repaired: no line end in the last %d bytes (readers skip it)" % len(tail))
+                else:
+                    keep = size - len(tail) + tail.rfind(b"\n") + 1
+                    print("event log: %s a torn last line (%d bytes)" % ("has" if check else "dropped", size - keep))
+                    if not check: os.ftruncate(fd, keep); os.fsync(fd)
+                    size = keep
         ino = os.fstat(fd).st_ino
     finally:
         os.close(fd)
