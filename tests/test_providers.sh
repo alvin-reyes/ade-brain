@@ -33,7 +33,7 @@ L=$(printf '%s\n' "$@" | grep -o 'bash -l [^"]*' | head -1); L="${L#bash -l }"
 [ -f "$L" ] || { echo "osascript stub: no launcher in [$*]" >&2; exit 1; }
 mkdir -p "$SP_CAP"; cp "$L" "$SP_CAP/launcher"
 m=$(grep -o -- "--settings '[^']*'" "$L" | head -1 | sed "s/^--settings '//; s/'\$//")
-[ -n "$m" ] && [ -f "$m" ] && { cp "$m" "$SP_CAP/settings.json"; stat -f %Lp "$m" > "$SP_CAP/settings.mode"; echo "$m" > "$SP_CAP/settings.path"; }
+[ -n "$m" ] && [ -f "$m" ] && { cp "$m" "$SP_CAP/settings.json"; python3 -c 'import os, sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777)[2:])' "$m" > "$SP_CAP/settings.mode"; echo "$m" > "$SP_CAP/settings.path"; }
 bash "$L" > "$SP_CAP/launcher.out" 2>&1
 STUB
 # the fake engine: writes a marker, its argv, whether its environment holds the key, and a /model-style settings write

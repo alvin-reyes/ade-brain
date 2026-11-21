@@ -53,7 +53,7 @@ repos_of() {
 }
 # stale_repos <folder>: repos whose HEAD commit is newer than STATE.md's mtime, as "<repo> <hash>" lines
 stale_repos() {
-  local s m r ct; s="$(hub_root)/$1/STATE.md"; [ -f "$s" ] || return 0; m=$(stat -f %m "$s")
+  local s m r ct; s="$(hub_root)/$1/STATE.md"; [ -f "$s" ] || return 0; m=$(file_mtime "$s")
   repos_of "$1" | while IFS= read -r r; do
     ct=$(git -C "$r" log -1 --format=%ct 2>/dev/null) || continue
     [ -n "$ct" ] && [ "$ct" -gt "$m" ] && echo "$r $(git -C "$r" rev-parse HEAD)"
@@ -421,7 +421,7 @@ _sync_lock_stale() {
   op=$(cat "$1/pid" 2>/dev/null)
   case "$op" in
     ""|*[!0-9]*)
-      m=$(stat -f %m "$1" 2>/dev/null); [ -n "$m" ] || return 1
+      m=$(file_mtime "$1"); [ -n "$m" ] || return 1
       [ $(( $(command date +%s) - m )) -gt "$(sync_lock_grace)" ]; return ;;
   esac
   ps -p "$op" >/dev/null 2>&1 || return 0
@@ -440,11 +440,11 @@ _sync_lock_reap() {
   _sync_lock_stale "$k" || return 1
   [ -n "$(find "$g" -maxdepth 0 -mmin +1 2>/dev/null)" ] && rm -rf "$g"
   mkdir "$g" 2>/dev/null || return 1
-  i=$(stat -f %i "$k" 2>/dev/null)
+  i=$(file_inode "$k")
   if [ -n "$i" ] && _sync_lock_stale "$k"; then
     rm -rf "$s"
     if mv "$k" "$s" 2>/dev/null; then
-      if [ "$(stat -f %i "$s" 2>/dev/null)" = "$i" ]; then rm -rf "$s"; "$lg" "removed stale lock"; r=0
+      if [ "$(file_inode "$s")" = "$i" ]; then rm -rf "$s"; "$lg" "removed stale lock"; r=0
       else [ -e "$k" ] || mv "$s" "$k" 2>/dev/null; rm -rf "$s"; fi
     fi
   fi
@@ -453,3 +453,118 @@ _sync_lock_reap() {
 }
 # sync_lock_release <lock>: removes the lock only when this process owns it
 sync_lock_release() { [ "$(cat "$1/pid" 2>/dev/null)" = "$$" ] && rm -rf "$1"; return 0; }
+# The platform layer (story V1, .ade/context/platform.md): every macOS-only call in bin/ goes through here, so the same
+# hub runs on macOS and on Linux (Ubuntu). AGENT_PLATFORM=macos|linux overrides the detection (tests).
+platform() { case "${AGENT_PLATFORM:-}" in macos|linux) echo "$AGENT_PLATFORM"; return 0 ;; esac
+  if [ "$(uname -s)" = Darwin ]; then echo macos; else echo linux; fi; }
+# File times, inodes, modes and owners: GNU stat -c or BSD stat -f, whichever this stat is (a Mac may have GNU first).
+if stat -c %Y / >/dev/null 2>&1; then _stat() { stat -c "$1" "$2"; }; _SF_M=%Y _SF_P=%a
+else _stat() { stat -f "$1" "$2"; }; _SF_M=%m _SF_P=%Lp; fi
+file_mtime() { _stat "$_SF_M" "$1" 2>/dev/null; }
+file_inode() { _stat %i "$1" 2>/dev/null; }
+file_mode() { _stat "$_SF_P" "$1" 2>/dev/null; }   # the permission bits in octal, e.g. 700
+file_owner() { _stat %u "$1" 2>/dev/null; }
+# Desktop notifications: macOS only (osascript); elsewhere nothing (bin/monitor writes an event instead).
+desktop_notify() { [ "$(platform)" = macos ] || return 0
+  osascript -e "display notification \"$(printf '%s' "$2" | tr -d '"\\')\" with title \"$(printf '%s' "$1" | tr -d '"\\')\"" 2>/dev/null; }
+# terminal_window <terminal|iterm> <launcher>: a new macOS Terminal or iTerm window running the launcher.
+terminal_window() {
+  if [ "$1" = iterm ]; then osascript -e "tell application \"iTerm\" to create window with default profile command \"bash -l $2\""
+  else osascript -e "tell application \"Terminal\" to do script \"bash -l $2\"" -e 'tell application "Terminal" to activate'; fi; }
+# tmux: focus sessions on Linux, and with AGENT_TERMINAL=tmux anywhere (ade-cli's `ade ui` attaches to ade-<hub>).
+# tmux turns . and : in a name into _, so names are made that way here, and targets are exact (=name).
+tmux_name() { printf '%s' "$1" | tr '.:' '__'; }
+tmux_hub_session() { echo "ade-$(tmux_name "$(hub_name)")"; }
+# tmux_taken <name>: 0 when a tmux session <name>, or a window <name> in the hub's session, already exists
+tmux_taken() { local n hs; n="$(tmux_name "$1")"; hs="$(tmux_hub_session)"
+  tmux has-session -t "=$n" 2>/dev/null && return 0
+  tmux has-session -t "=$hs" 2>/dev/null && tmux list-windows -t "=$hs" -F '#W' 2>/dev/null | grep -qxF -- "$n"; }
+# tmux_open <name> <dir> <launcher>: a new window in session ade-<hub> when it exists (left in the background), else a
+# detached session named <name>. Prints where it went: "window <hub session> <name>" or "session <name>".
+tmux_open() { local n hs c; n="$(tmux_name "$1")"; hs="$(tmux_hub_session)"; c="bash -l $(printf "'%s'" "$(printf '%s' "$3" | sed "s/'/'\\\\''/g")")"
+  if tmux has-session -t "=$hs" 2>/dev/null; then tmux new-window -d -t "=$hs:" -n "$n" -c "$2" "$c" && echo "window $hs $n"
+  else tmux new-session -d -s "$n" -c "$2" "$c" && echo "session $n"; fi; }
+# Scheduled jobs: launchd on macOS, systemd user units and timers on Linux (bin/schedule).
+launchd_domain() { echo "gui/$(id -u)"; }
+launchd_bootout() { launchctl bootout "$(launchd_domain)/$1" 2>/dev/null; }
+launchd_bootstrap() { launchctl bootstrap "$(launchd_domain)" "$1"; }
+launchd_loaded() { launchctl print "$(launchd_domain)/$1" >/dev/null 2>&1; }
+systemd_user_dir() { echo "${AGENT_SYSTEMD_USER_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"; }
+systemd_user() { systemctl --user "$@"; }
+# linger_on: user units run without a login session (a server); asks loginctl once
+linger_on() { local u; u="$(id -un)"; loginctl show-user "$u" -p Linger 2>/dev/null | grep -qx 'Linger=yes' || loginctl enable-linger "$u"; }
+# Secrets (bin/secret, bin/keys): the macOS Keychain; on Linux `pass` when installed and initialised, else a file store
+# under ~/.config/ade/secrets/<service>/ (dirs 0700, files 0600, refused when looser; bin/doctor calls it the weaker store).
+# A value only ever moves on stdin or in this shell's variables: never an argument of another program, the environment or a log.
+secret_store() { [ "$(platform)" = macos ] && { echo keychain; return 0; }
+  command -v pass >/dev/null 2>&1 && [ -f "$(pass_dir)/.gpg-id" ] && { echo pass; return 0; }
+  echo file; }
+secret_store_label() { case "$(secret_store)" in keychain) echo "the Keychain" ;; pass) echo "pass" ;; *) echo "the file store ($(secret_file_root))" ;; esac; }
+pass_dir() { echo "${PASSWORD_STORE_DIR:-$HOME/.password-store}"; }
+secret_file_root() { echo "${AGENT_SECRETS_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/ade/secrets}"; }
+# secret_name_ok <name>: a store key, never a path
+secret_name_ok() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; }
+# secret_store_refusal: why the store cannot be used (empty = it can): no security on macOS; a file store folder that is
+# not 0700 and the user's (it is made 0700 when missing); a service name that is not a plain name
+secret_store_refusal() {
+  local st d x; st="$(secret_store)"
+  case "$st" in
+    keychain) command -v security >/dev/null || echo "needs the macOS Keychain (the security command)"; return 0 ;;
+    pass) secret_name_ok "$(keychain_service)" || echo "the service name '$(keychain_service)' is not a plain name"; return 0 ;;
+  esac
+  secret_name_ok "$(keychain_service)" || { echo "the service name '$(keychain_service)' is not a plain name"; return 0; }
+  d="$(secret_file_root)"
+  for x in "$d" "$d/$(keychain_service)"; do
+    [ -d "$x" ] || ( umask 077; mkdir -p "$x" ) 2>/dev/null || { echo "cannot make $x"; return 0; }
+    [ "$(file_mode "$x")" = 700 ] && [ "$(file_owner "$x")" = "$(id -u)" ] ||
+      { echo "$x must be a 0700 folder of yours (it is $(file_mode "$x")); the file store refuses to run: chmod 700 $x"; return 0; }
+  done
+}
+_secret_path() { case "$(secret_store)" in pass) echo "ade/$(keychain_service)/$1" ;; file) echo "$(secret_file_root)/$(keychain_service)/$1" ;; esac; }
+# secret_get <name>: the value on stdout; exit 1 when not stored (or, in the file store, when the file is not 0600)
+secret_get() {
+  local p v; p="$(_secret_path "$1")"
+  case "$(secret_store)" in
+    keychain) security find-generic-password -s "$(keychain_service)" -a "$1" -w 2>/dev/null ;;
+    pass) v="$(pass show "$p" 2>/dev/null)" || return 1; printf '%s\n' "${v%%$'\n'*}" ;;
+    file) [ -f "$p" ] || return 1
+      [ "$(file_mode "$p")" = 600 ] && [ "$(file_owner "$p")" = "$(id -u)" ] || { echo "secret: $p must be a 0600 file of yours: chmod 600 $p" >&2; return 1; }
+      printf '%s\n' "$(cat "$p")" ;;
+  esac
+}
+secret_has() {
+  case "$(secret_store)" in
+    keychain) security find-generic-password -s "$(keychain_service)" -a "$1" >/dev/null 2>&1 ;;
+    pass) [ -f "$(pass_dir)/$(_secret_path "$1").gpg" ] ;;
+    file) [ -f "$(_secret_path "$1")" ] ;;
+  esac
+}
+# secret_put <name> <value>: store or replace (a shell function's argument: no process sees it), then read it back
+secret_put() {
+  local p t; p="$(_secret_path "$1")"
+  case "$(secret_store)" in
+    keychain) q() { local s="${1//\\/\\\\}"; printf '"%s"' "${s//\"/\\\"}"; }
+      # on stdin (security -i), so the value is never in a process argument; read back, since -i can hide a failure
+      printf 'add-generic-password -U -s %s -a %s -w %s\n' "$(q "$(keychain_service)")" "$(q "$1")" "$(q "$2")" | security -i >/dev/null 2>&1 ;;
+    pass) printf '%s\n' "$2" | pass insert -m -f "$p" >/dev/null 2>&1 ;;
+    file) t="$p.tmp.$$"; ( umask 077; printf '%s' "$2" > "$t" ) && chmod 600 "$t" && mv -f "$t" "$p" || { rm -f "$t"; return 1; } ;;
+  esac
+  [ "$(secret_get "$1" 2>/dev/null)" = "$2" ]
+}
+secret_forget() {
+  case "$(secret_store)" in
+    keychain) security delete-generic-password -s "$(keychain_service)" -a "$1" >/dev/null 2>&1 ;;
+    pass) secret_has "$1" && pass rm -f "$(_secret_path "$1")" >/dev/null 2>&1 ;;
+    file) [ -f "$(_secret_path "$1")" ] && rm -f "$(_secret_path "$1")" ;;
+  esac
+}
+# secret_names: the names stored for this hub's service (never values)
+secret_names() {
+  local d
+  case "$(secret_store)" in
+    keychain) security dump-keychain 2>/dev/null | awk -v s="$(keychain_service)" '/"svce"<blob>=/{x=($0 ~ "\"" s "\"")} x && /"acct"<blob>=/{gsub(/.*="|"$/,""); print; x=0}' | sort -u ;;
+    pass) d="$(pass_dir)/ade/$(keychain_service)"; [ -d "$d" ] && for f in "$d"/*.gpg; do [ -f "$f" ] && basename "$f" .gpg; done | sort ;;
+    file) d="$(secret_file_root)/$(keychain_service)"; [ -d "$d" ] && for f in "$d"/*; do [ -f "$f" ] && basename "$f"; done | grep -v '\.tmp\.[0-9]*$' | sort ;;
+  esac
+  return 0
+}

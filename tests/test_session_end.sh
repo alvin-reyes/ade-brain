@@ -53,7 +53,7 @@ st() { bash -c '. "$1"; proc_start "$2"' _ "$HUB/bin/lib.sh" "$1"; }   # proc_st
 
 CHECK=held_pipe_under_script_finishes; setup
 echo more >> projects/demo/STATE.md
-run_held 20 script -q /dev/null "$HUB/bin/session-end" projects/demo
+run_held 20 in_pty "$HUB/bin/session-end" projects/demo
 [ "$RC" != 124 ] || f "still running after 20 s (stdin read never returned)"
 committed || f "folder not committed"
 

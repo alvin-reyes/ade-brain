@@ -1,5 +1,5 @@
 #!/bin/bash
-# bin/doctor: what this Mac can reach (tools, GitHub, the code repos, the remote box, staging, stored secrets).
+# bin/doctor: what this machine can reach (tools, GitHub, the code repos, the remote box, staging, stored secrets).
 # Never prints a secret; always exits 0.
 . "$(dirname "$0")/lib.sh"; H="$(hub_root)"
 line() { printf '%-8s %-22s %s\n' "$1" "$2" "$3"; }
@@ -8,6 +8,14 @@ for t in claude gh git ssh node python3 curl gitleaks ${HUB_TOOLS:-}; do
   else line MISSING "$t" "not installed"; fi
 done
 line OK "claude install" "$(claude_cmd) ($(claude_home))"
+# the secret store (story V1): the Keychain, pass, or the weaker file store
+case "$(secret_store)" in
+  keychain) line OK "secrets" "the macOS Keychain (service $(keychain_service))" ;;
+  pass) line OK "secrets" "pass ($(pass_dir), service $(keychain_service))" ;;
+  *) w="$(secret_store_refusal)"
+     if [ -n "$w" ]; then line MISSING "secrets" "$w"
+     else line WARN "secrets" "file store $(secret_file_root): the weaker store (plain owner-only 0600 files); install and initialise pass for an encrypted one"; fi ;;
+esac
 m="$(claude_home)/projects/$(encode_path "$H")/memory"
 if [ -L "$m" ] && [ "$(readlink "$m")" = "$H/memory" ]; then line OK "hub memory link" "$m"; else line MISSING "hub memory link" "run bin/setup (links into $(claude_home))"; fi
 # a shell on another Claude account (its CLAUDE_CONFIG_DIR): sessions started from it keep their memory there
