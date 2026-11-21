@@ -1,7 +1,7 @@
 # 0004: The better-ade repos: method, agents, brain, skills, app
 
-- Status: Accepted for ade-method and ade-brain (owner, 2026-11-21). ade-skills: Proposed, until its first plugin ships
-  (design note `docs/plans/2026-11-21-ade-skills.md`).
+- Status: Accepted for all repos (owner, 2026-11-21); ade-skills shipped its
+  first slice (git, browser; design note `docs/plans/2026-11-21-ade-skills.md`).
 - Context: ade-method (named ade-setup until 2026-11-21) and ade-brain had started to overlap (`.ade/rules.md` here differs from ade-method's `rules.md` only
   by section 5, lean mode, which exists only here), and model assignments were split across ADE, ade-method and the hub.
   Merging the two repos was considered and rejected: ADE vendors ade-method into every project at a pinned ref, while
