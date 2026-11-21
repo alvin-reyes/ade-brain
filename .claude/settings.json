@@ -67,5 +67,6 @@
     "bmod-core-tools": "off",
     "bmod-method": "off",
     "bmod-toolsmith": "off"
-  }
+  },
+  "autoCompactEnabled": true
 }
