@@ -11,3 +11,6 @@ projects/*/.local/
 .local/
 .claude/settings.local.json
 reports/monitor/
+
+# Python bytecode written when hub scripts run
+__pycache__/
