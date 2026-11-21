@@ -1,6 +1,6 @@
 # C5: the orchestrator and its channels (Telegram first)
 
-Status: Ready for development (2026-11-21). Risk: high (a chat bot in front of the hub).
+Status: **Done (2026-11-21)** once CI (`bash tests/run.sh` on macOS) is green on this PR; one adversarial fix round (10 findings; the bot token is a short-lived 0600 file, owner decision). Risk: high (a chat bot in front of the hub).
 Owner's intent (2026-11-21): "the orchestrator needs to be accessible via chat (Telegram) for me." Accounts: Pro and
 Max (no org setting needed). Mechanism: Claude Code channels (research preview; https://code.claude.com/docs/en/channels.md),
 plugin `telegram@claude-plugins-official`. Verification command: `bash tests/run.sh`.
@@ -41,6 +41,8 @@ in; permission prompts are relayed to the owner; nothing skips permissions.
 | 8 | The hub CLAUDE.md template carries the forwarded-content rule | `claude_md_forwarded_content_rule` |
 | 9 | Channels come from `HUB_CHANNELS`; an unknown channel type exits 2 naming the known ones; `telegram` is the only type so far | `channels_from_conf` |
 | 10 | Each orchestrator keeps its channel state in its own folder (two hubs on one machine never share a bot token or allowlist) | `state_per_orchestrator` |
+| 11 | A start takes a lock before checking; a start without a terminal needs the allowlist policy and no groups; status shows groups and "channel not connected" when the bot is not up | `start_lock_and_access` |
+| 12 | A second hub with the same name is refused (start exit 2, no chat job) until it sets `HUB_NAME` | `same_folder_name` |
 
 ## Out of scope
 Other chat apps; group chats; permission relay internals (the plugin's); building our own bot.
