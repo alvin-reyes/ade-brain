@@ -59,4 +59,22 @@ mkdir -p .claude/skills/x repos/y; echo "# zebra skill" > .claude/skills/x/SKILL
 AGENT_OLLAMA_URL="$U" bin/brain index >/dev/null; bin/brain search zebra | grep -q . && fail "skills or repos indexed"
 bin/brain search >/dev/null 2>&1; assert_eq "$?" "2" "search needs a query"
 bin/brain nope >/dev/null 2>&1; assert_eq "$?" "2" "unknown command"
+# 5. story C4: each folder's code checkouts (ACCESS.md) add their .ade/context and .ade/knowledge Markdown, read-only
+C="$(mktemp -d)/demo-code"; mkdir -p "$C/.ade/context/decisions" "$C/.ade/knowledge" "$C/docs" "$C/src" "$C/.github"
+printf '# 0001 Pick walrus\nWe chose the walrus queue for jobs.\n' > "$C/.ade/context/decisions/0001-x.md"
+printf '# Ops\nThe narwhal cache warms at boot.\n' > "$C/.ade/knowledge/ops.md"
+printf '# Guide\nokapi docs only\n' > "$C/docs/guide.md"; printf '# Src\nokapi code\n' > "$C/src/readme.md"
+printf '# CI\nokapi ci\n' > "$C/.github/ci.md"; printf '# Other\nokapi other ade\n' > "$C/.ade/notes.md"
+printf 'okapi context text\n' > "$C/.ade/context/plain.txt"
+printf '| demo-code | %s | main | owner | none |\n| gone | /nonexistent/gone-code | main | owner | none |\n' "$C" >> projects/demo/ACCESS.md
+before=$(cd "$C" && find . -type f -exec stat -f '%N %m %z' {} + | sort)
+out=$(AGENT_OLLAMA_URL="$U" bin/brain index 2>&1) || fail "index with a missing checkout failed: [$out]"   # missing_checkout_skipped
+out=$(bin/brain search walrus queue); echo "$out" | head -1 | grep -q "decisions/0001-x.md:" || fail "project_decision_indexed: [$out]"
+echo "$out" | head -1 | grep -q "^projects/demo: demo-code/.ade/context/decisions/0001-x.md:1" || fail "results_name_project: [$out]"
+bin/brain search narwhal cache | head -1 | grep -q "^projects/demo: demo-code/.ade/knowledge/ops.md:" || fail "project_knowledge_indexed"
+bin/brain search okapi | grep -q . && fail "only_ade_folders: [$(bin/brain search okapi)]"
+after=$(cd "$C" && find . -type f -exec stat -f '%N %m %z' {} + | sort)
+assert_eq "$after" "$before" "checkout_untouched"
+rm "$C/.ade/context/decisions/0001-x.md"; AGENT_OLLAMA_URL="$U" bin/brain index >/dev/null
+bin/brain search walrus | grep -q "0001-x.md" && fail "removed_file_dropped"
 echo ok

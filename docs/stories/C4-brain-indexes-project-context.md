@@ -1,6 +1,6 @@
 # C4: the brain indexes each project's context
 
-Status: Ready for development (2026-11-21). Risk: low.
+Status: **Done (2026-11-21)**: `bash tests/run.sh` green (29 of 29 test files ok, exit 0), run by the reviewer; low risk, no review lenses. Risk: low.
 Owner's decision (2026-11-21, ADR 0004): project context stays in each project's repo; ade-brain indexes it read-only.
 Verification command: `bash tests/run.sh`.
 

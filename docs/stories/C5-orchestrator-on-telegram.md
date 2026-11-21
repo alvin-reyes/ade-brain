@@ -1,4 +1,4 @@
-# C5: reach the orchestrator from Telegram
+# C5: the orchestrator and its channels (Telegram first)
 
 Status: Ready for development (2026-11-21). Risk: high (a chat bot in front of the hub).
 Owner's intent (2026-11-21): "the orchestrator needs to be accessible via chat (Telegram) for me." Accounts: Pro and
@@ -6,6 +6,10 @@ Max (no org setting needed). Mechanism: Claude Code channels (research preview; 
 plugin `telegram@claude-plugins-official`. Verification command: `bash tests/run.sh`.
 
 ## Goal
+Per the orchestrators-and-channels ADR: the hub's orchestrator is a named session with a list of channels in
+hub.conf (`HUB_ORCHESTRATOR`, `HUB_CHANNELS`); each channel type supplies its plugin, secret, pairing and state folder.
+This story builds the channel layer and its first type, `telegram`.
+
 `bin/chat start|stop|status|setup` runs the hub's main session (the orchestrator) with the Telegram channel attached,
 kept alive by a launchd job, so the owner can talk to it from Telegram. Only the owner's paired Telegram account gets
 in; permission prompts are relayed to the owner; nothing skips permissions.
@@ -35,6 +39,8 @@ in; permission prompts are relayed to the owner; nothing skips permissions.
 | 6 | `stop` ends it; `status` reports running/stopped and the policy, never the token or Telegram ids | `stop_and_status` |
 | 7 | `bin/schedule install` adds the chat job only with `HUB_CHAT=telegram`, and removes it otherwise | `schedule_installs_chat_job` |
 | 8 | The hub CLAUDE.md template carries the forwarded-content rule | `claude_md_forwarded_content_rule` |
+| 9 | Channels come from `HUB_CHANNELS`; an unknown channel type exits 2 naming the known ones; `telegram` is the only type so far | `channels_from_conf` |
+| 10 | Each orchestrator keeps its channel state in its own folder (two hubs on one machine never share a bot token or allowlist) | `state_per_orchestrator` |
 
 ## Out of scope
 Other chat apps; group chats; permission relay internals (the plugin's); building our own bot.
