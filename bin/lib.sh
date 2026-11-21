@@ -92,6 +92,9 @@ provider_field() {
     glm:label) echo "z.ai API key" ;;
     glm:owner_only) echo 1 ;;
     glm:model|glm:opus|glm:sonnet|glm:haiku|glm:small) echo "unconfirmed" ;;
+    gemini:secret) echo "gemini-api-key" ;;
+    gemini:label) echo "Gemini API key" ;;
+    gemini:owner_only) echo 1 ;;
     *) return 1 ;;
   esac
 }
@@ -102,6 +105,8 @@ provider_feature_go() {
     deepseek:agents) return 0 ;;
     deepseek:delegation) return 0 ;;
     deepseek:effort) return 0 ;;
+    gemini:focus) return 0 ;;
+    gemini:delegation) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -118,7 +123,10 @@ provider_model_id() { case "$2" in opus|sonnet|haiku) provider_field "$1" "$2" ;
 provider_hub_refusal() {
   local o; o="$(provider_field "$1" owner_only)"
   [ "$o" = 0 ] || [ "${HUB_OWNED_BY_OWNER:-}" = 1 ] && return 0
-  if [ "$o" = 1 ]; then
+  if [ "$1" = gemini ]; then
+    [ "${HUB_GEMINI_CLIENT_APPROVED:-}" = 1 ] && return 0
+    echo "gemini runs only in the owner's own hubs (HUB_OWNED_BY_OWNER=1), or in a client hub whose client approved it (HUB_GEMINI_CLIENT_APPROVED=1 in hub.conf): Google's unpaid API and free-login terms let it use prompts and code to improve its products (ADR 0002)"
+  elif [ "$o" = 1 ]; then
     echo "$1 is only for the owner's own hubs (HUB_OWNED_BY_OWNER=1 in hub.conf): its terms allow training on API data and store it in the People's Republic of China (ADR 0002)"
   else
     echo "$1 has no owner_only value in bin/lib.sh, so it is refused outside the owner's own hubs (HUB_OWNED_BY_OWNER=1 in hub.conf, ADR 0002)"
@@ -201,6 +209,80 @@ s["env"] = env; s["apiKeyHelper"] = helper; s["skipWebFetchPreflight"] = True
 json.dump(s, open(dst, "w"), indent=2)
 PY
 }
+# Engines (story E1; contract .ade/context/engines.md "Gemini CLI engine", ADR 0002): the CLI a role entry runs in.
+# claude = Claude Code (anthropic and every provider row with a base_url); gemini = the Gemini CLI, signed in with its
+# own Google login or a stored Gemini API key. A gemini session never gets a Claude Code flag, and never yolo.
+engines() { echo "claude gemini"; }
+engine_of() { case "$1" in gemini) echo gemini ;; *) echo claude ;; esac; }
+gemini_cmd() { echo gemini; }
+gemini_model_ok() { [[ "$1" =~ ^gemini-[A-Za-z0-9._-]+$ ]]; }
+# the Gemini CLI's credential and backend switches: never passed to it from the caller's shell (bin/gemini-run sets its own)
+gemini_scrub_vars() { echo "GEMINI_API_KEY GOOGLE_API_KEY GOOGLE_GENAI_USE_VERTEXAI GOOGLE_GENAI_USE_GCA GOOGLE_APPLICATION_CREDENTIALS GOOGLE_GEMINI_BASE_URL GOOGLE_VERTEX_BASE_URL GEMINI_CLI_SYSTEM_SETTINGS_PATH GEMINI_CLI_SYSTEM_DEFAULTS_PATH"; }
+# gemini_yolo_refusal <args...>: the CLI's approve-everything mode, in any spelling (-y, --yolo, --approval-mode yolo or
+# =yolo, -y among combined short flags), is refused like --dangerously-skip-permissions. The value after an option that
+# takes one (a prompt, a model) is not a flag. Prints the reason, empty = none.
+gemini_yolo_refusal() {
+  local a p="" why=""
+  for a in "$@"; do
+    case "$p" in -m|--model|-p|--prompt|-i|--prompt-interactive|-o|--output-format|-e|--extensions|--allowed-mcp-server-names|--include-directories) p=""; continue ;;
+      --approval-mode) [ "$a" != yolo ] || why="--approval-mode yolo"; p=""; [ -z "$why" ] || break; continue ;; esac
+    case "$a" in -y|--yolo|--yolo=*|--approval-mode=yolo) why="$a"; break ;; --*) ;; -*y*) why="$a"; break ;; esac
+    p="$a"
+  done
+  [ -z "$why" ] || echo "yolo mode ($why) is never allowed: every tool call would run unapproved"
+}
+# gemini_checkout_refusal <dir>: the checkout's own Gemini files that could turn yolo on or bring in another key or
+# endpoint (.gemini/.env is loaded even with ignoreLocalEnv); names only, never values. Empty = none.
+gemini_checkout_refusal() {
+  [ ! -e "$1/.gemini/.env" ] || { echo "$1/.gemini/.env exists: the Gemini CLI would load it (a key or an endpoint could come from it); remove it"; return 0; }
+  [ -f "$1/.gemini/settings.json" ] || return 0
+  python3 -c '
+import json, sys
+p = sys.argv[1]
+try: s = json.load(open(p))
+except Exception: print("%s is not readable JSON" % p); sys.exit()
+hit = []
+def walk(d, path):
+    if isinstance(d, dict):
+        for k, v in d.items(): walk(v, path + [k])
+    elif d == "yolo" or (path[-1:] == ["disableYoloMode"] and d is False) or (path[-1:] == ["yolo"] and d is True): hit.append(".".join(path))
+walk(s, [])
+if hit: print("%s sets yolo mode (%s); yolo is never allowed" % (p, ", ".join(hit)))
+' "$1/.gemini/settings.json" 2>/dev/null || echo "the checkout's Gemini settings could not be checked"
+}
+# gemini_auth [has|read]: how the Gemini CLI is signed in: "google" (its own Google login, cached in
+# ${GEMINI_CLI_HOME:-$HOME}/.gemini/oauth_creds.json), else "key" (a stored gemini-api-key; "read" also reads it once
+# and drops it), else nothing and exit 1. The login wins, so no key is handled when the owner has signed in.
+gemini_auth() {
+  local H v; H="$(hub_root)"; v="$(keychain_service)"
+  [ -s "${GEMINI_CLI_HOME:-$HOME}/.gemini/oauth_creds.json" ] && { echo google; return 0; }
+  if [ "${1:-has}" = read ]; then
+    ( key="$(HUB="$H" AGENT_KEYCHAIN_SERVICE="$v" "$H/bin/secret" gemini-api-key 2>/dev/null)" && [ -n "$key" ]; r=$?; unset key; exit "$r" ) || return 1
+  else HUB="$H" AGENT_KEYCHAIN_SERVICE="$v" "$H/bin/secret" --has gemini-api-key || return 1; fi
+  echo key
+}
+gemini_auth_hint() { echo "no Gemini sign-in and no Gemini API key: sign in by running gemini once (Sign in with Google), or store a key with: bin/keys set gemini"; }
+# gemini_settings_write <dst> <google|key> <focus|agent> [approval mode]: the hub's settings layer, given to the CLI as
+# its system settings file (GEMINI_CLI_SYSTEM_SETTINGS_PATH, which overrides the user's and the checkout's). Never a key.
+gemini_settings_write() {
+  python3 -c '
+import json, sys
+dst, auth, kind = sys.argv[1:4]
+mode = sys.argv[4] if len(sys.argv) > 4 else "default"
+t = "oauth-personal" if auth == "google" else "gemini-api-key"
+s = {
+    "security": {"disableYoloMode": True, "auth": {"selectedType": t, "enforcedType": t},
+                 "environmentVariableRedaction": {"enabled": True, "blocked": ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS"]}},
+    "context": {"fileName": ["AGENTS.md", "CLAUDE.md", "GEMINI.md"]},
+    "advanced": {"ignoreLocalEnv": True},
+    "privacy": {"usageStatisticsEnabled": False},
+    "general": {"defaultApprovalMode": mode},
+}
+if kind == "agent":
+    s["tools"] = {"core": ["read_file", "read_many_files", "glob", "grep_search", "list_directory"]}
+json.dump(s, open(dst, "w"), indent=2)
+' "$@"
+}
 # AI tools whose key bin/keys manages. A tool here need not be connected yet: a stored key enables nothing.
 key_tools() { echo "deepseek glm muse gemini"; }
 key_secret() { case "$1" in deepseek|glm) provider_field "$1" secret ;; muse) echo "meta-model-api-key" ;; gemini) echo "gemini-api-key" ;; *) return 1 ;; esac; }
@@ -225,6 +307,7 @@ role_candidates() {
   for c in $list; do
     [[ "$c" =~ ^[a-z0-9-]+:[][A-Za-z0-9._:/-]+$ ]] || { echo "role $r: bad entry '$c' (want provider:model)" >&2; return 2; }
     if [ "${c%%:*}" = anthropic ]; then [[ "${c#*:}" =~ $am ]] || { echo "role $r: '$c' is not an Anthropic model (opus, sonnet, haiku, optional [1m], or claude-*)" >&2; return 2; }
+    elif [ "${c%%:*}" = gemini ]; then gemini_model_ok "${c#*:}" || { echo "role $r: '$c' is not a Gemini model (gemini-*)" >&2; return 2; }
     else provider_field "${c%%:*}" base_url >/dev/null || { echo "role $r: no provider '${c%%:*}' in bin/lib.sh ('$c')" >&2; return 2; }; fi
     n=$((n + 1))
   done
@@ -237,6 +320,15 @@ candidate_refusal() {
   local p="${1%%:*}" m="${1#*:}" dir="${2:-}" mode="${3:-has}" why
   case " ${HUB_PROVIDERS_ALLOWED:-anthropic} " in *" $p "*) ;; *) echo "$p is not in HUB_PROVIDERS_ALLOWED (hub.conf)"; return 0 ;; esac
   [ "$p" != anthropic ] || return 0
+  if [ "$p" = gemini ]; then   # the Gemini CLI engine (E1): no Claude Code, so its own checks
+    why="$(provider_hub_refusal gemini)"; [ -z "$why" ] || { echo "$why"; return 0; }
+    why="$(provider_own_hub_refusal)"; [ -z "$why" ] || { echo "$why"; return 0; }
+    provider_feature_go gemini delegation || { provider_no_go_reason gemini delegation; return 0; }
+    gemini_model_ok "$m" || { echo "$m is not a Gemini model (gemini-*)"; return 0; }
+    if [ -n "$dir" ]; then why="$(gemini_checkout_refusal "$dir")"; [ -z "$why" ] || { echo "$why"; return 0; }; fi
+    gemini_auth "$mode" >/dev/null || gemini_auth_hint
+    return 0
+  fi
   provider_field "$p" base_url >/dev/null || { echo "no provider '$p' in bin/lib.sh"; return 0; }
   why="$(provider_hub_refusal "$p")"; [ -z "$why" ] || { echo "$why"; return 0; }
   why="$(provider_own_hub_refusal)"; [ -z "$why" ] || { echo "$why"; return 0; }
@@ -275,7 +367,7 @@ method_pin() { echo v2.0.0; }
 method_repo() { echo "${AGENT_METHOD_REPO:-https://github.com/better-ade/ade-method}"; }
 # hub.conf (written by bin/init): who this agent is and what it can reach. Names and locations only, never secrets.
 # AGENT_* environment variables override it (tests use them). Provider choice, role tables and hub ownership come only from hub.conf.
-unset HUB_PROVIDER HUB_PROVIDERS_ALLOWED HUB_OWNED_BY_OWNER
+unset HUB_PROVIDER HUB_PROVIDERS_ALLOWED HUB_OWNED_BY_OWNER HUB_GEMINI_CLIENT_APPROVED
 for _v in $(compgen -v HUB_ROLE_); do unset "$_v"; done; unset _v   # role tables too
 [ -f "$(hub_root)/hub.conf" ] && . "$(hub_root)/hub.conf"
 hub_name() { echo "${HUB_NAME:-$(basename "$(hub_root)")}"; }

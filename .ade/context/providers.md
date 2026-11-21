@@ -65,7 +65,8 @@ same table, never a copy. Findings: `engines.md`. Decision and terms: `decisions
 ## Keys (`bin/keys`)
 - `bin/keys` lists `anthropic` (Claude login, no key) and each `key_tools` entry: `deepseek`, `glm`, `muse`
   (`meta-model-api-key`), `gemini` (`gemini-api-key`), with stored or missing and what the tool still needs for `bin/agent`. Never a value. `key_tools`, `key_secret` and
-  `key_source` are in `bin/lib.sh`; `muse` and `gemini` have no provider row, so they show "not connected yet".
+  `key_source` are in `bin/lib.sh`; `muse` has no provider row, so it shows "not connected yet"; `gemini` is the Gemini CLI
+  engine (story E1) and shows what it still needs (a sign-in counts as well as a key).
 - `bin/keys set <tool>` reads the key from a hidden prompt or stdin through `bin/secret --set`; `bin/keys forget <tool>` removes
   it. Exit 2 for an unknown tool or extra argument, so a key on the command line is refused. Storing a key enables nothing.
 - `bin/secret --set` passes the value to `security -i` on stdin, never as an argument, and reads it back to confirm; a failed store exits 1.
@@ -90,3 +91,24 @@ same table, never a copy. Findings: `engines.md`. Decision and terms: `decisions
   `projects/<encode_path hub>/memory -> <hub>/memory`, `projects/<encode_path dir>/memory -> <hub>/<F>/memory`.
 - Agents: front matter `provider:` absent or equal stays in `--agents`; another provider is left out, with
   `work: delegatable (not in --agents): <name> (provider <p>)` on stderr.
+
+## The Gemini CLI engine (story E1)
+- Engine table in `bin/lib.sh`: `engines` (`claude gemini`), `engine_of <provider>` (`gemini` for `gemini`, else
+  `claude`), `gemini_cmd`, `gemini_model_ok` (`gemini-*`), `gemini_scrub_vars`, `gemini_yolo_refusal <args>`,
+  `gemini_checkout_refusal <dir>`, `gemini_auth [has|read]` (`google` | `key`, exit 1 none), `gemini_auth_hint`,
+  `gemini_settings_write <dst> <google|key> <focus|agent> [approval mode]`.
+- `provider_field gemini`: `secret` `gemini-api-key`, `label`, `owner_only` 1 (no `base_url`: not behind Claude Code).
+  `provider_feature_go gemini`: `focus` and `delegation` go; `agents`, `effort`, `remote` no.
+- `hub.conf`: `HUB_GEMINI_CLIENT_APPROVED=1` opens gemini to a client hub (unset before `hub.conf` is sourced, so never
+  from the environment). `HUB_PROVIDERS_ALLOWED` must list `gemini`.
+- Role entries `gemini:<model>`; `candidate_refusal` checks allowlist, `provider_hub_refusal`, own hub, the go, the model,
+  the checkout's `.gemini/.env` and yolo settings, then a sign-in (`gemini_auth`). `bin/roles` appends `  (engine gemini)`.
+  `bin/work --role` prints each skipped candidate as `work: skipped <c>: <why>`.
+- `bin/gemini-run --system-settings FILE --auth google|key [gemini args]`: refuses yolo (exit 2), drops
+  `gemini_scrub_vars`, sets `GEMINI_CLI_SYSTEM_SETTINGS_PATH=FILE`, and with `key` reads `gemini-api-key` once and execs the
+  CLI with `GEMINI_API_KEY` (exit 1 when missing or empty).
+- Focus command: `cd '<dir>' && AGENT_FOLDER='<F>' '<hub>/bin/gemini-run' --system-settings '<file>' --auth <a> -m <model>
+  --approval-mode <default|auto_edit|plan> [-i <prompt>]`. Session entry `engine=gemini`; `bin/sessions` prints ENGINE
+  as the last column, after LAST (`claude` for older entries).
+- `bin/agent`: `bin/gemini-run ... -p "<instruction>" -m <model> -o text -e none --allowed-mcp-server-names none
+  --approval-mode default`, settings layer with `tools.core` = `read_file read_many_files glob grep_search list_directory`.

@@ -75,6 +75,22 @@ Owner-approved plan, 2026-11-18 (role-based model routing):
 - Consequence: a provider-backed role sends the files it reads in the checkout to that provider, so it stays limited to
   the owner's own hubs, and deny rules keep common secret files out of its tools. Contract: `.ade/context/providers.md`, "Roles".
 
-## Engines (S2a)
+## Engines (E1, 2026-11-21)
 
-Not written yet; S2a appends it here.
+Owner's decisions, 2026-11-21: builders and focus agents may use DeepSeek, GLM and Muse through Claude Code, and
+**Gemini through the Gemini CLI**; the orchestrator stays on Claude Code; GPT/Codex stays paused.
+
+- **Decision.** An engine is the CLI a role entry runs in: `claude` (Claude Code, every provider with a base URL) or
+  `gemini` (the Gemini CLI). `gemini:<model>` entries run through `bin/gemini-run` with a hub settings layer given as the
+  CLI's system settings, which override the user's and the checkout's: yolo disabled, the CLI's environment redaction on,
+  project `.env` files ignored, the rules read from `AGENTS.md`/`CLAUDE.md`/`GEMINI.md`. Yolo is refused in any spelling,
+  as `--dangerously-skip-permissions` is.
+- **Sign-in.** The CLI's own Google login, else a key stored with `bin/keys set gemini`. The CLI takes a key only from its
+  environment, so the key is given to that one process (never argv or a file); its tools' children rely on the CLI's
+  best-effort redaction (residual risk, `engines.md`).
+- **Data sharing.** Google's unpaid API terms (and the free login's) allow using prompts to improve its products, so
+  Gemini is owner-only by default, like DeepSeek; a client hub uses it only with `HUB_GEMINI_CLIENT_APPROVED=1` in
+  `hub.conf`, set when that client approved it, and only when `HUB_PROVIDERS_ALLOWED` lists `gemini`.
+- **Consequences.** A Gemini session has no Claude Code hooks (no C6 events), plugins, BMAD skills, `--agents`, Telegram
+  channel or Remote Control. The reviewer stays on Claude Code and the verification command still decides Done. Details:
+  `.ade/context/engines.md`, "Gemini CLI engine".

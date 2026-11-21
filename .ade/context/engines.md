@@ -280,3 +280,58 @@ Until then, `meta` is no-go and moves to a later story.
    startup. Without a key it sends the Anthropic OAuth token to the third-party URL (fake-server proof).
 3. **ADR 0002 provider section:** the data-sharing decision per hub, and the vendors' terms. DeepSeek's API terms were
    not researched in this spike.
+
+## Gemini CLI engine (story E1, 2026-11-21)
+
+A role entry `gemini:<model>` runs in the **Gemini CLI**, not Claude Code: `bin/work --role` / `--provider gemini` (focus
+sessions, `bin/dispatch` builders) and `bin/agent --role` (read-only delegation). The orchestrator stays on Claude Code.
+Checked against the official docs (github.com/google-gemini/gemini-cli `docs/`, main, read 2026-11-21:
+`reference/configuration.md`, `get-started/authentication.mdx`, `cli/trusted-folders.md`, `cli/headless.md`,
+`resources/tos-privacy.md`) and `gemini --help` of **Gemini CLI 0.67.0**. No request was sent to Google: the tests use a
+fake `gemini`, and no real key or login was used.
+
+### What the CLI offers (docs and `--help`)
+| Need | Gemini CLI | Used by the hub |
+|---|---|---|
+| Model | `-m, --model <id>` (also `GEMINI_MODEL`) | `-m <model>` from the role entry (`gemini-*` only) |
+| Headless | `-p, --prompt <text>`, "appended to input on stdin"; `-o text\|json\|stream-json`; exit 0 ok, 1 error, 42 input, 53 turn limit | `bin/agent`: task on stdin, `-p` a fixed one-line instruction, `-o text` |
+| First message, interactive | `-i, --prompt-interactive <text>` | `bin/work --prompt` |
+| Approval modes | `--approval-mode default\|auto_edit\|yolo\|plan`; `-y, --yolo`; `general.defaultApprovalMode` cannot be yolo; `plan` is documented as "not yet fully functional" | `--mode manual` = `default`, `auto`/`acceptEdits` = `auto_edit`, `plan` = `plan`; `bin/agent` = `default` |
+| Turning yolo off | `security.disableYoloMode: true` "Disable YOLO mode, even if enabled by a flag" | always set |
+| Settings layers | system defaults < user `~/.gemini/settings.json` < project `.gemini/settings.json` < **system settings**, whose path `GEMINI_CLI_SYSTEM_SETTINGS_PATH` overrides | the hub's layer is the system settings file (mktemp, mode 600, removed after the run) |
+| Rules file | `context.fileName` (string or list; default `GEMINI.md`); `@file` imports in a context file | `["AGENTS.md", "CLAUDE.md", "GEMINI.md"]`, so the checkout's CLAUDE.md (and the `.ade/rules.md` it imports) is read |
+| Sign-in | Sign in with Google (cached under `~/.gemini/`, here `oauth_creds.json`, or `$GEMINI_CLI_HOME/.gemini/`); `GEMINI_API_KEY`; Vertex AI (`GOOGLE_API_KEY`, `GOOGLE_GENAI_USE_VERTEXAI`, ADC); `security.auth.selectedType` / `enforcedType` | Google login if cached, else the stored `gemini-api-key`; `selectedType` and `enforcedType` = `oauth-personal` or `gemini-api-key` |
+| `.env` files | the CLI loads the first `.env` up from the cwd, then `~/.env`; `.gemini/.env` is never excluded; `advanced.ignoreLocalEnv` skips generic project `.env` files | `ignoreLocalEnv: true`; a checkout with `.gemini/.env` is refused |
+| Children's environment | `security.environmentVariableRedaction.enabled` (default **false**) redacts, "best effort", variables named like `*KEY*`, `*TOKEN*` ... from tool processes such as shell commands; `blocked` adds names | enabled, `blocked` = `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GOOGLE_APPLICATION_CREDENTIALS` |
+| Tool list | `tools.core` allowlist of built-in tools; `-e none` disables extensions; `--allowed-mcp-server-names` | `bin/agent`: `tools.core` = `read_file read_many_files glob grep_search list_directory`, `-e none`, `--allowed-mcp-server-names none` |
+| Telemetry | `privacy.usageStatisticsEnabled` | `false` |
+
+### The key: the residual risk
+The CLI takes an API key **only from its environment** (`GEMINI_API_KEY`, or a `.env` file); it has no helper command
+like Claude Code's `apiKeyHelper`. So with a key:
+- `bin/gemini-run` reads it once with `bin/secret gemini-api-key` and `exec`s the CLI with `GEMINI_API_KEY` set for that
+  process only. It is never in argv, the launcher, the settings layer, a log or a file in the hub (`tests/test_engines.sh`).
+- The caller's own `GEMINI_API_KEY`, `GOOGLE_API_KEY`, Vertex switches and settings-path variables are dropped first
+  (`gemini_scrub_vars`).
+- **Residual:** the CLI's tool children (shell commands) get it removed only by the CLI's "best effort" redaction, which the
+  hub turns on. MCP servers and hooks the CLI starts are not documented as covered; `bin/agent` starts none (`-e none`,
+  no MCP), a focus session loads the user's and checkout's MCP servers and hooks like any Gemini session. Prefer the Google
+  login (no key handled at all) where its terms fit.
+
+### Data terms (docs, `resources/tos-privacy.md`)
+- Google login: Gemini Code Assist terms (for individuals: Google Terms of Service and the Gemini Code Assist privacy notice).
+- API key, unpaid: **Gemini API Terms, Unpaid Services**: Google may use prompts and responses to improve its products.
+- API key, paid (billing on): Gemini API Terms, Paid Services: not used to improve products.
+- Vertex AI: Google Cloud terms (not used by the hub).
+- Hence `gemini` is **owner-only** (`owner_only` 1): a client hub uses it only with `HUB_GEMINI_CLIENT_APPROVED=1` in
+  `hub.conf`, set when that client approved it (ADR 0002). It is also refused unless `HUB_PROVIDERS_ALLOWED` lists it.
+
+### Gaps (stated plainly)
+- No Claude Code hooks: no C6 events, no `busy`/`idle` marks in `bin/sessions`, no session-end sync or journal from the
+  session itself; no plugins, no BMAD skills, no `--agents`, no Telegram channel, no Remote Control (so no one-session-per-
+  folder check from a Remote Control name).
+- The folder's specialist agents are not loaded (said on stderr).
+- `--approval-mode plan` is documented as not fully functional.
+- The Google login is detected by its cached file only; a login kept elsewhere (an OS keychain) is not seen and the run is
+  refused with the hint.
+- The reviewer still runs on Claude Code, and the verification command decides Done.
