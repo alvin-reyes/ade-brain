@@ -212,76 +212,110 @@ PY
 # Engines (story E1; contract .ade/context/engines.md "Gemini CLI engine", ADR 0002): the CLI a role entry runs in.
 # claude = Claude Code (anthropic and every provider row with a base_url); gemini = the Gemini CLI, signed in with its
 # own Google login or a stored Gemini API key. A gemini session never gets a Claude Code flag, and never yolo.
+# The hub's restrictions reach the CLI two ways it honours as a normal user (checked with the real CLI 0.67.0, offline):
+# a user settings layer in a hub-owned GEMINI_CLI_HOME, and an --admin-policy file. Never the system-settings slot: the
+# CLI skips a GEMINI_CLI_SYSTEM_SETTINGS_PATH file that is not owned by root.
 engines() { echo "claude gemini"; }
 engine_of() { case "$1" in gemini) echo gemini ;; *) echo claude ;; esac; }
 gemini_cmd() { echo gemini; }
 gemini_model_ok() { [[ "$1" =~ ^gemini-[A-Za-z0-9._-]+$ ]]; }
-# the Gemini CLI's credential and backend switches: never passed to it from the caller's shell (bin/gemini-run sets its own)
-gemini_scrub_vars() { echo "GEMINI_API_KEY GOOGLE_API_KEY GOOGLE_GENAI_USE_VERTEXAI GOOGLE_GENAI_USE_GCA GOOGLE_APPLICATION_CREDENTIALS GOOGLE_GEMINI_BASE_URL GOOGLE_VERTEX_BASE_URL GEMINI_CLI_SYSTEM_SETTINGS_PATH GEMINI_CLI_SYSTEM_DEFAULTS_PATH"; }
-# gemini_yolo_refusal <args...>: the CLI's approve-everything mode, in any spelling (-y, --yolo, --approval-mode yolo or
-# =yolo, -y among combined short flags), is refused like --dangerously-skip-permissions. The value after an option that
-# takes one (a prompt, a model) is not a flag. Prints the reason, empty = none.
+# gemini_home <google|key>: the CLI's home for that sign-in (GEMINI_CLI_HOME; it keeps .gemini/ there), inside the hub
+gemini_home() { echo "$(hub_root)/.local/engines/gemini-$1"; }
+# the Gemini CLI's credential, backend, trust and settings-path switches. bin/gemini-run sets each one to empty (a .env
+# file never overrides a variable that is set), then sets its own; the settings paths are removed instead.
+gemini_scrub_vars() { echo "GEMINI_API_KEY GOOGLE_API_KEY GOOGLE_GENAI_USE_VERTEXAI GOOGLE_GENAI_USE_GCA GOOGLE_APPLICATION_CREDENTIALS GOOGLE_GEMINI_BASE_URL GOOGLE_VERTEX_BASE_URL GOOGLE_CLOUD_PROJECT GOOGLE_CLOUD_LOCATION GEMINI_CLI_TRUST_WORKSPACE GEMINI_CLI_TRUSTED_FOLDERS_PATH GEMINI_MODEL"; }
+gemini_unset_vars() { echo "GEMINI_CLI_SYSTEM_SETTINGS_PATH GEMINI_CLI_SYSTEM_DEFAULTS_PATH GEMINI_CLI_HOME"; }
+# gemini_yolo_refusal <args...>: the CLI's approve-everything mode, in any spelling (-y, --yolo, --approval-mode or
+# --approvalMode, as yolo or =yolo, in any letter case, -y among combined short flags), is refused like
+# --dangerously-skip-permissions. The value after an option that takes one (a prompt, a model) is not a flag.
+# Prints the reason, empty = none.
 gemini_yolo_refusal() {
-  local a p="" why=""
+  local a l p="" why=""
   for a in "$@"; do
-    case "$p" in -m|--model|-p|--prompt|-i|--prompt-interactive|-o|--output-format|-e|--extensions|--allowed-mcp-server-names|--include-directories) p=""; continue ;;
-      --approval-mode) [ "$a" != yolo ] || why="--approval-mode yolo"; p=""; [ -z "$why" ] || break; continue ;; esac
-    case "$a" in -y|--yolo|--yolo=*|--approval-mode=yolo) why="$a"; break ;; --*) ;; -*y*) why="$a"; break ;; esac
-    p="$a"
+    l="$(printf '%s' "$a" | tr 'A-Z' 'a-z')"
+    case "$p" in -m|--model|-p|--prompt|-i|--prompt-interactive|-o|--output-format|-e|--extensions|--allowed-mcp-server-names|--include-directories|--policy|--admin-policy) p=""; continue ;;
+      --approval-mode|--approvalmode) [ "$l" != yolo ] || why="$p yolo"; p=""; [ -z "$why" ] || break; continue ;; esac
+    case "$l" in -y|--yolo|--yolo=*|--approval-mode=yolo|--approvalmode=yolo) why="$a"; break ;; --*) ;; -*y*) why="$a"; break ;; esac
+    p="$l"
   done
   [ -z "$why" ] || echo "yolo mode ($why) is never allowed: every tool call would run unapproved"
 }
-# gemini_checkout_refusal <dir>: the checkout's own Gemini files that could turn yolo on or bring in another key or
-# endpoint (.gemini/.env is loaded even with ignoreLocalEnv); names only, never values. Empty = none.
+# gemini_checkout_refusal <dir>: the checkout's own Gemini configuration is never loaded: any .gemini/settings.json (it
+# could set a discovery or call command, hooks, MCP servers, security settings or yolo), .gemini/hooks, .gemini/policies,
+# .gemini/.env (loaded even with ignoreLocalEnv). Names only, never contents. Empty = none.
 gemini_checkout_refusal() {
-  [ ! -e "$1/.gemini/.env" ] || { echo "$1/.gemini/.env exists: the Gemini CLI would load it (a key or an endpoint could come from it); remove it"; return 0; }
-  [ -f "$1/.gemini/settings.json" ] || return 0
-  python3 -c '
-import json, sys
-p = sys.argv[1]
-try: s = json.load(open(p))
-except Exception: print("%s is not readable JSON" % p); sys.exit()
-hit = []
-def walk(d, path):
-    if isinstance(d, dict):
-        for k, v in d.items(): walk(v, path + [k])
-    elif d == "yolo" or (path[-1:] == ["disableYoloMode"] and d is False) or (path[-1:] == ["yolo"] and d is True): hit.append(".".join(path))
-walk(s, [])
-if hit: print("%s sets yolo mode (%s); yolo is never allowed" % (p, ", ".join(hit)))
-' "$1/.gemini/settings.json" 2>/dev/null || echo "the checkout's Gemini settings could not be checked"
+  local f; for f in settings.json hooks policies .env; do
+    [ ! -e "$1/.gemini/$f" ] || { echo "$1/.gemini/$f exists: the Gemini CLI would load the checkout's own configuration (commands, hooks, MCP servers, keys or yolo); a hub session runs without it, so remove or move it"; return 0; }
+  done
 }
-# gemini_auth [has|read]: how the Gemini CLI is signed in: "google" (its own Google login, cached in
-# ${GEMINI_CLI_HOME:-$HOME}/.gemini/oauth_creds.json), else "key" (a stored gemini-api-key; "read" also reads it once
-# and drops it), else nothing and exit 1. The login wins, so no key is handled when the owner has signed in.
+# gemini_admin_policy_dir: the CLI's standard admin policy folder. Any .toml there makes the CLI ignore --admin-policy,
+# so the hub's policy would not apply: refused (gemini_system_refusal).
+gemini_admin_policy_dir() { if [ "$(uname -s 2>/dev/null)" = Darwin ]; then echo "/Library/Application Support/GeminiCli/policies"; else echo /etc/gemini-cli/policies; fi; }
+gemini_system_refusal() {
+  local d; d="${AGENT_GEMINI_ADMIN_POLICY_DIR:-$(gemini_admin_policy_dir)}"
+  ls "$d"/*.toml >/dev/null 2>&1 && echo "$d holds admin policies, so the Gemini CLI would ignore the hub's --admin-policy; the hub does not run Gemini on this machine"
+  return 0
+}
+# gemini_auth [has|read]: how the CLI is signed in: "google" (its own Google login, cached in the hub's google home,
+# gemini_home google), else "key" (a stored gemini-api-key; "read" also reads it once and drops it), else nothing
+# (exit 1). The login is judged in the same home the CLI gets; another home's login (~/.gemini) does not count.
 gemini_auth() {
   local H v; H="$(hub_root)"; v="$(keychain_service)"
-  [ -s "${GEMINI_CLI_HOME:-$HOME}/.gemini/oauth_creds.json" ] && { echo google; return 0; }
+  [ -s "$(gemini_home google)/.gemini/oauth_creds.json" ] && { echo google; return 0; }
   if [ "${1:-has}" = read ]; then
     ( key="$(HUB="$H" AGENT_KEYCHAIN_SERVICE="$v" "$H/bin/secret" gemini-api-key 2>/dev/null)" && [ -n "$key" ]; r=$?; unset key; exit "$r" ) || return 1
   else HUB="$H" AGENT_KEYCHAIN_SERVICE="$v" "$H/bin/secret" --has gemini-api-key || return 1; fi
   echo key
 }
-gemini_auth_hint() { echo "no Gemini sign-in and no Gemini API key: sign in by running gemini once (Sign in with Google), or store a key with: bin/keys set gemini"; }
-# gemini_settings_write <dst> <google|key> <focus|agent> [approval mode]: the hub's settings layer, given to the CLI as
-# its system settings file (GEMINI_CLI_SYSTEM_SETTINGS_PATH, which overrides the user's and the checkout's). Never a key.
+gemini_auth_hint() { echo "no Gemini sign-in and no Gemini API key: sign in once with GEMINI_CLI_HOME='$(gemini_home google)' gemini (Sign in with Google), or store a key with: bin/keys set gemini"; }
+# gemini_settings_write <home> <google|key>: the hub's user settings layer, <home>/.gemini/settings.json (written whole,
+# through a temp file). Never a key.
 gemini_settings_write() {
+  mkdir -p "$1/.gemini" && chmod 700 "$1" "$1/.gemini" || return 1
   python3 -c '
-import json, sys
-dst, auth, kind = sys.argv[1:4]
-mode = sys.argv[4] if len(sys.argv) > 4 else "default"
+import json, os, sys
+home, auth = sys.argv[1:3]
 t = "oauth-personal" if auth == "google" else "gemini-api-key"
 s = {
-    "security": {"disableYoloMode": True, "auth": {"selectedType": t, "enforcedType": t},
+    "security": {"disableYoloMode": True, "auth": {"selectedType": t, "enforcedType": t}, "folderTrust": {"enabled": True},
                  "environmentVariableRedaction": {"enabled": True, "blocked": ["GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_APPLICATION_CREDENTIALS"]}},
     "context": {"fileName": ["AGENTS.md", "CLAUDE.md", "GEMINI.md"]},
     "advanced": {"ignoreLocalEnv": True},
+    "tools": {"discoveryCommand": "", "callCommand": ""},
+    "hooksConfig": {"enabled": False},
+    "mcpServers": {},
     "privacy": {"usageStatisticsEnabled": False},
-    "general": {"defaultApprovalMode": mode},
+    "general": {"enableAutoUpdate": False, "enableAutoUpdateNotification": False},
 }
+p = os.path.join(home, ".gemini", "settings.json"); tmp = "%s.%d" % (p, os.getpid())
+with open(tmp, "w") as f: json.dump(s, f, indent=2)
+os.replace(tmp, p)
+' "$1" "$2"
+}
+# gemini_policy_write <file> <focus|agent>: the hub's --admin-policy (TOML, Admin tier, above any user rule). Both: the
+# secret files a Claude path run may not read (the same names) are denied to the read tools and the shell, and every tool
+# asks in yolo mode. agent: everything is denied but the read tools. Never a key.
+gemini_policy_write() {
+  python3 -c '
+import os, sys
+dst, kind = sys.argv[1:3]
+q = chr(39)   # TOML literal strings: backslashes stay as written. No nested quantifiers: the CLI skips such a rule.
+b = "[/\" ]"; e = "(?:[\" ]|$)"
+names = "(?:%s\\.env(?:[\". /]|$)|\\.pem%s|\\.key%s|%sid_rsa|%s\\.npmrc%s|%s\\.netrc%s|%scredentials)" % (b, e, e, b, b, e, b, e, b)
+dirs = "%s(?:\\.ssh|\\.aws|secrets)(?:[/\" ]|$)" % b
+tools = "[\"read_file\", \"read_many_files\", \"glob\", \"grep_search\", \"list_directory\", \"run_shell_command\"]"
+out = []
+out.append("# the hub policy (bin/lib.sh gemini_policy_write); written for every run\n")
+out.append("[[rule]]\ntoolName = %s\nargsPattern = %s\ndecision = \"deny\"\npriority = 999\ndenyMessage = \"hub: a secret file (.env, *.pem, *.key, id_rsa*, .npmrc, .netrc, credentials*)\"\n" % (tools, q + names + q))
+out.append("[[rule]]\ntoolName = %s\nargsPattern = %s\ndecision = \"deny\"\npriority = 999\ndenyMessage = \"hub: a secret folder (.ssh, .aws, secrets)\"\n" % (tools, q + dirs + q))
+out.append("[[rule]]\ntoolName = \"*\"\ndecision = \"ask_user\"\nmodes = [\"yolo\"]\npriority = 500\n")
 if kind == "agent":
-    s["tools"] = {"core": ["read_file", "read_many_files", "glob", "grep_search", "list_directory"]}
-json.dump(s, open(dst, "w"), indent=2)
-' "$@"
+    out.append("[[rule]]\ntoolName = \"*\"\ndecision = \"deny\"\npriority = 100\ndenyMessage = \"hub: a delegated run is read-only\"\n")
+    out.append("[[rule]]\ntoolName = [\"read_file\", \"read_many_files\", \"glob\", \"grep_search\", \"list_directory\"]\ndecision = \"allow\"\npriority = 200\n")
+tmp = "%s.%d" % (dst, os.getpid())
+with open(tmp, "w") as f: f.write("\n".join(out))
+os.replace(tmp, dst)
+' "$1" "$2"
 }
 # AI tools whose key bin/keys manages. A tool here need not be connected yet: a stored key enables nothing.
 key_tools() { echo "deepseek glm muse gemini"; }
@@ -325,6 +359,8 @@ candidate_refusal() {
     why="$(provider_own_hub_refusal)"; [ -z "$why" ] || { echo "$why"; return 0; }
     provider_feature_go gemini delegation || { provider_no_go_reason gemini delegation; return 0; }
     gemini_model_ok "$m" || { echo "$m is not a Gemini model (gemini-*)"; return 0; }
+    command -v "$(gemini_cmd)" >/dev/null 2>&1 || { echo "the Gemini CLI ($(gemini_cmd)) is not installed"; return 0; }
+    why="$(gemini_system_refusal)"; [ -z "$why" ] || { echo "$why"; return 0; }
     if [ -n "$dir" ]; then why="$(gemini_checkout_refusal "$dir")"; [ -z "$why" ] || { echo "$why"; return 0; }; fi
     gemini_auth "$mode" >/dev/null || gemini_auth_hint
     return 0

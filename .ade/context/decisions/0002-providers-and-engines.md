@@ -81,10 +81,13 @@ Owner's decisions, 2026-11-21: builders and focus agents may use DeepSeek, GLM a
 **Gemini through the Gemini CLI**; the orchestrator stays on Claude Code; GPT/Codex stays paused.
 
 - **Decision.** An engine is the CLI a role entry runs in: `claude` (Claude Code, every provider with a base URL) or
-  `gemini` (the Gemini CLI). `gemini:<model>` entries run through `bin/gemini-run` with a hub settings layer given as the
-  CLI's system settings, which override the user's and the checkout's: yolo disabled, the CLI's environment redaction on,
-  project `.env` files ignored, the rules read from `AGENTS.md`/`CLAUDE.md`/`GEMINI.md`. Yolo is refused in any spelling,
-  as `--dangerously-skip-permissions` is.
+  `gemini` (the Gemini CLI). `gemini:<model>` entries run through `bin/gemini-run`, which re-checks every gate and gives
+  the CLI a hub-owned home (`GEMINI_CLI_HOME`) with the hub's user settings (yolo disabled, environment redaction on,
+  project `.env` files ignored, no discovery commands, hooks or MCP servers, the rules read from
+  `AGENTS.md`/`CLAUDE.md`/`GEMINI.md`) and an `--admin-policy` (secret files denied; a delegated run gets the read tools
+  only). The checkout's own `.gemini/` configuration is refused. Not the system-settings slot: the CLI ignores a file
+  there unless root owns it. Yolo is refused in any spelling, as `--dangerously-skip-permissions` is. Verified with the
+  real CLI 0.67.0 offline (`tests/test_gemini_real.sh`).
 - **Sign-in.** The CLI's own Google login, else a key stored with `bin/keys set gemini`. The CLI takes a key only from its
   environment, so the key is given to that one process (never argv or a file); its tools' children rely on the CLI's
   best-effort redaction (residual risk, `engines.md`).
