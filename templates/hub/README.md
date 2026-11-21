@@ -1,7 +1,7 @@
 # {{NAME}}
 
 {{OWNER}}'s AI **{{TITLE}}** for **{{CLIENT}}**, made from
-[ade-brain](https://github.com/alvin-reyes/ade-brain). It holds the **context, state and
+[ade-brain](https://github.com/better-ade/ade-brain). It holds the **context, state and
 history** of the work and runs Claude Code agents that know them. Client code stays in its own repos.
 
 ## Use it
