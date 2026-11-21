@@ -13,7 +13,7 @@ make_hub() {
   unset ADE_HOOK_BIN ADE_HOOK_PORT ADE_HOOK_TOKEN ADE_PTY_ID AGENT_TERMINAL
   # the macOS behaviour (Keychain, launchd, Terminal) with the stubs the tests give, on any machine; tests/test_platform.sh
   # runs the Linux behaviour (story V1). GNU or BSD tools underneath are the machine's own.
-  export AGENT_PLATFORM=macos
+  export AGENT_PLATFORM=macos AGENT_PLATFORM_TEST=1   # the override only counts with the test flag (bin/lib.sh)
   unset XDG_CONFIG_HOME   # the file store and systemd units go under the test's HOME, never a runner's real config
   HUB="$(mktemp -d)/hub"; mkdir -p "$HUB"
   (cd "$REPO" && tar cf - --exclude ./repos --exclude ./.git --exclude ./hub.conf --exclude ./.local --exclude ./.superpowers .) | (cd "$HUB" && tar xf -)

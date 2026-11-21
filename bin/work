@@ -60,6 +60,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 [[ "$CL" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "work: bad claude command '$CL'" >&2; exit 2; }
+# a server's hub runs as a normal user (story V1): never as root on Linux
+[ "$(platform)" != linux ] || [ "$(id -u)" != 0 ] || { echo "work: never as root; create a user for the hub (adduser) and run it as that user" >&2; exit 2; }
 # --role: one way to choose; the pick becomes --provider and --model, so every check below applies to it
 if [ -n "$ROLE" ]; then
   [ -z "$MODEL" ] && [ "$PSET" = 0 ] || { echo "work: --role picks the provider and model; drop --model and --provider" >&2; exit 2; }
@@ -167,8 +169,11 @@ elif [ "${AGENT_TERMINAL:-}" = ade ]; then
   echo "work: AGENT_TERMINAL=ade needs an ADE terminal (ADE_HOOK_BIN, ADE_HOOK_PORT, ADE_HOOK_TOKEN and ADE_PTY_ID set)" >&2; exit 2
 elif [ "${AGENT_TERMINAL:-}" = tmux ] || { [ -z "${AGENT_TERMINAL:-}" ] && [ "$(platform)" = linux ]; }; then
   OPEN=tmux; TN="$(tmux_name "${RNAME:-${F##*/}}")"
+  case "$TN" in ade-*) echo "work: a focus session is never named ade-* (the hub sessions' names); use --name" >&2; exit 2 ;; esac
+  other="$(hub_name_claim)" || { echo "work: the hub name $(hub_name) is already used by the hub at $other, so its tmux session $(tmux_hub_session) is not this hub's; set HUB_NAME in hub.conf" >&2; exit 2; }
   if command -v tmux >/dev/null 2>&1; then
-    [ "$FORCE" = 1 ] || ! tmux_taken "$TN" || { echo "work: $TN is already open in tmux (tmux attach -t $(tmux has-session -t "=$TN" 2>/dev/null && echo "$TN" || tmux_hub_session)); use it, or stop it first (--force opens another)" >&2; exit 3; }
+    if [ "$FORCE" = 1 ]; then b="$TN"; i=2; while tmux_taken "$TN"; do TN="$b-$i"; i=$((i + 1)); done   # another one: <name>-2, -3 ...
+    else ! tmux_taken "$TN" || { echo "work: $TN is already open in tmux (tmux attach -t $(tmux has-session -t "=$TN" 2>/dev/null && echo "$TN" || tmux_hub_session)); use it, or stop it first (--force opens another)" >&2; exit 3; }; fi
   elif [ "${WORK_DRY:-}" != 1 ]; then echo "work: tmux is not installed (sudo apt-get install tmux)" >&2; exit 1; fi
 elif [ "$(platform)" != macos ]; then
   echo "work: AGENT_TERMINAL=${AGENT_TERMINAL}: Terminal and iTerm windows are macOS only; on $(platform) sessions open in tmux" >&2; exit 2

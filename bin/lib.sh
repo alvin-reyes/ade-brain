@@ -162,10 +162,13 @@ provider_config_refusal() {
     case "$r" in "$rl"|"$rl"/*) ;; *) echo "$p resolves to $r, outside $H/.local; a provider config dir stays in the hub"; return 0 ;; esac
   done
 }
+# checkout_gate_vars: hub switches a checkout's settings may never set either (story V1): they would move the secret store
+# or the platform the session's hooks run on
+checkout_gate_vars() { echo "AGENT_PLATFORM AGENT_PLATFORM_TEST AGENT_SECRETS_DIR PASSWORD_STORE_DIR HUB_SECRET_STORE"; }
 # provider_checkout_refusal <provider> <dir>: the checkout's own settings load below nothing that can unset a key: an
 # Anthropic credential or a backend switch in their env would beat apiKeyHelper and go to the provider (names only, never values)
 provider_checkout_refusal() {
-  local why; why="$(WORK_SCRUB="$(provider_scrub_vars)" python3 - "$2/.claude/settings.json" "$2/.claude/settings.local.json" <<'PY'
+  local why; why="$(WORK_SCRUB="$(provider_scrub_vars) $(checkout_gate_vars)" python3 - "$2/.claude/settings.json" "$2/.claude/settings.local.json" <<'PY'
 import json, os, sys
 bad = os.environ["WORK_SCRUB"].split()
 for p in sys.argv[1:]:
@@ -318,9 +321,23 @@ os.replace(tmp, dst)
 ' "$1" "$2"
 }
 # AI tools whose key bin/keys manages. A tool here need not be connected yet: a stored key enables nothing.
-key_tools() { echo "deepseek glm muse gemini"; }
-key_secret() { case "$1" in deepseek|glm) provider_field "$1" secret ;; muse) echo "meta-model-api-key" ;; gemini) echo "gemini-api-key" ;; *) return 1 ;; esac; }
-key_source() { case "$1" in deepseek) echo "platform.deepseek.com" ;; glm) echo "z.ai" ;; muse) echo "dev.meta.ai" ;; gemini) echo "aistudio.google.com" ;; *) return 1 ;; esac; }
+key_tools() { echo "deepseek glm muse gemini telegram"; }
+key_secret() { case "$1" in deepseek|glm) provider_field "$1" secret ;; muse) echo "meta-model-api-key" ;; gemini) echo "gemini-api-key" ;; telegram) channel_secret telegram ;; *) return 1 ;; esac; }
+key_source() { case "$1" in deepseek) echo "platform.deepseek.com" ;; glm) echo "z.ai" ;; muse) echo "dev.meta.ai" ;; gemini) echo "aistudio.google.com" ;; telegram) echo "@BotFather in Telegram" ;; *) return 1 ;; esac; }
+# Chat channels (story C5, ADR 0006, .ade/context/chat.md): each type's plugin, Keychain secret, the variable the
+# plugin reads its token from, and the variable that moves its state folder (bot token, access.json, inbox).
+channel_types() { echo "telegram"; }
+channel_plugin() { case "$1" in telegram) echo "plugin:telegram@claude-plugins-official" ;; *) return 1 ;; esac; }
+channel_secret() { case "$1" in telegram) echo "telegram-bot-token" ;; *) return 1 ;; esac; }
+channel_token_env() { case "$1" in telegram) echo "TELEGRAM_BOT_TOKEN" ;; *) return 1 ;; esac; }
+# hub_name_claim: this hub owns its name on this machine (the state folder, Keychain service and launchd labels all
+# derive from it). The first hub to claim it is recorded in <state dir>/hub-path; a different hub that still exists
+# there makes this print that hub's path and return 1 (two folders both named "hub": set HUB_NAME in one of them).
+hub_name_claim() { local f me o; f="$(state_dir)/hub-path"; me="$(cd "$(hub_root)" && pwd -P)" || return 0
+  mkdir -p "$(state_dir)" || return 0
+  if [ -f "$f" ]; then o="$(cat "$f")"; [ "$o" = "$me" ] && return 0; [ -d "$o" ] && { echo "$o"; return 1; }; fi
+  echo "$me" > "$f"; }
+channel_state_env() { case "$1" in telegram) echo "TELEGRAM_STATE_DIR" ;; *) return 1 ;; esac; }
 # Role routing (.ade/context/providers.md, "Roles"): a role is an ordered list of provider:model candidates. Defaults
 # here; HUB_ROLE_<ROLE> in hub.conf (never the environment) replaces a role's list or adds a role.
 role_default() { case "$1" in
@@ -403,7 +420,7 @@ method_pin() { echo v2.0.0; }
 method_repo() { echo "${AGENT_METHOD_REPO:-https://github.com/better-ade/ade-method}"; }
 # hub.conf (written by bin/init): who this agent is and what it can reach. Names and locations only, never secrets.
 # AGENT_* environment variables override it (tests use them). Provider choice, role tables and hub ownership come only from hub.conf.
-unset HUB_PROVIDER HUB_PROVIDERS_ALLOWED HUB_OWNED_BY_OWNER HUB_GEMINI_CLIENT_APPROVED
+unset HUB_PROVIDER HUB_PROVIDERS_ALLOWED HUB_OWNED_BY_OWNER HUB_GEMINI_CLIENT_APPROVED HUB_SECRET_STORE
 for _v in $(compgen -v HUB_ROLE_) $(compgen -v HUB_BROWSER_PROFILE_); do unset "$_v"; done; unset _v   # role tables and browser profile switches too
 [ -f "$(hub_root)/hub.conf" ] && . "$(hub_root)/hub.conf"
 hub_name() { echo "${HUB_NAME:-$(basename "$(hub_root)")}"; }
@@ -490,9 +507,10 @@ _sync_lock_reap() {
 # sync_lock_release <lock>: removes the lock only when this process owns it
 sync_lock_release() { [ "$(cat "$1/pid" 2>/dev/null)" = "$$" ] && rm -rf "$1"; return 0; }
 # The platform layer (story V1, .ade/context/platform.md): every macOS-only call in bin/ goes through here, so the same
-# hub runs on macOS and on Linux (Ubuntu). AGENT_PLATFORM=macos|linux overrides the detection (tests).
-platform() { case "${AGENT_PLATFORM:-}" in macos|linux) echo "$AGENT_PLATFORM"; return 0 ;; esac
-  if [ "$(uname -s)" = Darwin ]; then echo macos; else echo linux; fi; }
+# hub runs on macOS and on Linux (Ubuntu). AGENT_PLATFORM=macos|linux overrides the detection only with the test flag
+# AGENT_PLATFORM_TEST=1 (tests/helpers.sh), so a stray variable never switches a real hub's secrets or scheduler.
+platform() { case "${AGENT_PLATFORM:-}:${AGENT_PLATFORM_TEST:-}" in macos:1|linux:1) echo "$AGENT_PLATFORM"; return 0 ;; esac
+  if [ "$(uname -s 2>/dev/null)" = Darwin ]; then echo macos; else echo linux; fi; }
 # File times, inodes, modes and owners: GNU stat -c or BSD stat -f, whichever this stat is (a Mac may have GNU first).
 if stat -c %Y / >/dev/null 2>&1; then _stat() { stat -c "$1" "$2"; }; _SF_M=%Y _SF_P=%a
 else _stat() { stat -f "$1" "$2"; }; _SF_M=%m _SF_P=%Lp; fi
@@ -500,6 +518,13 @@ file_mtime() { _stat "$_SF_M" "$1" 2>/dev/null; }
 file_inode() { _stat %i "$1" 2>/dev/null; }
 file_mode() { _stat "$_SF_P" "$1" 2>/dev/null; }   # the permission bits in octal, e.g. 700
 file_owner() { _stat %u "$1" 2>/dev/null; }
+# file_low9 <path>: the low nine permission bits only (setgid, setuid and sticky left out), e.g. 700
+file_low9() { local m; m="$(file_mode "$1")" || return 1; [ -n "$m" ] || return 1; printf '%o' "$(( 8#$m & 0777 ))"; }
+# dir_loose <dir>: why a folder on a secret's path is unsafe (empty = it is not): writable by group or others without the
+# sticky bit, or owned by someone other than this user or root
+dir_loose() { local m o; m="$(file_mode "$1")" || return 0; [ -n "$m" ] || return 0; o="$(file_owner "$1")"
+  [ "$o" = "$(id -u)" ] || [ "$o" = 0 ] || { echo "$1 is owned by uid $o, not you"; return 0; }
+  [ $(( 8#$m & 022 )) = 0 ] || [ $(( 8#$m & 01000 )) != 0 ] || echo "$1 is writable by group or others (mode $m): chmod go-w $1"; }
 # utc_epoch <YYYY-MM-DDTHH:MM:SS>: that UTC time in seconds (GNU date -d or BSD date -j); nothing when unreadable
 utc_epoch() { date -u -d "$1" +%s 2>/dev/null || date -j -u -f "%Y-%m-%dT%H:%M:%S" "$1" +%s 2>/dev/null; }
 # Desktop notifications: macOS only (osascript); elsewhere nothing (bin/monitor writes an event instead).
@@ -513,13 +538,18 @@ terminal_window() {
 # tmux turns . and : in a name into _, so names are made that way here, and targets are exact (=name).
 tmux_name() { printf '%s' "$1" | tr '.:' '__'; }
 tmux_hub_session() { echo "ade-$(tmux_name "$(hub_name)")"; }
+# tmux_env: the env -i prefix a tmux session starts with: these variables only. A tmux server keeps the environment it
+# was started with, so a focus session never takes a caller's credentials or switches.
+tmux_env() { local v o=""; for v in HOME PATH TERM LANG LC_ALL USER LOGNAME SHELL TMPDIR SSH_AUTH_SOCK XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS; do
+    [ -n "${!v:-}" ] && o="$o $v=$(provider_sq "${!v}")"; done
+  [ -n "${TERM:-}" ] || o="$o TERM=xterm-256color"; printf 'env -i%s' "$o"; }
 # tmux_taken <name>: 0 when a tmux session <name>, or a window <name> in the hub's session, already exists
 tmux_taken() { local n hs; n="$(tmux_name "$1")"; hs="$(tmux_hub_session)"
   tmux has-session -t "=$n" 2>/dev/null && return 0
   tmux has-session -t "=$hs" 2>/dev/null && tmux list-windows -t "=$hs" -F '#W' 2>/dev/null | grep -qxF -- "$n"; }
 # tmux_open <name> <dir> <launcher>: a new window in session ade-<hub> when it exists (left in the background), else a
 # detached session named <name>. Prints where it went: "window <hub session> <name>" or "session <name>".
-tmux_open() { local n hs c; n="$(tmux_name "$1")"; hs="$(tmux_hub_session)"; c="bash -l $(printf "'%s'" "$(printf '%s' "$3" | sed "s/'/'\\\\''/g")")"
+tmux_open() { local n hs c; n="$(tmux_name "$1")"; hs="$(tmux_hub_session)"; c="$(tmux_env) bash -l $(printf "'%s'" "$(printf '%s' "$3" | sed "s/'/'\\\\''/g")")"
   if tmux has-session -t "=$hs" 2>/dev/null; then tmux new-window -d -t "=$hs:" -n "$n" -c "$2" "$c" && echo "window $hs $n"
   else tmux new-session -d -s "$n" -c "$2" "$c" && echo "session $n"; fi; }
 # Scheduled jobs: launchd on macOS, systemd user units and timers on Linux (bin/schedule).
@@ -527,17 +557,23 @@ launchd_domain() { echo "gui/$(id -u)"; }
 launchd_bootout() { launchctl bootout "$(launchd_domain)/$1" 2>/dev/null; }
 launchd_bootstrap() { launchctl bootstrap "$(launchd_domain)" "$1"; }
 launchd_loaded() { launchctl print "$(launchd_domain)/$1" >/dev/null 2>&1; }
+launchd_enable() { launchctl enable "$(launchd_domain)/$1"; }
+launchd_disable() { launchctl disable "$(launchd_domain)/$1" 2>/dev/null; }
+# systemd_escape <text>: a value for a unit file (systemd expands % specifiers and $ variables)
+systemd_escape() { printf '%s' "$1" | sed -e 's/%/%%/g' -e 's/\$/$$/g'; }
 systemd_user_dir() { echo "${AGENT_SYSTEMD_USER_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user}"; }
 systemd_user() { systemctl --user "$@"; }
 # linger_on: user units run without a login session (a server); asks loginctl once
 linger_on() { local u; u="$(id -un)"; loginctl show-user "$u" -p Linger 2>/dev/null | grep -qx 'Linger=yes' || loginctl enable-linger "$u"; }
-# Secrets (bin/secret, bin/keys): the macOS Keychain; on Linux `pass` when installed and initialised, else a file store
-# under ~/.config/ade/secrets/<service>/ (dirs 0700, files 0600, refused when looser; bin/doctor calls it the weaker store).
-# A value only ever moves on stdin or in this shell's variables: never an argument of another program, the environment or a log.
-secret_store() { [ "$(platform)" = macos ] && { echo keychain; return 0; }
-  command -v pass >/dev/null 2>&1 && [ -f "$(pass_dir)/.gpg-id" ] && { echo pass; return 0; }
-  echo file; }
-secret_store_label() { case "$(secret_store)" in keychain) echo "the Keychain" ;; pass) echo "pass" ;; *) echo "the file store ($(secret_file_root))" ;; esac; }
+# Secrets (bin/secret, bin/keys): HUB_SECRET_STORE in hub.conf (keychain|pass|file; never the environment), default
+# keychain on macOS and file on Linux: the store never switches by itself when pass appears. The file store lives under
+# ~/.config/ade/secrets/<service>/ (dirs 0700, files 0600, no loose parent up to $HOME; bin/doctor calls it the weaker
+# store). A value only ever moves on stdin or in this shell's variables: never an argument of another program, the
+# environment or a log.
+secret_store() { case "${HUB_SECRET_STORE:-}" in
+    "") if [ "$(platform)" = macos ]; then echo keychain; else echo file; fi ;;
+    keychain|pass|file) echo "$HUB_SECRET_STORE" ;; *) echo invalid ;; esac; }
+secret_store_label() { case "$(secret_store)" in keychain) echo "the Keychain" ;; pass) echo "pass" ;; file) echo "the file store ($(secret_file_root))" ;; *) echo "no store" ;; esac; }
 pass_dir() { echo "${PASSWORD_STORE_DIR:-$HOME/.password-store}"; }
 secret_file_root() { echo "${AGENT_SECRETS_DIR:-${XDG_CONFIG_HOME:-$HOME/.config}/ade/secrets}"; }
 # secret_name_ok <name>: a store key, never a path
@@ -545,17 +581,23 @@ secret_name_ok() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; }
 # secret_store_refusal: why the store cannot be used (empty = it can): no security on macOS; a file store folder that is
 # not 0700 and the user's (it is made 0700 when missing); a service name that is not a plain name
 secret_store_refusal() {
-  local st d x; st="$(secret_store)"
+  local st d x why; st="$(secret_store)"
   case "$st" in
-    keychain) command -v security >/dev/null || echo "needs the macOS Keychain (the security command)"; return 0 ;;
-    pass) secret_name_ok "$(keychain_service)" || echo "the service name '$(keychain_service)' is not a plain name"; return 0 ;;
+    invalid) echo "HUB_SECRET_STORE=${HUB_SECRET_STORE:-} in hub.conf: it must be keychain, pass or file"; return 0 ;;
+    keychain) [ "$(platform)" = macos ] || { echo "HUB_SECRET_STORE=keychain: the Keychain is macOS only (use pass or file)"; return 0; }
+      command -v security >/dev/null || echo "needs the macOS Keychain (the security command)"; return 0 ;;
+    pass) command -v pass >/dev/null 2>&1 && [ -f "$(pass_dir)/.gpg-id" ] || { echo "HUB_SECRET_STORE=pass, but pass is not installed and initialised (pass init <gpg-id>)"; return 0; }
+      secret_name_ok "$(keychain_service)" || echo "the service name '$(keychain_service)' is not a plain name"; return 0 ;;
   esac
   secret_name_ok "$(keychain_service)" || { echo "the service name '$(keychain_service)' is not a plain name"; return 0; }
   d="$(secret_file_root)"
+  # every folder above the store, up to $HOME (or /): none writable by others, none owned by another user
+  x="$(dirname "$d")"; while :; do why="$(dir_loose "$x")"; [ -z "$why" ] || { echo "$why; the file store refuses to run"; return 0; }
+    { [ "$x" = "$HOME" ] || [ "$x" = / ] || [ "$x" = . ]; } && break; x="$(dirname "$x")"; done
   for x in "$d" "$d/$(keychain_service)"; do
-    [ -d "$x" ] || ( umask 077; mkdir -p "$x" ) 2>/dev/null || { echo "cannot make $x"; return 0; }
-    [ "$(file_mode "$x")" = 700 ] && [ "$(file_owner "$x")" = "$(id -u)" ] ||
-      { echo "$x must be a 0700 folder of yours (it is $(file_mode "$x")); the file store refuses to run: chmod 700 $x"; return 0; }
+    if [ ! -d "$x" ]; then ( umask 077; mkdir -p "$x" ) 2>/dev/null && chmod 0700 "$x" || { echo "cannot make $x"; return 0; }; fi
+    [ "$(file_low9 "$x")" = 700 ] && [ "$(file_owner "$x")" = "$(id -u)" ] ||
+      { echo "$x must be a 0700 folder of yours (it is $(file_mode "$x")); the file store refuses to run: chmod 00700 $x"; return 0; }
   done
 }
 _secret_path() { case "$(secret_store)" in pass) echo "ade/$(keychain_service)/$1" ;; file) echo "$(secret_file_root)/$(keychain_service)/$1" ;; esac; }
@@ -566,7 +608,7 @@ secret_get() {
     keychain) security find-generic-password -s "$(keychain_service)" -a "$1" -w 2>/dev/null ;;
     pass) v="$(pass show "$p" 2>/dev/null)" || return 1; printf '%s\n' "${v%%$'\n'*}" ;;
     file) [ -f "$p" ] || return 1
-      [ "$(file_mode "$p")" = 600 ] && [ "$(file_owner "$p")" = "$(id -u)" ] || { echo "secret: $p must be a 0600 file of yours: chmod 600 $p" >&2; return 1; }
+      [ "$(file_low9 "$p")" = 600 ] && [ "$(file_owner "$p")" = "$(id -u)" ] || { echo "secret: $p must be a 0600 file of yours: chmod 600 $p" >&2; return 1; }
       printf '%s\n' "$(cat "$p")" ;;
   esac
 }
@@ -585,7 +627,7 @@ secret_put() {
       # on stdin (security -i), so the value is never in a process argument; read back, since -i can hide a failure
       printf 'add-generic-password -U -s %s -a %s -w %s\n' "$(q "$(keychain_service)")" "$(q "$1")" "$(q "$2")" | security -i >/dev/null 2>&1 ;;
     pass) printf '%s\n' "$2" | pass insert -m -f "$p" >/dev/null 2>&1 ;;
-    file) t="$p.tmp.$$"; ( umask 077; printf '%s' "$2" > "$t" ) && chmod 600 "$t" && mv -f "$t" "$p" || { rm -f "$t"; return 1; } ;;
+    file) t="$p.tmp.$$"; rm -f "$t"; ( set -C; umask 077; printf '%s' "$2" > "$t" ) 2>/dev/null && chmod 600 "$t" && mv -f "$t" "$p" || { rm -f "$t"; return 1; } ;;
   esac
   [ "$(secret_get "$1" 2>/dev/null)" = "$2" ]
 }
