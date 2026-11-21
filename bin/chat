@@ -1,0 +1,101 @@
+#!/bin/bash
+# bin/chat start|stop|status|setup [channel]: the hub's orchestrator (its main session at the hub root) with its chat
+# channels attached, so the owner can reach it from Telegram (story C5, ADR 0006). Contract: .ade/context/chat.md.
+#   start   run claude at the hub root with --channels <plugin> for each HUB_CHANNELS type (default telegram), in the hub's
+#           permission mode (HUB_CHAT_MODE, else HUB_WORK_MODE, else auto) and with Remote Control named HUB_ORCHESTRATOR
+#           (default the hub name). One at a time. launchd runs it (bin/schedule install with HUB_CHAT=telegram).
+#   stop    end it (and unload the launchd job, which would restart it; bin/schedule install loads it again)
+#   status  running or stopped, since when, and each channel's access policy (a name only, never ids or the token)
+#   setup   the one-time steps: bot, token, plugin, pairing, allowlist, a test message
+# Never skips permissions: --dangerously-skip-permissions, --allow-dangerously-skip-permissions or bypassPermissions in an
+# argument, a HUB setting or the claude wrapper is refused with exit 2. Each channel's token comes from the Keychain
+# (bin/secret) into that session's environment only: never a file, an argument or the log. A missing token exits 1.
+set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; S="$(state_dir)"; PIDF="$S/chat/chat.pid"
+LA="${AGENT_LAUNCHAGENTS:-$HOME/Library/LaunchAgents}"; LABEL="ai.agent-hub.$(hub_name).chat"
+usage() { echo "usage: bin/chat start | stop | status | setup [channel] (channels: $(channel_types))" >&2; exit 2; }
+CHANNELS="${HUB_CHANNELS-telegram}"
+check_channels() {
+  [ -n "${CHANNELS// /}" ] || { echo "chat: HUB_CHANNELS is empty (known channel types: $(channel_types))" >&2; exit 2; }
+  local c; for c in $CHANNELS; do case " $(channel_types) " in *" $c "*) ;;
+    *) echo "chat: unknown channel type in HUB_CHANNELS (known channel types: $(channel_types))" >&2; exit 2 ;; esac; done
+}
+# channel_dir <channel>: this orchestrator's own state folder for it (two hubs never share a bot token or allowlist)
+channel_dir() { echo "$S/channels/$1"; }
+# the pid of the running chat session, if any: the pid file names a live process whose command has --channels
+running_pid() { local p; [ -f "$PIDF" ] || return 1; p="$(awk '{print $1; exit}' "$PIDF")"
+  case "$p" in ''|*[!0-9]*) return 1 ;; esac
+  ps -p "$p" -o command= 2>/dev/null | grep -q -- "--channels" || return 1; echo "$p"; }
+since() { awk '{print $2; exit}' "$PIDF"; }
+refuse_skip() { echo "chat: refused: the orchestrator never skips permissions ($1)" >&2; exit 2; }
+skips() { case "$1" in *dangerously*|*bypassPermissions*) return 0 ;; esac; return 1; }
+
+case "${1:-}" in
+  start) shift
+    for a in "$@"; do skips "$a" && refuse_skip "argument $a"; done
+    [ $# -eq 0 ] || usage
+    for v in $(compgen -v | grep -E '^(HUB_|AGENT_CLAUDE$)'); do skips "${!v}" && refuse_skip "$v"; done
+    CL="$(claude_cmd)"
+    case "$CL" in *[[:space:]]*) echo "chat: the claude command must be one word (HUB_CLAUDE / AGENT_CLAUDE)" >&2; exit 2 ;; esac
+    w="$(command -v -- "$CL" 2>/dev/null)"
+    if [ -n "$w" ] && [ -f "$w" ] && [ "$(wc -c < "$w")" -lt 65536 ] && grep -qE 'dangerously|bypassPermissions' "$w" 2>/dev/null; then
+      refuse_skip "the claude wrapper $CL"; fi
+    MODE="${HUB_CHAT_MODE:-${HUB_WORK_MODE:-auto}}"
+    case "$MODE" in auto|manual|acceptEdits|plan) ;; *) echo "chat: mode must be auto|manual|acceptEdits|plan (HUB_CHAT_MODE)" >&2; exit 2 ;; esac
+    NAME="${HUB_ORCHESTRATOR:-$(hub_name)}"
+    [[ "$NAME" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "chat: HUB_ORCHESTRATOR must start with a letter or digit (letters, digits, . _ -)" >&2; exit 2; }
+    [ -z "${HUB_MODEL:-}" ] || [[ "$HUB_MODEL" =~ ^[A-Za-z0-9][A-Za-z0-9._:/\[\]-]*$ ]] || { echo "chat: bad HUB_MODEL" >&2; exit 2; }
+    check_channels
+    if p="$(running_pid)"; then echo "chat: already running (pid $p, since $(since)); bin/chat stop first" >&2; exit 1; fi
+    command -v -- "$CL" >/dev/null 2>&1 || { echo "chat: $CL not found" >&2; exit 1; }
+    # every token first, so a missing one launches nothing; a token in the caller's shell is never used
+    for c in $CHANNELS; do unset "$(channel_token_env "$c")" "$(channel_state_env "$c")"
+      "$H/bin/secret" --has "$(channel_secret "$c")" || { echo "chat: no $c bot token in the Keychain: run bin/keys set $c (bin/chat setup $c)" >&2; exit 1; }; done
+    cmd=("$CL"); for c in $CHANNELS; do cmd+=(--channels "$(channel_plugin "$c")"); done
+    cmd+=(--permission-mode "$MODE" --remote-control "$NAME"); [ -z "${HUB_MODEL:-}" ] || cmd+=(--model "$HUB_MODEL")
+    mkdir -p "$S/chat" && chmod 700 "$S/chat" || exit 1
+    cd "$H" || exit 1
+    # launchd gives no terminal, and claude's interface needs one: script(1) gives it a pseudo-terminal, fed a stdin
+    # that never ends while this process lives (an end of input would reach claude as Ctrl-D). Opened before any token
+    # is in the environment, so the feeder never holds one.
+    if [ ! -t 0 ]; then exec 0< <(exec >/dev/null 2>&1; while kill -0 $$ 2>/dev/null; do sleep 5; done); cmd=(script -q /dev/null "${cmd[@]}"); fi
+    for c in $CHANNELS; do d="$(channel_dir "$c")"; mkdir -p "$d" && chmod 700 "$d" || exit 1; export "$(channel_state_env "$c")=$d"
+      t="$("$H/bin/secret" "$(channel_secret "$c")" 2>/dev/null)" && [ -n "$t" ] || { echo "chat: could not read the $c bot token: run bin/keys set $c" >&2; exit 1; }
+      export "$(channel_token_env "$c")=$t"; unset t; done
+    echo "$$ $(date -u +%Y-%m-%dT%H:%MZ)" > "$PIDF"
+    echo "chat: $NAME on $CHANNELS (pid $$, mode $MODE)" >&2
+    exec "${cmd[@]}" ;;
+  stop) [ $# -eq 1 ] || usage
+    if [ -f "$LA/$LABEL.plist" ] && [ "${SCHEDULE_DRY:-}" != 1 ]; then
+      launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null && echo "unloaded $LABEL (bin/schedule install loads it again)"; fi
+    if p="$(running_pid)"; then kill "$p" 2>/dev/null; rm -f "$PIDF"; echo "stopped (pid $p)"; else rm -f "$PIDF"; echo "not running"; fi ;;
+  status) [ $# -eq 1 ] || usage
+    NAME="${HUB_ORCHESTRATOR:-$(hub_name)}"
+    if p="$(running_pid)"; then echo "$NAME: running (pid $p, since $(since))"; else echo "$NAME: stopped"; fi
+    for c in $CHANNELS; do case " $(channel_types) " in *" $c "*) ;; *) echo "$c: unknown channel type"; continue ;; esac
+      f="$(channel_dir "$c")/access.json"
+      if [ ! -f "$f" ]; then echo "$c: not paired yet (bin/chat setup $c)"; continue; fi
+      # the policy name only, and only a known one: ids, tokens and anything else in the file are never shown
+      pol="$(python3 -I -c 'import json,sys
+try: d=json.load(open(sys.argv[1]))
+except Exception: d={}
+v=d.get("dmPolicy", d.get("policy")) if isinstance(d,dict) else None
+print(v if v in ("pairing","allowlist","disabled") else "unknown")' "$f" 2>/dev/null)"
+      echo "$c: policy ${pol:-unknown}"; done ;;
+  setup) [ $# -le 2 ] || usage; c="${2:-telegram}"
+    case " $(channel_types) " in *" $c "*) ;; *) echo "chat: unknown channel type (known channel types: $(channel_types))" >&2; exit 2 ;; esac
+    if "$H/bin/secret" --has "$(channel_secret "$c")" 2>/dev/null; then st="stored"; else st="missing"; fi
+    cat <<EOF
+Telegram for this hub's orchestrator ($(hub_name)); token: $st. Do these once, in your own terminal:
+1. In Telegram, message @BotFather: /newbot, pick a name and a username ending in "bot". Copy the token it gives you.
+2. bin/keys set telegram   (paste the token at the hidden prompt; never in a chat or a file)
+3. In any claude session: /plugin install telegram@claude-plugins-official   (user scope)
+4. bin/chat start   (in a Terminal at the hub root, the first time, so you can accept its prompts)
+5. Message your bot in Telegram; it replies with a pairing code. In the session: /telegram:access pair <code>
+6. Lock it to you: /telegram:access policy allowlist
+7. Send a test message from Telegram and check the session answers. Then quit it, set HUB_CHAT=telegram in hub.conf
+   and run bin/schedule install, so launchd keeps it running. bin/chat status shows it.
+This orchestrator's channel state stays in $(channel_dir "$c"), never in the shared ~/.claude/channels/$c.
+EOF
+    ;;
+  *) usage ;;
+esac

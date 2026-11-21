@@ -202,9 +202,16 @@ json.dump(s, open(dst, "w"), indent=2)
 PY
 }
 # AI tools whose key bin/keys manages. A tool here need not be connected yet: a stored key enables nothing.
-key_tools() { echo "deepseek glm muse gemini"; }
-key_secret() { case "$1" in deepseek|glm) provider_field "$1" secret ;; muse) echo "meta-model-api-key" ;; gemini) echo "gemini-api-key" ;; *) return 1 ;; esac; }
-key_source() { case "$1" in deepseek) echo "platform.deepseek.com" ;; glm) echo "z.ai" ;; muse) echo "dev.meta.ai" ;; gemini) echo "aistudio.google.com" ;; *) return 1 ;; esac; }
+key_tools() { echo "deepseek glm muse gemini telegram"; }
+key_secret() { case "$1" in deepseek|glm) provider_field "$1" secret ;; muse) echo "meta-model-api-key" ;; gemini) echo "gemini-api-key" ;; telegram) channel_secret telegram ;; *) return 1 ;; esac; }
+key_source() { case "$1" in deepseek) echo "platform.deepseek.com" ;; glm) echo "z.ai" ;; muse) echo "dev.meta.ai" ;; gemini) echo "aistudio.google.com" ;; telegram) echo "@BotFather in Telegram" ;; *) return 1 ;; esac; }
+# Chat channels (story C5, ADR 0006, .ade/context/chat.md): each type's plugin, Keychain secret, the variable the
+# plugin reads its token from, and the variable that moves its state folder (bot token, access.json, inbox).
+channel_types() { echo "telegram"; }
+channel_plugin() { case "$1" in telegram) echo "plugin:telegram@claude-plugins-official" ;; *) return 1 ;; esac; }
+channel_secret() { case "$1" in telegram) echo "telegram-bot-token" ;; *) return 1 ;; esac; }
+channel_token_env() { case "$1" in telegram) echo "TELEGRAM_BOT_TOKEN" ;; *) return 1 ;; esac; }
+channel_state_env() { case "$1" in telegram) echo "TELEGRAM_STATE_DIR" ;; *) return 1 ;; esac; }
 # Role routing (.ade/context/providers.md, "Roles"): a role is an ordered list of provider:model candidates. Defaults
 # here; HUB_ROLE_<ROLE> in hub.conf (never the environment) replaces a role's list or adds a role.
 role_default() { case "$1" in
