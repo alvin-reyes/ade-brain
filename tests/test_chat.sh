@@ -241,11 +241,190 @@ state_per_orchestrator() {
   HUB="$H1"; cd "$H1"; rm -f hub.conf
 }
 
+# ---- story C7: formatting, approvals and talking to focus agents. A fake channel (AGENT_CHAT_SEND) records each
+# payload it is given; a fake bin/sessions lists three agents; a fake bin/notify records its argv.
+c7_setup() {
+  mkdir -p projects/api projects/web ops/infra
+  cat > "$FAKE/bin/send" <<'STUB'
+#!/bin/bash
+cat >> "$FAKE/sent"; echo >> "$FAKE/sent"
+[ -z "${FAKE_SEND_FAIL:-}" ] || exit 1
+STUB
+  chmod +x "$FAKE/bin/send"; export AGENT_CHAT_SEND="$FAKE/bin/send"; : > "$FAKE/sent"
+  [ -f "$FAKE/sessions.real" ] || cp bin/sessions "$FAKE/sessions.real"; [ -f "$FAKE/notify.real" ] || cp bin/notify "$FAKE/notify.real"
+  cat > bin/sessions <<'STUB'
+#!/bin/bash
+cat <<'T'
+NAME             FOLDER                     PID      PARENT   STARTED               ROLE       STATUS LAST
+T-1.2            projects/api               4101     -        2026-11-21T10:00:00Z  builder    busy   2026-11-21T14:02:11Z
+web              projects/web               4102     -        2026-11-21T10:05:00Z  -          idle   2026-11-21T13:50:40Z
+infra            ops/infra                  4103     -        2026-11-21T10:06:00Z  ops        -      -
+T
+STUB
+  printf '#!/bin/bash\nfor a in "$@"; do printf "[%%s]" "$a"; done >> "$FAKE/notify.log"; echo >> "$FAKE/notify.log"\n' > bin/notify
+  chmod +x bin/sessions bin/notify; : > "$FAKE/notify.log"; rm -rf "$AGENT_STATE/events.jsonl" "$AGENT_STATE/events-seen" "$AGENT_STATE/chat/asks"
+}
+c7_done() { cp "$FAKE/sessions.real" bin/sessions; cp "$FAKE/notify.real" bin/notify; unset AGENT_CHAT_SEND AGENT_CHAT_BUTTONS; }
+ev() { H="$HUB" ST="$AGENT_STATE" python3 -I bin/events.py write "$@" || fail "event write $*"; }
+sent_texts() { python3 -c 'import json,sys
+for l in open(sys.argv[1]):
+    l=l.strip()
+    if l: print(json.loads(l)["text"].replace("\n","\\n"))' "$FAKE/sent"; }
+
+telegram_style_rule() {
+  for s in "Telegram replies" "markdownv2" "never a raw Markdown table" "aligned code block" "full text in <path>" \
+    "bin/chat status --card" "● busy" "○ idle" "⚠ blocked" "15 lines" "reply 1 to approve" "bin/chat to --sender" \
+    "bin/chat answer --sender" "bin/chat forward"; do
+    assert_contains templates/hub/CLAUDE.md "$s" "hub CLAUDE.md Telegram style rule"; done
+}
+
+status_card_golden() {
+  c7_setup; ev --auto --from ops/infra --to main --kind idle --text "waiting"
+  ev --from ops/infra --to main --kind note --text "blocked: the staging box is unreachable"
+  out="$(bin/chat status --card)" || fail "status --card [$out]"
+  want="hub · stopped · 3 agents
+● T-1.2 · projects/api · builder · T-1.2 · busy 14:02Z
+○ web · projects/web · - · - · idle 13:50Z
+⚠ infra · ops/infra · ops · - · blocked"
+  assert_eq "$out" "$want" "the status card layout"
+  # a later event from the folder clears blocked; no agents gives one title line
+  ev --auto --from ops/infra --to main --kind idle --text "unblocked"
+  bin/chat status --card | grep -q '^○ infra · ops/infra · ops · - · idle$' || fail "a later idle clears blocked [$(bin/chat status --card)]"
+  printf '#!/bin/bash\necho "NAME FOLDER PID PARENT STARTED ROLE STATUS LAST"\n' > bin/sessions
+  assert_eq "$(bin/chat status --card)" "hub · stopped · no agents" "the card with no agents"
+  c7_done
+}
+
+to_agent_notifies() {
+  c7_setup
+  out="$(bin/chat to --sender 99887766 api "rebase on main" 2>&1)" || fail "to api [$out]"
+  assert_eq "$(cat "$FAKE/notify.log")" "[--from][main][projects/api][rebase on main]" "one notify to the resolved folder"
+  : > "$FAKE/notify.log"; bin/chat to --sender 99887766 T-1.2 "and run the tests" >/dev/null 2>&1 || fail "to by agent name"
+  assert_eq "$(cat "$FAKE/notify.log")" "[--from][main][projects/api][and run the tests]" "an agent name resolves to its folder"
+  # unknown: a reply listing the agents, no notify
+  : > "$FAKE/notify.log"; out="$(bin/chat to --sender 99887766 billing "hello" 2>&1)"; assert_eq "$?" "2" "an unknown agent"
+  for a in T-1.2 web infra; do echo "$out" | grep -q "$a" || fail "the reply lists $a [$out]"; done
+  [ -s "$FAKE/notify.log" ] && fail "an unknown name notified"
+  # ambiguous: two folders named api among the agents
+  cat > bin/sessions <<'STUB'
+#!/bin/bash
+echo "NAME FOLDER PID PARENT STARTED ROLE STATUS LAST"
+echo "api projects/api 1 - x builder busy -"
+echo "api-ops ops/api 2 - x - idle -"
+STUB
+  mkdir -p ops/api; out="$(bin/chat to --sender 99887766 api "hello" 2>&1)"; assert_eq "$?" "2" "an ambiguous name"
+  echo "$out" | grep -q "ops/api" || fail "the ambiguous reply lists the agents [$out]"; [ -s "$FAKE/notify.log" ] && fail "an ambiguous name notified"
+  # only the paired owner
+  out="$(bin/chat to --sender 11111 web "hi" 2>&1)"; assert_eq "$?" "2" "a sender that is not paired"
+  echo "$out" | grep -q "not the paired owner" || fail "the refusal says why [$out]"; [ -s "$FAKE/notify.log" ] && fail "an unpaired sender notified"
+  bin/chat to web "hi" >/dev/null 2>&1; assert_eq "$?" "2" "no --sender"; [ -s "$FAKE/notify.log" ] && fail "no sender notified"
+  c7_done
+}
+
+forward_agent_events_once() {
+  c7_setup
+  ev --auto --from projects/api --to main --kind idle --text "tests green, PR open"
+  ev --from projects/web --to main --kind note --text "need the staging URL"
+  ev --from main --to projects/api --kind note --text "from main to api"
+  ev --auto --from projects/api --to main --kind pushed --text "pushed c7" --repo /x --branch c7
+  ev --auto --from projects/web --to main --kind ended --text "2 commits"
+  bin/chat forward >/dev/null 2>&1 || fail "forward"
+  want='[api] idle: tests green, PR open
+[web] note: "need the staging URL"
+[web] ended: 2 commits'
+  assert_eq "$(sent_texts)" "$want" "agent events to main are forwarded, tagged, one each"
+  python3 -c 'import json,sys
+for l in open(sys.argv[1]):
+    l=l.strip()
+    if l: d=json.loads(l); assert d["chat_id"]=="99887766" and "parse_mode" not in d, d' "$FAKE/sent" || fail "sent as plain text to the paired owner"
+  : > "$FAKE/sent"; bin/chat forward >/dev/null 2>&1 || fail "forward again"; [ -s "$FAKE/sent" ] && fail "an event was forwarded twice"
+  # a failed send is retried on the next run, then sent once
+  ev --auto --from projects/api --to main --kind idle --text "retry me"
+  FAKE_SEND_FAIL=1 bin/chat forward >/dev/null 2>&1; assert_eq "$?" "1" "a failed send"
+  : > "$FAKE/sent"; bin/chat forward >/dev/null 2>&1 || fail "forward after a failure"
+  assert_eq "$(sent_texts)" "[api] idle: retry me" "the failed event is sent on the next run"
+  : > "$FAKE/sent"; bin/chat forward >/dev/null 2>&1; [ -s "$FAKE/sent" ] && fail "the retried event was sent twice"
+  # a text that looks like a secret is withheld
+  printf '{"time":"2026-11-21T10:00:00Z","from":"projects/api","to":"main","kind":"idle","text":"token=ab12cd34ef"}\n' >> "$AGENT_STATE/events.jsonl"
+  bin/chat forward >/dev/null 2>&1; grep -q ab12cd34ef "$FAKE/sent" && fail "a secret-looking text was forwarded"
+  c7_done
+}
+
+approvals_buttons_or_numbered() {
+  c7_setup
+  ref="$(bin/chat ask "Dispatch T-1.3 (high risk)?")" || fail "ask"
+  [[ "$ref" =~ ^[a-z]{5}$ ]] || fail "ask prints a ref [$ref]"
+  assert_eq "$(sent_texts)" "Dispatch T-1.3 (high risk)?\\nreply 1 to approve, 2 to deny (ref $ref)" "Telegram: numbered replies"
+  grep -q reply_markup "$FAKE/sent" && fail "buttons sent where the plugin takes none"
+  # an unpaired sender's answer never counts
+  out="$(bin/chat answer --sender 11111 1 2>&1)"; assert_eq "$?" "2" "an unpaired answer"
+  echo "$out" | grep -q "not the paired owner" || fail "says why [$out]"
+  assert_eq "$(bin/chat asked "$ref")" "pending" "still pending after an unpaired answer"
+  bin/chat answer --sender 99887766 1 >/dev/null 2>&1 || fail "the owner approves"
+  assert_eq "$(bin/chat asked "$ref")" "approved" "the owner's 1 approves"
+  grep -rq "approved $ref" journal/ || fail "the answer is journaled"
+  bin/chat answer --sender 99887766 2 >/dev/null 2>&1; assert_eq "$?" "2" "nothing left pending"
+  assert_eq "$(bin/chat asked "$ref")" "approved" "a late answer changes nothing"
+  # a channel that takes buttons: Approve / Deny buttons, answered by their callback data
+  : > "$FAKE/sent"; r2="$(AGENT_CHAT_BUTTONS=all bin/chat ask "Restart web?")" || fail "ask with buttons"
+  python3 -c 'import json,sys
+d=json.loads(open(sys.argv[1]).readline()); k=d["reply_markup"]["inline_keyboard"][0]
+assert [b["text"] for b in k]==["Approve","Deny"], k
+assert [b["callback_data"] for b in k]==["ask:approve:"+sys.argv[2],"ask:deny:"+sys.argv[2]], k
+assert d["text"]=="Restart web?", d' "$FAKE/sent" "$r2" || fail "buttons payload [$(cat "$FAKE/sent")]"
+  bin/chat answer --sender 11111 "ask:approve:$r2" >/dev/null 2>&1; assert_eq "$(bin/chat asked "$r2")" "pending" "an unpaired button press"
+  bin/chat answer --sender 99887766 "ask:deny:$r2" >/dev/null 2>&1 || fail "the owner's button"
+  assert_eq "$(bin/chat asked "$r2")" "denied" "the owner's Deny button"
+  # two pending: a bare number is ambiguous, a ref picks one
+  a="$(bin/chat ask "one?")"; b="$(bin/chat ask "two?")"
+  bin/chat answer --sender 99887766 1 >/dev/null 2>&1; assert_eq "$?" "2" "a bare answer with two pending"
+  bin/chat answer --sender 99887766 "2 $b" >/dev/null 2>&1 || fail "answer by ref"
+  assert_eq "$(bin/chat asked "$b") $(bin/chat asked "$a")" "denied pending" "the ref picks the ask"
+  c7_done
+}
+
+agents_list() {
+  c7_setup; ev --from ops/infra --to main --kind note --text "blocked: no VPN"
+  out="$(bin/chat agents)" || fail "agents"
+  want='NAME   FOLDER        ROLE     TICKET  STATE
+T-1.2  projects/api  builder  T-1.2   ● busy
+web    projects/web  -        -       ○ idle
+infra  ops/infra     ops      -       ⚠ blocked'
+  assert_eq "$out" "$want" "/agents lists folder, role, ticket and state"
+  c7_done
+}
+
+bot_send_token_on_stdin_only() {
+  # the real sender against a local stand-in for the Bot API (never the network): the token only in the request path
+  c7_setup; unset AGENT_CHAT_SEND; SRV="$(mktemp -d)"
+  cat > "$SRV/api.py" <<'PYS'
+import http.server, json, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length", 0)); b = self.rfile.read(n)
+        open(sys.argv[2], "a").write(self.path + " " + b.decode() + "\n")
+        self.send_response(200); self.end_headers(); self.wfile.write(b'{"ok":true}')
+    def log_message(self, *a): pass
+s = http.server.HTTPServer(("127.0.0.1", 0), H); open(sys.argv[1], "w").write(str(s.server_address[1])); s.serve_forever()
+PYS
+  python3 "$SRV/api.py" "$SRV/port" "$SRV/req" & srv=$!; wait_for "[ -s '$SRV/port' ]" || fail "the stand-in API did not start"
+  ev --auto --from projects/api --to main --kind idle --text "via the bot"
+  AGENT_TELEGRAM_API="http://127.0.0.1:$(cat "$SRV/port")" bin/chat forward >"$FAKE/out" 2>&1 || fail "forward through the bot [$(cat "$FAKE/out")]"
+  kill "$srv" 2>/dev/null; wait "$srv" 2>/dev/null
+  assert_contains "$SRV/req" "/bot$K/sendMessage" "the token is used in the Bot API path"
+  assert_contains "$SRV/req" '"text": "[api] idle: via the bot"' "the text is sent"
+  grep -qF "$K" "$FAKE/out" && fail "the token was printed"
+  grep -qF "$K" "$STORE.argv" && fail "the token is in a security argument"
+  c7_done
+}
+
 # bash tests/test_chat.sh <check>: run the checks up to and including one (to see each fail on its own)
 if [ $# -gt 0 ]; then for c in start_launches_channel_session token_short_lived_file missing_token_refuses skip_permissions_refused \
-  single_instance stop_and_status start_lock_and_access same_folder_name schedule_installs_chat_job claude_md_forwarded_content_rule channels_from_conf state_per_orchestrator; do
+  single_instance stop_and_status start_lock_and_access same_folder_name schedule_installs_chat_job claude_md_forwarded_content_rule channels_from_conf state_per_orchestrator \
+  telegram_style_rule status_card_golden to_agent_notifies forward_agent_events_once approvals_buttons_or_numbered agents_list bot_send_token_on_stdin_only; do
   [ "$c" = "$1" ] && { "$c"; echo ok; exit 0; }; ( "$c" ) >/dev/null 2>&1; done; fi
 start_launches_channel_session; token_short_lived_file; missing_token_refuses; skip_permissions_refused
 single_instance; stop_and_status; start_lock_and_access; same_folder_name; schedule_installs_chat_job; claude_md_forwarded_content_rule; channels_from_conf
 state_per_orchestrator
+telegram_style_rule; status_card_golden; to_agent_notifies; forward_agent_events_once; approvals_buttons_or_numbered; agents_list; bot_send_token_on_stdin_only
 echo ok

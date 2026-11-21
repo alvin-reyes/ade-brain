@@ -9,13 +9,25 @@
 #   status  running or stopped, since when, whether the channel connected, and each channel's policy and group count
 #           (never ids or the token)
 #   setup   the one-time steps: bot, token, plugin, pairing, allowlist, a test message
+# Story C7 (the orchestrator is the switchboard between the owner's chat and the focus agents):
+#   status --card                 the status card: a title line, then one line per agent (● busy ○ idle ⚠ blocked)
+#   agents                        the /agents table: name, folder, role, ticket, state
+#   to --sender <id> <agent> <text>  one bin/notify from main to that agent's folder (an agent name, folder or folder
+#                                 name among the running agents); unknown or ambiguous: exit 2 with the agents listed
+#   forward                       send the agents' idle/ended/note events to main to the chat, tagged [<agent>], once
+#                                 each (start runs it every AGENT_CHAT_FORWARD_EVERY s, default 15, 0 = never)
+#   ask <question>                offer an approval: Approve/Deny buttons where the channel takes them, else "reply 1
+#                                 to approve, 2 to deny (ref <ref>)"; prints the ref
+#   answer --sender <id> <reply>  record the owner's answer (1, 2, approve, deny, optionally a ref; or a button's data)
+#   asked <ref>                   pending, approved or denied
+# --sender is the user_id of the inbound channel message: only a paired owner (access.json allowFrom) counts.
 # Never skips permissions: dangerously/bypassPermissions in an argument, a HUB setting or the claude wrapper exits 2.
 # Each channel's token goes from the Keychain (bin/secret) into a 0600 .env in that channel's own state folder, which a
 # watcher deletes once the plugin has read it (it writes bot.pid), or after 60 s. Never the environment, argv or log.
 set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; S="$(state_dir)"; PIDF="$S/chat/chat.pid"; LOCK="$S/chat/lock"
 LA="${AGENT_LAUNCHAGENTS:-$HOME/Library/LaunchAgents}"; LABEL="ai.agent-hub.$(hub_name).chat"
 NAME="${HUB_ORCHESTRATOR:-$(hub_name)}"
-usage() { echo "usage: bin/chat start | stop | status | setup [channel] (channels: $(channel_types))" >&2; exit 2; }
+usage() { echo "usage: bin/chat start | stop | status [--card] | setup [channel] | agents | to --sender <id> <agent> <text> | forward | ask <question> | answer --sender <id> <reply> | asked <ref> (channels: $(channel_types))" >&2; exit 2; }
 CHANNELS="${HUB_CHANNELS-telegram}"
 check_channels() {
   [ -n "${CHANNELS// /}" ] || { echo "chat: HUB_CHANNELS is empty (known channel types: $(channel_types))" >&2; exit 2; }
@@ -49,6 +61,26 @@ take_lock() { local p; mkdir -p "$S/chat" && chmod 700 "$S/chat" || return 1
   kill -0 "$p" 2>/dev/null && ps -p "$p" -o command= 2>/dev/null | grep -qE 'bin/chat|--channels' && return 1
   rm -rf "$LOCK"; mkdir "$LOCK" 2>/dev/null && echo $$ > "$LOCK/pid"; }
 refuse() { rm -rf "$LOCK"; echo "chat: $1" >&2; exit "${2:-1}"; }
+PY_CHAT="$(dirname "$0")/chat.py"; PY_EV="$(dirname "$0")/events.py"; ASKS="$S/chat/asks"
+first_channel() { set -- $CHANNELS; echo "${1:-telegram}"; }
+access_file() { echo "$(channel_dir "$(first_channel)")/access.json"; }
+# is_owner <sender>: a paired owner of the chat channel (access.json allowFrom), else a refusal on stderr
+is_owner() { [ -n "${1:-}" ] && ACCESS="$(access_file)" python3 -I "$PY_CHAT" owner "$1" && return 0
+  echo "chat: ignored: not the paired owner (only a sender in the channel's allowlist counts)" >&2; return 1; }
+# chat_send [--buttons <ref>]: the text on stdin to the paired owner, through the fake channel (AGENT_CHAT_SEND, tests)
+# or the channel's bot (its token from the Keychain on the helper's stdin, never an argument or the environment)
+chat_send() { local c t rc; c="$(first_channel)"
+  if [ -n "${AGENT_CHAT_SEND:-}" ]; then ACCESS="$(access_file)" python3 -I "$PY_CHAT" send "$@"; return; fi
+  t="$("$H/bin/secret" "$(channel_secret "$c")" 2>/dev/null)" && [ -n "$t" ] || { echo "chat: no $c bot token (bin/keys set $c)" >&2; return 1; }
+  { printf '%s\n' "$t"; cat; } | ACCESS="$(access_file)" python3 -I "$PY_CHAT" send "$@"; rc=$?; unset t; return $rc; }
+ev_py() { H="$H" ST="$S" python3 -I "$PY_EV" "$@"; }
+agents_view() { local s; s="$("$H/bin/sessions" 2>/dev/null)" || { echo "chat: bin/sessions failed" >&2; return 1; }
+  printf '%s\n' "$s" | LATEST="$(ev_py latest 2>/dev/null)" python3 -I "$PY_CHAT" agents "$1" "$2"; }
+# resolve <agent>: the one folder among the running agents that the name names (agent name, folder, or folder name)
+resolve() { "$H/bin/sessions" 2>/dev/null | awk -v t="$1" 'NR>1 && NF>=2 { n=$2; sub(/.*\//,"",n); if ($1==t || $2==t || n==t) f[$2]=1 }
+  END { for (k in f) { c++; o=k } if (c==1) print o; exit c!=1 }'; }
+pending() { local f; for f in "$ASKS"/*; do [ -f "$f" ] || continue; case "$f" in *.answer) continue ;; esac
+  [ -f "$f.answer" ] || basename "$f"; done; }
 
 case "${1:-}" in
   start) shift
@@ -95,6 +127,9 @@ case "${1:-}" in
       # deleted once the plugin has read it (it writes bot.pid when it starts), or after the time limit
       ( exec </dev/null >/dev/null 2>&1; i=0; while [ "$i" -lt $((ttl * 2)) ] && [ ! -f "$d/bot.pid" ]; do sleep 0.5; i=$((i+1)); done; rm -f "$d/.env" ) &
     done
+    # the forwarder: the agents' events to main reach the chat while the session lives (story C7)
+    fe="${AGENT_CHAT_FORWARD_EVERY:-15}"; case "$fe" in ''|*[!0-9]*) fe=15 ;; esac
+    if [ "$fe" -gt 0 ]; then ( exec </dev/null >/dev/null 2>&1; while kill -0 $$ 2>/dev/null; do sleep "$fe"; kill -0 $$ 2>/dev/null && "$H/bin/chat" forward; done ) & fi
     echo "$$ $(date -u +%Y-%m-%dT%H:%MZ)" > "$PIDF"; echo $$ > "$LOCK/pid"
     echo "chat: $NAME on $CHANNELS (pid $$, mode $MODE)" >&2
     # the lock stays with the session (same pid); it is stale once the session is gone
@@ -107,7 +142,9 @@ case "${1:-}" in
       while kill -0 "$p" 2>/dev/null; do i=$((i+1)); [ $i -lt 100 ] || { echo "chat: pid $p still runs after 10 s; the pid file is kept" >&2; exit 1; }; sleep 0.1; done
       rm -f "$PIDF"; rm -rf "$LOCK"; echo "stopped (pid $p)"
     else echo "not running"; fi ;;
-  status) [ $# -eq 1 ] || usage
+  status) if [ "${2:-}" = --card ] && [ $# -eq 2 ]; then st=stopped; running_pid >/dev/null && st=running
+      agents_view card "$NAME · $st"; exit; fi
+    [ $# -eq 1 ] || usage
     if p="$(running_pid)"; then ok=1; for c in $CHANNELS; do connected "$c" 2>/dev/null || ok=0; done
       if [ "$ok" = 1 ]; then echo "$NAME: running (pid $p, since $(since))"; else echo "$NAME: running, channel not connected (pid $p, since $(since))"; fi
     else echo "$NAME: stopped"; fi
@@ -129,5 +166,42 @@ Telegram for this hub's orchestrator ($(hub_name)); token: $st. Do these once, i
 This orchestrator's channel state stays in $(channel_dir "$c"), never in the shared ~/.claude/channels/$c.
 EOF
     ;;
+  agents) [ $# -eq 1 ] || usage; agents_view table "" ;;
+  to) [ "${2:-}" = --sender ] && [ $# -eq 5 ] || usage; is_owner "$3" || exit 2
+    if ! f="$(resolve "$4")"; then echo "chat: no single agent named '$4'; the agents:" >&2; agents_view table "" >&2; exit 2; fi
+    "$H/bin/notify" --from main "$f" "$5" ;;
+  forward) [ $# -eq 1 ] || usage; mkdir -p "$S/chat" && chmod 700 "$S/chat" || exit 1; FL="$S/chat/forward.lock"
+    # one forwarder at a time; a lock whose holder is gone is taken over
+    if ! mkdir "$FL" 2>/dev/null; then p="$(cat "$FL/pid" 2>/dev/null)"
+      case "$p" in ''|*[!0-9]*) ;; *) kill -0 "$p" 2>/dev/null && exit 0 ;; esac
+      rm -rf "${FL:?}"; mkdir "$FL" 2>/dev/null || exit 0; fi
+    echo $$ > "$FL/pid"; trap 'rm -rf "${FL:?}"' EXIT
+    out="$(ev_py outbox)" || { echo "chat: the event log is unreadable" >&2; exit 1; }
+    while IFS="$(printf '\t')" read -r cur text; do [ -n "$cur" ] || continue
+      printf '%s\n' "$text" | chat_send || exit 1
+      ev_py ack $cur || exit 1
+    done <<< "$out" ;;
+  ask) [ $# -eq 2 ] && [ -n "$2" ] || usage; mkdir -p "$ASKS" && chmod 700 "$S/chat" || exit 1
+    ref="$(python3 -I "$PY_CHAT" ref)" && [ -n "$ref" ] || exit 1; printf '%s\n' "$2" > "$ASKS/$ref"
+    b="${AGENT_CHAT_BUTTONS:-$(channel_buttons "$(first_channel)")}"
+    if [ "$b" = all ]; then printf '%s\n' "$2" | chat_send --buttons "$ref"
+    else printf '%s\nreply 1 to approve, 2 to deny (ref %s)\n' "$2" "$ref" | chat_send; fi || { rm -f "${ASKS:?}/${ref:?}"; exit 1; }
+    echo "$ref" ;;
+  answer) [ "${2:-}" = --sender ] && [ $# -eq 4 ] || usage; is_owner "$3" || exit 2; a="$4"; ref=""
+    if [[ "$a" =~ ^ask:(approve|deny):([a-z]{5})$ ]]; then v="${BASH_REMATCH[1]}"; ref="${BASH_REMATCH[2]}"
+    elif [[ "$a" =~ ^[[:space:]]*(1|2|approve|deny|yes|no)([[:space:]]+([a-z]{5}))?[[:space:]]*$ ]]; then v="${BASH_REMATCH[1]}"; ref="${BASH_REMATCH[3]}"
+    else echo "chat: not an answer (reply 1 to approve, 2 to deny)" >&2; exit 2; fi
+    case "$v" in 1|approve|yes) v=approved ;; *) v=denied ;; esac
+    p="$(pending)"
+    if [ -z "$ref" ]; then set -- $p
+      if [ $# -ne 1 ]; then
+        if [ $# -eq 0 ]; then echo "chat: nothing is waiting for an answer" >&2; else echo "chat: more than one is waiting ($*); reply with the ref too: 1 <ref>" >&2; fi
+        exit 2; fi
+      ref="$1"; fi
+    printf '%s\n' "$p" | grep -qx "$ref" || { echo "chat: no ask $ref is waiting" >&2; exit 2; }
+    echo "$v $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ASKS/$ref.answer"; q="$(head -1 "$ASKS/$ref")"
+    "$H/bin/journal" . "chat: $v $ref: $q"; echo "$v $ref: $q" ;;
+  asked) [ $# -eq 2 ] && [[ "$2" =~ ^[a-z]{5}$ ]] || usage; [ -f "$ASKS/$2" ] || { echo unknown; exit 2; }
+    if [ -f "$ASKS/$2.answer" ]; then awk '{print $1; exit}' "$ASKS/$2.answer"; else echo pending; fi ;;
   *) usage ;;
 esac
