@@ -13,8 +13,11 @@ elsewhere); never as root (exit 2); needs `sudo` (`sudo -v`, exit 2 without).
    - `upgrades`: `systemctl is-enabled unattended-upgrades` is `enabled` and
      `${AGENT_APT_CONF_DIR:-/etc/apt/apt.conf.d}/20auto-upgrades` sets `APT::Periodic::Unattended-Upgrade "1"`
    `--accept-risk` takes those row names only (exit 2 otherwise). The rows are checked, never changed.
-2. **Packages**: `server_packages` (apt, the distribution's versions): `git python3 tmux curl ca-certificates nodejs npm
-   ufw unattended-upgrades`; only the missing ones (`dpkg-query`) with `sudo apt-get install -y -q --no-install-recommends`.
+2. **Packages**: `server_packages` (apt, the distribution's versions): ade's tool set `git python3 tmux gh`, then
+   `curl ca-certificates nodejs npm ufw unattended-upgrades`; `server_extras` for ade's file viewer: `bat glow
+   poppler-utils chafa yazi`, each only where the archive has it (`apt-cache show`; otherwise `<pkg>: not packaged for this
+   system; skipped`). Only the missing ones (`dpkg-query`), in one `sudo apt-get install -y -q --no-install-recommends`.
+   Ubuntu names bat's command `batcat`.
 3. **Tools**, only when missing (any version present is left alone), pinned by `server_pin`: gitleaks `8.30.1` (release
    tarball checked against the release's checksums file, into `~/.local/bin`), bun `1.3.9` (`bun.sh/install`), Claude
    Code `2.1.330` (`claude.ai/install.sh`).

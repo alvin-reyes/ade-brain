@@ -22,6 +22,8 @@ echo "apt-get $*" >> "$S/calls"; [ "$1" = install ] || exit 0
 for p in "$@"; do case "$p" in -*|install) ;; *) echo "$p" >> "$S/installed" ;; esac; done
 STUB
 printf '#!/bin/bash\nfor p; do :; done; grep -qx "$p" "$S/installed" 2>/dev/null && printf "install ok installed" || exit 1\n' > "$S/bin/dpkg-query"
+# apt-cache: every package is in the archive except those in $S/unpackaged (yazi by default, as on Ubuntu 24.04)
+printf '#!/bin/bash\necho "apt-cache $*" >> "$S/calls"; for p; do :; done; grep -qx "$p" "$S/unpackaged" 2>/dev/null && exit 100; echo "Package: $p"\n' > "$S/bin/apt-cache"
 printf '#!/bin/bash\necho "sshd $*" >> "$S/calls"; cat "$S/sshd.conf"\n' > "$S/bin/sshd"
 printf '#!/bin/bash\necho "ufw $*" >> "$S/calls"; cat "$S/ufw.status"\n' > "$S/bin/ufw"
 cat > "$S/bin/systemctl" <<'STUB'
@@ -62,13 +64,14 @@ printf '%s  gitleaks_8.30.1_linux_x64.tar.gz\n' "$(python3 -c 'import hashlib, s
 safe() { printf 'port 22\npasswordauthentication no\npermitrootlogin no\n' > "$S/sshd.conf"
   printf 'Status: active\n\nTo                         Action      From\n--                         ------      ----\nOpenSSH                    ALLOW       Anywhere\nOpenSSH (v6)               ALLOW       Anywhere (v6)\n' > "$S/ufw.status"
   echo enabled > "$S/uu"; printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' > "$S/apt/20auto-upgrades"; }
-reset() { rm -rf "$S/calls" "$S/installed" "$S/root" "$S/nosudo" "$S/units" "$HOME/.local" "$HOME/.bun" "$HOME/Project" "$S/active"; : > "$S/calls"; safe; }
+reset() { echo yazi > "$S/unpackaged"; rm -rf "$S/calls" "$S/installed" "$S/root" "$S/nosudo" "$S/units" "$HOME/.local" "$HOME/.bun" "$HOME/Project" "$S/active"; : > "$S/calls"; safe; }
 install() { bin/server install "$@" > "$S/out" 2> "$S/err"; rc=$?; }
 changes() { grep -E '^(apt-get install|sudo apt-get install|curl|systemctl --user enable|loginctl enable)' "$S/calls"; }
 
 installs_missing_from_fixed_list() {   # AC1
   reset; echo git > "$S/installed"; install; assert_eq "$rc" 0 "install: $(cat "$S/err" "$S/out")"
-  grep -q '^apt-get install -y -q --no-install-recommends python3 tmux curl ca-certificates nodejs npm ufw unattended-upgrades$' "$S/calls" || fail "only the missing packages: $(grep apt-get "$S/calls")"
+  grep -q '^apt-get install -y -q --no-install-recommends python3 tmux gh curl ca-certificates nodejs npm ufw unattended-upgrades bat glow poppler-utils chafa$' "$S/calls" || fail "only the missing packages, ade's tools too: $(grep apt-get "$S/calls")"
+  grep -q 'yazi: not packaged for this system; skipped' "$S/out" || fail "an extra that is not packaged is skipped with a note: $(cat "$S/out")"
   [ -x "$HOME/.local/bin/gitleaks" ] || fail "gitleaks installed"; grep -q 'releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz' "$S/calls" || fail "gitleaks pinned"
   grep -q 'curl -fsSL https://bun.sh/install' "$S/calls" && [ "$("$HOME/.bun/bin/bun")" = bun-v1.3.9 ] || fail "bun pinned: $("$HOME/.bun/bin/bun" 2>&1)"
   [ "$("$HOME/.local/bin/claude")" = 2.1.330 ] || fail "claude pinned"
@@ -122,7 +125,7 @@ status_report() {   # AC5
 dry_run_changes_nothing() {   # AC6
   reset; bin/server install --dry-run > "$S/out" 2> "$S/err"; assert_eq "$?" 0 "dry run: $(cat "$S/err")"
   assert_eq "$(changes)" "" "a dry run installs nothing"; [ ! -e "$S/units" ] && [ ! -d "$HOME/Project" ] && [ ! -e "$HOME/.local/bin/gitleaks" ] || fail "a dry run changed the machine"
-  grep -q '^+ sudo apt-get install -y -q --no-install-recommends git ' "$S/out" || fail "prints the apt command: $(cat "$S/out")"
+  grep -q '^+ sudo apt-get install -y -q --no-install-recommends git python3 tmux gh .* bat glow poppler-utils chafa$' "$S/out" || fail "prints the apt command, ade's tools too: $(cat "$S/out")"
   grep -q '^+ curl -fsSL -o .*gitleaks_8.30.1_linux_x64.tar.gz' "$S/out" && grep -q "^+ bash -c curl.*bun.sh/install" "$S/out" && grep -q "^+ bash -c curl.*claude.ai/install.sh" "$S/out" || fail "prints the tool installs: $(cat "$S/out")"
   grep -q "^+ mkdir -p $HOME/Project" "$S/out" && grep -q "^+ $HUB/bin/schedule install" "$S/out" || fail "prints the hub steps: $(cat "$S/out")"
   printf 'passwordauthentication yes\npermitrootlogin no\n' > "$S/sshd.conf"; bin/server install --dry-run > "$S/out" 2>&1; assert_eq "$?" 1 "dry run on an unsafe host exits as the install would"
