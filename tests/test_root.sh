@@ -20,7 +20,5 @@ for d in README.md docs/index.html templates/hub/README.md; do
 n=$(ls personas/*.md | wc -l | tr -d ' '); [ "$n" -ge 10 ] || fail "persona library has $n personas"
 for p in personas/*.md; do for k in title folders briefing_focus; do grep -q "^$k: ." "$p" || fail "$p has no $k"; done
   grep -q "{{CLIENT}}" "$p" && grep -q "{{OWNER}}" "$p" || fail "$p does not name the client and owner"; done
-# the ADE rules match the current ADE methodology: commit identity, judge roles read-only, the archive
-for s in "**Commit as the user.**" "additionally restricted to read-only tools" "may write only the story's Verification section" "## 4. The archive"; do
-  assert_contains .ade/rules.md "$s" "ADE rules"; done
+# the ADE rules are ade-method's own (story C1): test_method.sh keeps .ade/rules.md equal to the pinned ref
 echo ok

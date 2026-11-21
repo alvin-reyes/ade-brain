@@ -1,0 +1,6 @@
+# the method this hub runs, from ade-method (bin/method sync); bin/method check compares the files below
+ref v2.0.0
+commit 2590a793bae821845938f1b915a91c36de9824a1
+file e2793095ba7d19fcf8bc43c9687096bb3f8e30a4d44664a0963e0ef95dbfe213 .ade/rules.md
+file 6f527e0a3818fc93bbdfea258a6903e797b8912ef77c8eddd885b037edb2a770 _bmad/custom/bmad-build.toml
+file 277be3f45facb80285646f99a642bd7a5a9af4038c7f81d0608683b1f9543f2d _bmad/custom/bmad-code-review.toml

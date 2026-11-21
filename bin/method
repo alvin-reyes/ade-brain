@@ -1,0 +1,42 @@
+#!/bin/bash
+# bin/method: the hub takes the method from ade-method, its only home (story C1, .ade/context/method.md).
+#   bin/method sync [ref]   copy ade-method's rules.md to .ade/rules.md and bmad/custom/*.toml to _bmad/custom/, at ref
+#                           (default HUB_METHOD_REF from hub.conf, else the template's pin), and record it in .ade/method-version
+#   bin/method check        exit 1 naming each file that differs from the recorded ref, 0 when all match (offline)
+# An unknown ref or an unreachable repo exits 1 and changes nothing.
+. "$(dirname "$0")/lib.sh"; H="$(hub_root)"; V="$H/.ade/method-version"
+usage() { sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
+case "${1:-}" in
+  sync)
+    [ $# -le 2 ] || usage; ref="${2:-${HUB_METHOD_REF:-$(method_pin)}}"; repo="$(method_repo)"
+    [[ "$ref" =~ ^[A-Za-z0-9._/-]+$ ]] && [ "${ref#-}" = "$ref" ] || { echo "method: bad ref '$ref'" >&2; exit 1; }
+    tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT; src="$tmp/src"
+    git init -q "$src" && git -C "$src" fetch -q --depth 1 "$repo" "$ref" 2>/dev/null && git -C "$src" checkout -q FETCH_HEAD 2>/dev/null ||
+      { echo "method: cannot fetch $ref from $repo" >&2; exit 1; }
+    commit="$(git -C "$src" rev-parse 'HEAD^{commit}')"
+    [ -f "$src/rules.md" ] || { echo "method: $repo at $ref has no rules.md" >&2; exit 1; }
+    # stage every file and the version record first; only then replace the hub's copies
+    mkdir -p "$tmp/out/.ade" "$tmp/out/_bmad/custom"; cp "$src/rules.md" "$tmp/out/.ade/rules.md"
+    files=".ade/rules.md"
+    for f in "$src"/bmad/custom/*.toml; do [ -f "$f" ] || continue; b="$(basename "$f")"
+      cp "$f" "$tmp/out/_bmad/custom/$b"; files="$files _bmad/custom/$b"; done
+    { echo "# the method this hub runs, from ade-method (bin/method sync); bin/method check compares the files below"
+      echo "ref $ref"; echo "commit $commit"
+      for f in $files; do echo "file $(sha "$tmp/out/$f") $f"; done; } > "$tmp/out/.ade/method-version"
+    mkdir -p "$H/.ade" "$H/_bmad/custom"
+    for f in $files .ade/method-version; do cp "$tmp/out/$f" "$H/$f.method-new" && mv "$H/$f.method-new" "$H/$f" ||
+      { echo "method: could not write $f" >&2; exit 1; }; done
+    echo "method: ade-method $ref ($commit) synced: $files"
+    ;;
+  check)
+    [ $# -eq 1 ] || usage
+    [ -f "$V" ] || { echo "method: no .ade/method-version (bin/method sync)"; exit 1; }
+    rc=0
+    while read -r k h f; do [ "$k" = file ] || continue
+      if [ ! -f "$H/$f" ] || [ "$(sha "$H/$f")" != "$h" ]; then echo "differs: $f"; rc=1; fi
+    done < "$V"
+    exit $rc
+    ;;
+  *) usage ;;
+esac

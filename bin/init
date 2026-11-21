@@ -129,10 +129,15 @@ HUB_COMPACT_WINDOW=$(q "$CWIN")
 HUB_BASH_MAX_CHARS=$(q "$BMAX")
 # 1: bin/sync --auto pushes the hub every 30 minutes (bin/schedule) and at each focus session end; 0: off
 HUB_AUTO_SYNC=$([ "$ASYNC" = off ] && echo 0 || echo 1)
+# the ade-method tag this hub's .ade/rules.md and _bmad/custom/ come from (bin/method sync; the template's pin)
+HUB_METHOD_REF=$(q "$(method_pin)")
 CONF
 render "$T/templates/hub/CLAUDE.md" "$H/CLAUDE.md"
 render "$T/templates/hub/ACCESS.md" "$H/ACCESS.md"
 render "$T/templates/hub/README.md" "$H/README.md"
+# the method at the pinned ref, so a new hub starts in step; offline, it keeps the template's copy (also the pin) and says so
+HUB="$H" AGENT_METHOD_REPO="$(method_repo)" "$H/bin/method" sync "$(method_pin)" >/dev/null ||
+  echo "init: could not sync the method from $(method_repo); kept the template's copy (run bin/method sync later)" >&2
 mkdir -p "$H/.claude/agents" "$H/journal" "$H/memory" "$H/projects" "$H/ops"
 render "$T/templates/hub/persona-agent.md" "$H/.claude/agents/$PERSONA.md"
 # BMAD's project name and output folder (python: the hub path may hold & or #); a failure stops init, never silently
