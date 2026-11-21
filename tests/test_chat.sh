@@ -11,7 +11,7 @@ cat > "$FAKE/bin/claude" <<'STUB'
 pwd -P > "$FAKE_REC/pwd"; printf '%s\n' "$@" > "$FAKE_REC/argv"
 printf '%s' "${TELEGRAM_BOT_TOKEN:-}" > "$FAKE_REC/envtoken"; printf '%s' "${TELEGRAM_STATE_DIR:-}" > "$FAKE_REC/statedir"
 printf '%s' "${CLAUDE_CONFIG_DIR:-}" > "$FAKE_REC/configdir"; d="${TELEGRAM_STATE_DIR:-/nonexistent}"
-if [ -f "$d/.env" ]; then stat -f %Lp "$d/.env" > "$FAKE_REC/envmode"; sed -n 's/^TELEGRAM_BOT_TOKEN=//p' "$d/.env" > "$FAKE_REC/filetoken"; fi
+if [ -f "$d/.env" ]; then python3 -c 'import os, sys; print(oct(os.stat(sys.argv[1]).st_mode & 0o777)[2:])' "$d/.env" > "$FAKE_REC/envmode"; sed -n 's/^TELEGRAM_BOT_TOKEN=//p' "$d/.env" > "$FAKE_REC/filetoken"; fi
 bash -c env > "$FAKE_REC/childenv"
 [ -n "${FAKE_NOBOT:-}" ] || echo $$ > "$d/bot.pid"
 echo SESSION-OUTPUT-MARKER
