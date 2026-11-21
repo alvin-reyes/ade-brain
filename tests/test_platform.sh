@@ -23,7 +23,7 @@ case "$1" in
 esac
 STUB
 # fake systemctl / loginctl: argv logged; is-active answers from $S/active
-printf '#!/bin/bash\necho "$*" >> "$S/systemctl.argv"\ncase " $* " in *" is-active "*) for a; do u="$a"; done; grep -qx "$u" "$S/active" 2>/dev/null; exit;; esac\nexit 0\n' > "$S/bin/systemctl"
+printf '#!/bin/bash\necho "$*" >> "%s/systemctl.argv"\ncase " $* " in *" enable "*) [ -e "%s/failenable" ] && exit 1;; esac\ncase " $* " in *" is-active "*) for a; do u="$a"; done; grep -qx "$u" "%s/active" 2>/dev/null; exit;; esac\nexit 0\n' "$S" "$S" "$S" > "$S/bin/systemctl"   # paths fixed in the fake: bin/chat has its own S
 printf '#!/bin/bash\necho "$*" >> "$S/loginctl.argv"\ncase "$1" in show-user) echo "Linger=no";; esac\nexit 0\n' > "$S/bin/loginctl"
 # fake tmux: sessions and windows in $S/tmux (one "session window" per line); new-session/new-window run the command in
 # the background, as tmux would in its server, and record its pid
@@ -43,12 +43,15 @@ esac
 STUB
 printf '#!/bin/bash\necho "$*" >> "%s/osa.log"\n' "$S" > "$S/bin/osascript"
 # a fake claude that stays up a while, so bin/sessions sees the session
-printf '#!/bin/bash\n[ "${1:-}" = --version ] && { echo fake; exit 0; }\necho "$*" > "%s/claude.argv"; pwd -P > "%s/claude.cwd"; sleep 20\n' "$S" "$S" > "$S/bin/claude"
+printf '#!/bin/bash\n[ "${1:-}" = --version ] && { echo fake; exit 0; }\nenv > "%s/claude.env"; echo "$*" > "%s/claude.argv"; pwd -P > "%s/claude.cwd"; sleep 20\n' "$S" "$S" "$S" > "$S/bin/claude"
+# fake id: uid 0 while $S/root exists (a root shell), else the real id
+printf '#!/bin/bash\n[ -e "%s/root" ] && [ "${1:-}" = -u ] && { echo 0; exit 0; }\nexec /usr/bin/id "$@"\n' "$S" > "$S/bin/id"
 chmod +x "$S"/bin/*; export S PATH="$S/bin:$PATH"
 tmux_kill() { local p; for p in $(cat "$S/tmux.pids" 2>/dev/null); do pkill -P "$p" 2>/dev/null; kill "$p" 2>/dev/null; done; : > "$S/tmux.pids" 2>/dev/null; return 0; }
 linux() { export AGENT_PLATFORM=linux; }
-passstore() { export PASSWORD_STORE_DIR="$S/pw"; mkdir -p "$S/pw"; echo FAKEKEYID > "$S/pw/.gpg-id"; }
-filestore() { export PASSWORD_STORE_DIR="$S/no-pass"; }   # no .gpg-id: pass is not initialised, so the file store
+passstore() { export PASSWORD_STORE_DIR="$S/pw"; mkdir -p "$S/pw"; echo FAKEKEYID > "$S/pw/.gpg-id"; echo 'HUB_SECRET_STORE=pass' > hub.conf; }
+filestore() { export PASSWORD_STORE_DIR="$S/pw"; rm -f hub.conf; }   # the Linux default is the file store, pass or not
+store() { bash -c '. bin/lib.sh; secret_store'; }
 . bin/lib.sh
 
 platform_named() {   # AC1
@@ -66,7 +69,7 @@ platform_named() {   # AC1
 }
 linux_secrets_pass() {   # AC2, AC3
   linux; passstore; rm -f "$S/pass.argv" "$S/pass.env"
-  assert_eq "$(secret_store)" pass "pass when installed and initialised"
+  assert_eq "$(store)" pass "pass when hub.conf names it"
   printf '%s\n' "$VAL" | bin/secret --set api-token 2> "$S/err" || fail "set: $(cat "$S/err")"
   bin/secret --has api-token || fail "--has after set"
   assert_eq "$(bin/secret api-token)" "$VAL" "read back"
@@ -77,11 +80,11 @@ linux_secrets_pass() {   # AC2, AC3
   [ -f "$S/pw/ade/hub/api-token.gpg" ] || fail "stored under ade/<service>/<name>"
   bin/secret --forget api-token 2>/dev/null || fail "forget"; bin/secret --has api-token && fail "--has after forget"
   bin/secret api-token 2> "$S/err"; assert_eq "$?" 1 "missing"; assert_contains "$S/err" "not stored" "hint"
-  unset AGENT_PLATFORM PASSWORD_STORE_DIR
+  rm -f hub.conf; unset AGENT_PLATFORM PASSWORD_STORE_DIR
 }
 linux_secrets_file() {   # AC2, AC3
   linux; filestore; local D="$HOME/.config/ade/secrets"
-  assert_eq "$(secret_store)" file "the file store without pass"
+  passstore; filestore; assert_eq "$(store)" file "the file store by default on Linux, even with pass ready (never a silent switch)"
   printf '%s\n' "$VAL" | bin/secret --set api-token 2> "$S/err" || fail "set: $(cat "$S/err")"
   assert_eq "$(file_mode "$D")" 700 "secrets dir 0700"; assert_eq "$(file_mode "$D/hub")" 700 "service dir 0700"
   assert_eq "$(file_mode "$D/hub/api-token")" 600 "value file 0600"
@@ -129,7 +132,7 @@ linux_schedule() {   # AC4
 linux_work_tmux() {   # AC5, and AGENT_TERMINAL=tmux on either platform (ade-cli `ade ui`)
   linux; rm -f "$S/tmux" "$S/tmux.argv" "$S/osa.log"; bin/new projects/demo >/dev/null 2>&1
   bin/work --no-remote projects/demo > "$S/out" 2> "$S/err" || fail "work: $(cat "$S/err")"
-  grep -q "^new-session -d -s demo -c $HUB/projects/demo bash -l " "$S/tmux.argv" || fail "a detached session named after the folder: $(cat "$S/tmux.argv")"
+  grep -q "^new-session -d -s demo -c $HUB/projects/demo env -i .* bash -l " "$S/tmux.argv" || fail "a detached session named after the folder: $(cat "$S/tmux.argv")"
   grep -q "tmux attach -t demo" "$S/err" || fail "says how to attach: $(cat "$S/err")"
   [ ! -e "$S/osa.log" ] || fail "osascript on Linux"
   local i; for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do [ -e "$S/claude.argv" ] && break; sleep 0.25; done
@@ -139,7 +142,7 @@ linux_work_tmux() {   # AC5, and AGENT_TERMINAL=tmux on either platform (ade-cli
   tmux_kill; rm -f "$S/tmux" "$S/claude.argv"
   echo "ade-hub orchestrator" > "$S/tmux"; : > "$S/tmux.argv"
   bin/work --no-remote --name t-1.1 projects/demo 2> "$S/err" >/dev/null || fail "work into the hub session: $(cat "$S/err")"
-  grep -q "^new-window -d -t =ade-hub: -n t-1_1 -c $HUB/projects/demo bash -l " "$S/tmux.argv" || fail "a window in ade-<hub>: $(cat "$S/tmux.argv")"
+  grep -q "^new-window -d -t =ade-hub: -n t-1_1 -c $HUB/projects/demo env -i .* bash -l " "$S/tmux.argv" || fail "a window in ade-<hub>: $(cat "$S/tmux.argv")"
   grep -q "new-session" "$S/tmux.argv" && fail "no new session when ade-<hub> exists"
   bin/work --no-remote --name t-1.1 projects/demo >/dev/null 2>&1; assert_eq "$?" 3 "the window name is taken"
   tmux_kill; unset AGENT_PLATFORM; rm -f "$S/tmux"; : > "$S/tmux.argv"
@@ -173,6 +176,71 @@ assert any("macos-latest" in j and "bash tests/run.sh" in j for j in jobs), jobs
 PY
 }
 
-ALL="platform_named linux_secrets_pass linux_secrets_file linux_schedule linux_work_tmux linux_monitor_event ci_has_linux_job"
+secret_store_explicit() {   # review 3, 4, 10: the store is chosen in hub.conf; the file store checks its parents
+  linux; local D="$HOME/.config/ade/secrets"
+  printf 'HUB_SECRET_STORE=keychain\n' > hub.conf; printf 'x\n' | bin/secret --set k1 >/dev/null 2>&1; assert_eq "$?" 1 "the Keychain on Linux is refused"
+  printf 'HUB_SECRET_STORE=bogus\n' > hub.conf; bin/secret --list >/dev/null 2>&1; assert_eq "$?" 1 "an unknown store is refused"
+  rm -f hub.conf; HUB_SECRET_STORE=pass bash -c '. bin/lib.sh; secret_store' | grep -qx file || fail "the store comes from hub.conf only, never the environment"
+  rm -f hub.conf; rm -rf "$HOME/.config"
+  mkdir -p "$HOME/.config"; chmod 777 "$HOME/.config"; printf 'x\n' | bin/secret --set k1 >/dev/null 2> "$S/err"; assert_eq "$?" 1 "a world-writable parent is refused"
+  assert_contains "$S/err" "$HOME/.config" "names the parent"; chmod 755 "$HOME/.config"
+  mkdir -p "$D"; chmod 2700 "$D" 2>/dev/null; printf 'x\n' | bin/secret --set k1 2> "$S/err" || fail "a setgid 0700 folder is fine (low 9 bits): $(cat "$S/err")"
+  chmod 750 "$D"; bin/secret k1 >/dev/null 2> "$S/err"; assert_eq "$?" 1 "a 0750 store"; assert_contains "$S/err" "chmod 00700" "the chmod that also clears setgid"; chmod 700 "$D"
+  grep -q 'set -C' bin/lib.sh || fail "temp files are made with noclobber"
+  # doctor: pass is tried without a terminal; entries left in the file store after a switch are named
+  passstore; printf 'v\n' | bin/secret --set p1 2>/dev/null
+  printf '#!/bin/bash\n[ "$1" = show ] && [ ! -t 0 ] && { echo "gpg: decryption failed: No pinentry" >&2; exit 2; }\nexec "%s/bin/pass" "$@"\n' "$S" > "$S/pass2"; chmod +x "$S/pass2"
+  mkdir -p "$S/p2"; cp "$S/pass2" "$S/p2/pass"; PATH="$S/p2:$PATH" DOCTOR_OFFLINE=1 bin/doctor > "$S/out" 2>&1
+  grep -q '^WARN .*secrets.*without a terminal' "$S/out" || fail "doctor tries pass without a TTY: $(grep -i secret "$S/out")"
+  grep -q '^WARN .*file store.*k1\|^WARN .*file store.*1 entr' "$S/out" || fail "doctor names the entries left in the file store: $(grep -i secret "$S/out")"
+  rm -f hub.conf; rm -rf "$HOME/.config"; unset AGENT_PLATFORM PASSWORD_STORE_DIR
+}
+linux_root_refused() {   # review 5
+  bin/new projects/demo >/dev/null 2>&1; linux; touch "$S/root"; AGENT_SYSTEMD_USER_DIR="$S/units-root" bin/schedule install > /dev/null 2> "$S/err"; assert_eq "$?" 2 "schedule as root"
+  assert_contains "$S/err" "create a user" "says what to do"; [ ! -e "$S/units-root" ] || fail "nothing written as root"
+  bin/work --no-remote projects/demo >/dev/null 2> "$S/err"; assert_eq "$?" 2 "work as root"; assert_contains "$S/err" "create a user" "work says why"
+  rm -f "$S/root"; unset AGENT_PLATFORM
+}
+systemd_units_escaped() {   # review 8
+  linux; local U="$S/u2" H2 o; export AGENT_SYSTEMD_USER_DIR="$U"; H2="$HOME"; export HOME="$S/ho%me\$x"; mkdir -p "$HOME"
+  bin/schedule install > "$S/out" 2>&1 || fail "install: $(cat "$S/out")"
+  grep -q '^Environment="PATH=.*/ho%%me\$\$x/.local/bin:' "$U/ade-hub-monitor.service" || fail "Environment= quoted, % and \$ escaped: $(grep Environment "$U/ade-hub-monitor.service")"
+  export HOME="$H2"; printf 'HUB_NAME="bad name"\n' > hub.conf; bin/schedule install >/dev/null 2>&1; assert_eq "$?" 2 "a hub name units cannot carry"
+  rm -f hub.conf; touch "$S/failenable"; bin/schedule install >/dev/null 2>&1; o=$?; rm -f "$S/failenable"; [ "$o" != 0 ] || fail "a failed enable fails the install"
+  rm -rf "$U"; unset AGENT_PLATFORM AGENT_SYSTEMD_USER_DIR
+}
+chat_stop_linux() {   # review 1
+  linux; export AGENT_SYSTEMD_USER_DIR="$S/u3"; mkdir -p "$S/u3"; : > "$S/u3/ade-hub-chat.service"; rm -f "$S/systemctl.argv"
+  bin/chat stop > "$S/out" 2>&1; grep -q -- '--user disable --now ade-hub-chat.service' "$S/systemctl.argv" || fail "chat stop disables the unit: $(cat "$S/out") $(cat "$S/systemctl.argv" 2>/dev/null)"
+  local other; other="$(mktemp -d)"; echo "$other" > "$AGENT_STATE/hub-path"; echo 'HUB_CHAT=telegram' > hub.conf
+  bin/schedule install > "$S/out" 2>&1; [ ! -e "$S/u3/ade-hub-chat.service" ] || fail "no chat unit when another hub has the name"
+  assert_contains "$S/out" "already used" "says why"
+  rm -f hub.conf "$AGENT_STATE/hub-path"; rm -rf "$other" "$S/u3"; unset AGENT_PLATFORM AGENT_SYSTEMD_USER_DIR
+}
+tmux_rules() {   # review 2, 6, 7
+  bin/new projects/demo >/dev/null 2>&1; linux; rm -f "$S/tmux" "$S/claude.env"; : > "$S/tmux.argv"
+  LEAK_CANARY=caller-secret ANTHROPIC_API_KEY=caller-key bin/work --no-remote projects/demo >/dev/null 2> "$S/err" || fail "work: $(cat "$S/err")"
+  local i; for i in $(seq 1 40); do [ -s "$S/claude.env" ] && break; sleep 0.25; done
+  [ -s "$S/claude.env" ] || fail "the session did not start"
+  grep -q 'LEAK_CANARY\|ANTHROPIC_API_KEY' "$S/claude.env" && fail "a caller variable reached the session: $(grep -e LEAK -e ANTHROPIC "$S/claude.env")"
+  bin/work --no-remote --force projects/demo >/dev/null 2> "$S/err" || fail "--force: $(cat "$S/err")"
+  grep -q '^new-session -d -s demo-2 ' "$S/tmux.argv" || fail "--force opens demo-2: $(cat "$S/tmux.argv")"
+  tmux_kill; rm -f "$S/tmux"
+  bin/work --no-remote --name ade-x projects/demo >/dev/null 2> "$S/err"; assert_eq "$?" 2 "a session named ade-*"
+  local other; other="$(mktemp -d)"; echo "$other" > "$AGENT_STATE/hub-path"; echo "ade-hub x" > "$S/tmux"
+  bin/work --no-remote projects/demo >/dev/null 2> "$S/err"; assert_eq "$?" 2 "the hub's tmux session belongs to another hub of that name"
+  assert_contains "$S/err" "HUB_NAME" "says how"
+  rm -f "$AGENT_STATE/hub-path" "$S/tmux"; rm -rf "$other"; tmux_kill; unset AGENT_PLATFORM
+}
+platform_override_guarded() {   # review 9
+  case "$(uname -s)" in Darwin) assert_eq "$(env -u AGENT_PLATFORM_TEST AGENT_PLATFORM=linux bash -c '. bin/lib.sh; platform')" macos "a Mac ignores AGENT_PLATFORM without the test flag" ;;
+    *) assert_eq "$(env -u AGENT_PLATFORM_TEST AGENT_PLATFORM=macos bash -c '. bin/lib.sh; platform')" linux "Linux ignores AGENT_PLATFORM without the test flag" ;; esac
+  local d v; d="$(mktemp -d)"; mkdir -p "$d/.claude"
+  for v in AGENT_PLATFORM AGENT_SECRETS_DIR PASSWORD_STORE_DIR; do printf '{"env":{"%s":"x"}}' "$v" > "$d/.claude/settings.json"
+    ( . bin/lib.sh; provider_checkout_refusal deepseek "$d" ) | grep -q "$v" || fail "the checkout-settings gate refuses $v"; done
+  rm -rf "$d"
+}
+
+ALL="platform_named linux_secrets_pass linux_secrets_file linux_schedule linux_work_tmux linux_monitor_event ci_has_linux_job secret_store_explicit linux_root_refused systemd_units_escaped chat_stop_linux tmux_rules platform_override_guarded"
 for t in ${@:-$ALL}; do "$t"; done
 echo ok
