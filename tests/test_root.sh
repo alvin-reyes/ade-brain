@@ -10,8 +10,8 @@ grep -rqi "orillia\|arjuns57\|jared" bin templates personas docs README.md CLAUD
 # every relative link in an llms.txt index points at a file the hub actually has
 [ ! -f llms.txt ] || for l in $(grep -oE '\]\([^)]+\)' llms.txt | sed -E 's/^\]\(//; s/\)$//' | grep -v '://'); do [ -e "$l" ] || fail "llms.txt links to missing $l"; done
 python3 -c "import json; d=json.load(open('.claude/settings.json')); assert 'attribution' not in d and 'includeCoAuthoredBy' not in d" || fail "the template overrides commit attribution for every hub"
-grep -rni "alvin" templates | grep -qv "github.com/alvin-reyes/ade-brain" && fail "a person's name is hard-coded in templates/ (use {{OWNER}})"
-grep -rni "alvin" bin tests | grep -v "^tests/test_root.sh:" | grep -qv "github.com/alvin-reyes/ade-brain" && fail "a person's name in bin/ or tests/ (test fixtures say Owner)"
+grep -rni "alvin" templates && fail "a person's name is hard-coded in templates/ (use {{OWNER}})"
+grep -rni "alvin" bin tests | grep -v "^tests/test_root.sh:" && fail "a person's name in bin/ or tests/ (test fixtures say Owner)"
 grep -rnE "[A-Z]{4,}_STATE=" tests | grep -vqE "(AGENT|HUB)_STATE=" && fail "a test sets another hub's state variable (only AGENT_STATE)"
 grep -rni "alvin" _bmad/custom && fail "a person's name in _bmad/custom/ (every hub copies it; say 'owner')"
 # every user-facing bin/work flag and the session list are documented

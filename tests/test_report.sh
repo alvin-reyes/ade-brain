@@ -16,6 +16,7 @@ assert_eq "$(bin/stop-check projects/demo)" "" "blocks only once per commit"
 bin/context | grep -q "projects/demo (state may be stale" || fail "root flags stale state"
 echo '{"transcript_path":""}' | bin/session-end projects/demo
 assert_contains "journal/$(date -u +%Y-%m-%d).md" "fix pings" "session-end journals the commits"
+for i in $(seq 1 150); do [ -f .local/brain.db ] && break; sleep 0.2; done   # the hook runs it detached
 [ -f .local/brain.db ] || fail "session-end refreshes the brain index"
 # transcript start time: a session that started after the commit sees nothing new
 printf '{"timestamp":"2099-01-01T00:00:00.000Z"}\n' > "$AGENT_STATE/t.jsonl"
@@ -42,10 +43,18 @@ echo x >> projects/demo/STATE.md; echo "$T" | bin/session-end .
 assert_eq "$(git rev-parse HEAD)" "$h" "hub root session never commits"
 # auto sync: session end starts bin/sync --auto in the background, and never waits on it or fails because of it
 M="$AGENT_STATE/synced"; rm -f "$M"
+# from here bin/brain is a stub that leaves a marker, so a run's detached job (brain index, then the sync) can be waited
+# for. job_done: up to 30 s for this run's brain marker (removed before the run), then until no detached session-end
+# of this hub is left running
+BD="$AGENT_STATE/brain-ran"; printf '#!/bin/bash\ntouch "%s"\n' "$BD" > bin/brain; chmod +x bin/brain
+job_done() {
+  local i=0; while [ ! -e "$BD" ] && [ $i -lt 100 ]; do sleep 0.3; i=$((i + 1)); done
+  while pgrep -f "$HUB/bin/session-end" >/dev/null && [ $i -lt 200 ]; do sleep 0.3; i=$((i + 1)); done
+}
 echo "$T" | AGENT_AUTO_SYNC=1 AGENT_SYNC_CMD="touch $M" bin/session-end projects/demo; assert_eq "$?" "0" "session-end with auto sync exits 0"
-for i in 1 2 3 4 5 6 7 8 9 10; do [ -e "$M" ] && break; sleep 0.3; done
+for i in $(seq 1 100); do [ -e "$M" ] && break; sleep 0.3; done
 [ -e "$M" ] || fail "session end did not start the auto sync"
-rm -f "$M"; echo "$T" | AGENT_AUTO_SYNC=0 AGENT_SYNC_CMD="touch $M" bin/session-end projects/demo; sleep 1
+rm -f "$M" "$BD"; echo "$T" | AGENT_AUTO_SYNC=0 AGENT_SYNC_CMD="touch $M" bin/session-end projects/demo; job_done
 [ -e "$M" ] && fail "AGENT_AUTO_SYNC=0 still started the auto sync"
 t0=$(date +%s); echo "$T" | AGENT_AUTO_SYNC=1 AGENT_SYNC_CMD="sleep 20" bin/session-end projects/demo; rc=$?
 assert_eq "$rc" "0" "slow sync: session-end still exits 0"; [ $(( $(date +%s) - t0 )) -lt 10 ] || fail "session end waited on the sync"
@@ -54,11 +63,11 @@ echo "$T" | AGENT_AUTO_SYNC=1 AGENT_SYNC_CMD="false" bin/session-end projects/de
 echo y > "$R/b" && git -C "$R" add b && git -C "$R" commit -qm "second fix"; rm -f "$M"
 echo '{"transcript_path":""}' | AGENT_AUTO_SYNC=1 AGENT_SYNC_CMD="touch $M" bin/session-end projects/demo
 assert_contains "journal/$(date -u +%Y-%m-%d).md" "second fix" "commits path ran"
-for i in 1 2 3 4 5 6 7 8 9 10; do [ -e "$M" ] && break; sleep 0.3; done; [ -e "$M" ] || fail "commits path did not start the auto sync"
+for i in $(seq 1 100); do [ -e "$M" ] && break; sleep 0.3; done; [ -e "$M" ] || fail "commits path did not start the auto sync"
 # HUB_AUTO_SYNC=0 in hub.conf turns it off too (no AGENT_AUTO_SYNC set)
-rm -f "$M"; echo HUB_AUTO_SYNC=0 > hub.conf
-echo "$T" | env -u AGENT_AUTO_SYNC AGENT_SYNC_CMD="touch $M" bin/session-end projects/demo; sleep 1
+rm -f "$M" "$BD"; echo HUB_AUTO_SYNC=0 > hub.conf
+echo "$T" | env -u AGENT_AUTO_SYNC AGENT_SYNC_CMD="touch $M" bin/session-end projects/demo; job_done
 [ -e "$M" ] && fail "HUB_AUTO_SYNC=0 still started the auto sync"
 rm -f hub.conf; echo "$T" | env -u AGENT_AUTO_SYNC AGENT_SYNC_CMD="touch $M" bin/session-end projects/demo
-for i in 1 2 3 4 5 6 7 8 9 10; do [ -e "$M" ] && break; sleep 0.3; done; [ -e "$M" ] || fail "auto sync is on by default"
+for i in $(seq 1 100); do [ -e "$M" ] && break; sleep 0.3; done; [ -e "$M" ] || fail "auto sync is on by default"
 echo ok

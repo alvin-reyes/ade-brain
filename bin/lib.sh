@@ -291,24 +291,50 @@ staging_url() { echo "${AGENT_STAGING_URL:-${HUB_STAGING_URL:-}}"; }
 keychain_service() { echo "${AGENT_KEYCHAIN_SERVICE:-${HUB_KEYCHAIN_SERVICE:-$(hub_name)}}"; }
 # The sync lock: one bin/sync --yes/--auto run or session-end commit at a time. A directory holding its owner's pid.
 sync_lock_path() { echo "${AGENT_SYNC_LOCK:-$(state_dir)/sync.lock}"; }
-# seconds bin/sync --yes and bin/session-end wait for a busy lock (--auto never waits)
+# seconds bin/sync --yes and bin/session-end --since wait for a busy lock (--auto never waits)
 sync_lock_wait() { echo "${AGENT_LOCK_WAIT:-30}"; }
+# seconds the SessionEnd hook path (bin/session-end without --since) waits for a busy lock
+sync_hook_lock_wait() { echo "${AGENT_HOOK_LOCK_WAIT:-5}"; }
+# seconds a lock without a usable pid file is kept (its taker may not have written the pid yet); fixed
+sync_lock_grace() { echo 10; }
+# proc_start <pid>: the process's start time (ps lstart in UTC and the C locale, so every taker and judge print the same
+# string whatever their TZ or locale; spaces collapsed); nothing when there is no such process
+proc_start() { TZ=UTC LC_ALL=C ps -o lstart= -p "$1" 2>/dev/null | head -1 | tr -s ' ' | sed 's/^ //; s/ $//'; }
 # sync_lock_take <lock> <wait-secs> [log-cmd]: take the lock, trying once a second; a busy lock is retried <wait-secs>
 # times after the first try (attempts are counted, so the wait is at least <wait-secs> seconds).
-# A stale lock (its owner pid is gone, or it is over 120 minutes old) is removed and `<log-cmd> removed stale lock` runs.
+# The lock holds <lock>/start (`<pid> <start time>`, written first; left out when ps gives no start time) and
+# <lock>/pid. It is stale only when its owner is gone: the pid names no process, or a process that started at another
+# time than the start record says (the pid was reused), or there is no usable pid and the lock is older than
+# sync_lock_grace seconds. A live owner's lock is kept however old. A stale lock is removed and
+# `<log-cmd> removed stale lock` runs.
 # Returns 0 holding the lock (pid file = $$), 1 when a live owner still holds it.
 sync_lock_take() {
-  local k="$1" w="${2:-0}" lg="${3:-:}" n=0; mkdir -p "$(dirname "$k")" 2>/dev/null
+  local k="$1" w="${2:-0}" lg="${3:-:}" n=0 t; mkdir -p "$(dirname "$k")" 2>/dev/null
   while :; do
-    mkdir "$k" 2>/dev/null && { echo $$ > "$k/pid"; return 0; }
+    if mkdir "$k" 2>/dev/null; then
+      t=$(proc_start $$); [ -z "$t" ] || echo "$$ $t" > "$k/start"
+      echo $$ > "$k/pid"; return 0
+    fi
     _sync_lock_reap "$k" "$lg" && continue
     [ "$n" -lt "$w" ] || return 1
     n=$((n + 1)); sleep 1
   done
 }
+# _sync_lock_stale <lock>: 0 = stale (the owner rule above). ps -p, not kill -0: kill -0 fails for another user's live
+# process. A start record naming another pid than the pid file, or with no start, leaves the lock judged by pid alone.
 _sync_lock_stale() {
-  local op; op=$(cat "$1/pid" 2>/dev/null)
-  { [ -n "$op" ] && ! kill -0 "$op" 2>/dev/null; } || [ -n "$(find "$1" -maxdepth 0 -mmin +120 2>/dev/null)" ]
+  local op rec m live
+  op=$(cat "$1/pid" 2>/dev/null)
+  case "$op" in
+    ""|*[!0-9]*)
+      m=$(stat -f %m "$1" 2>/dev/null); [ -n "$m" ] || return 1
+      [ $(( $(command date +%s) - m )) -gt "$(sync_lock_grace)" ]; return ;;
+  esac
+  ps -p "$op" >/dev/null 2>&1 || return 0
+  rec=$(head -1 "$1/start" 2>/dev/null)
+  case "$rec" in "$op "?*) rec="${rec#"$op "}" ;; *) return 1 ;; esac
+  live=$(proc_start "$op")
+  [ -n "$live" ] && [ "$live" != "$rec" ]
 }
 # _sync_lock_reap <lock> <log-cmd>: removes <lock> if it is stale; 0 = removed. Only one taker at a time may judge and
 # remove (the guard <lock>.gc, a mkdir), and the lock is judged again inside the guard, so two takers that both saw the
