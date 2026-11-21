@@ -1,0 +1,120 @@
+#!/bin/bash
+# bin/dispatch [--approve <ref>] <folder>: starts a focus builder (bin/work --role builder --name <ref> --prompt "bmad-build <ref>")
+# for each ready_to_start ticket in the folder checkout's BMAD `tickets next`, up to the free slots (story C3).
+# Slots: HUB_DISPATCH_MAX (hub.conf or the environment; unset = 1, above 2 = 2), less the running builder sessions
+# (bin/sessions); a ticket whose session name already runs is not started again and takes a slot.
+# A ticket is started only when its risk is low or medium and it has no hitl: a high-risk, hitl or unknown-risk ticket is
+# printed as "waiting for the owner" and journaled; `--approve <ref>` starts that one ticket when it is ready, not running and
+# a slot is free. Ready-to-refine, in-progress and blocked tickets are never started.
+# Refuses (starts nothing) on any doubt: the folder must have exactly one Code repo whose checkout exists and holds
+# _bmad/ade-runtime.mjs; `tickets next` failing or printing something unreadable, or bin/sessions failing, exits 1.
+# A ref may hold A-Za-z0-9._/- only (else it is skipped); --name gets the ref with every other character turned into -.
+# Every run that gets as far as the ticket list writes one journal line (bin/journal) with what started and what waits.
+# Exit: 0 done (also when nothing was ready), 1 refused or a bin/work start failed, 2 usage.
+set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; B="$(cd "$(dirname "$0")" && pwd)"
+USAGE="usage: bin/dispatch [--approve <ref>] <folder>"
+APPROVE=""
+if [ "${1:-}" = --approve ]; then [ $# -ge 2 ] && [ -n "$2" ] || { echo "$USAGE" >&2; exit 2; }; APPROVE="$2"; shift 2; fi
+[ $# -eq 1 ] || { echo "$USAGE" >&2; exit 2; }
+F="${1%/}"
+folders | grep -qxF -- "$F" || { echo "dispatch: no folder '$F' (projects/<name> or ops/<name>)" >&2; exit 2; }
+MAX="${HUB_DISPATCH_MAX:-1}"
+[[ "$MAX" =~ ^[0-9]+$ ]] || { echo "dispatch: HUB_DISPATCH_MAX must be a whole number (got '$MAX')" >&2; exit 2; }
+[ "$MAX" -le 2 ] || MAX=2
+
+# the checkout: exactly one Code repo (the one bin/work opens by default) with an existing checkout
+A="$H/$F/ACCESS.md"
+nrows=$(awk -F'|' '/^## /{c=($0=="## Code")} /^\|/{n=$2; k=$3; gsub(/^[ \t]+|[ \t]+$/,"",n); gsub(/^[ \t]+|[ \t]+$/,"",k);
+  if((c || k ~ /^[\/~]/) && n!="" && n!="Repo" && n !~ /^-+$/ && n !~ /^\(/) print n}' "$A" 2>/dev/null | grep -c .)
+CK="$(repos_of "$F")"
+[ "$nrows" -eq 1 ] && [ -n "$CK" ] && [ "$(printf '%s\n' "$CK" | grep -c .)" -eq 1 ] ||
+  { echo "dispatch: $F needs exactly one Code repo with an existing checkout in ACCESS.md (repos: $nrows); nothing started" >&2; exit 1; }
+RT="$CK/_bmad/ade-runtime.mjs"
+[ -f "$RT" ] || { echo "dispatch: no BMAD in $CK ($RT missing); nothing started" >&2; exit 1; }
+command -v node >/dev/null 2>&1 || { echo "dispatch: node not found; nothing started" >&2; exit 1; }
+
+T="$(mktemp)"; trap 'rm -f "$T"' EXIT
+if ! J=$(node "$RT" tickets --project-root "$CK" next 2>"$T"); then
+  { echo "dispatch: tickets next failed; nothing started"; [ -z "$J" ] || echo "$J"; cat "$T"; } >&2; exit 1
+fi
+# one line per ticket: R<TAB>ref<TAB>risk<TAB>hitl(0|1) for ready_to_start, O<TAB>ref<TAB>group for the rest,
+# B<TAB>json-quoted ref for a ready ref with other characters
+rows=$(printf '%s' "$J" | python3 -c '
+import json, re, sys
+d = json.load(sys.stdin)
+assert isinstance(d, dict) and isinstance(d.get("ready_to_start"), list)
+ok = re.compile(r"^[A-Za-z0-9._/-]+$")
+def on(v): return v not in (None, False, "", "false", 0)
+for g in ("ready_to_start", "ready_to_refine", "in_progress", "blocked"):
+    rs = d.get(g, [])
+    assert isinstance(rs, list)
+    for r in rs:
+        assert isinstance(r, dict)
+        ref = r.get("ref")
+        if not isinstance(ref, str) or not ok.match(ref):
+            if g == "ready_to_start": print("B\t" + json.dumps(ref))
+            continue
+        if g != "ready_to_start": print("O\t%s\t%s" % (ref, g)); continue
+        risk = r.get("risk") if isinstance(r.get("risk"), str) else ""
+        drift = r.get("drift") if isinstance(r.get("drift"), dict) else {}
+        hitl = on(r.get("hitl")) or "hitl" in drift
+        print("R\t%s\t%s\t%d" % (ref, re.sub(r"[^A-Za-z0-9_-]", "?", risk) or "-", 1 if hitl else 0))
+' 2>/dev/null) || { echo "dispatch: tickets next printed something unreadable; nothing started" >&2; exit 1; }
+
+SESS=$("$B/sessions" </dev/null 2>"$T") || { echo "dispatch: bin/sessions failed; nothing started" >&2; cat "$T" >&2; exit 1; }
+RUNNING=$(printf '%s\n' "$SESS" | awk 'NR>1 && $1!="" {print $1}')
+used=$(printf '%s\n' "$SESS" | awk 'NR>1 && $6=="builder"' | grep -c .)
+runs() { printf '%s\n' "$RUNNING" | grep -qxF -- "$1"; }
+role_of() { printf '%s\n' "$SESS" | awk -v n="$1" 'NR>1 && $1==n {print $6; exit}'; }
+name_of() { printf '%s' "$1" | sed 's/[^A-Za-z0-9._-]/-/g'; }
+# a running ticket session that is not a builder still takes a slot
+while IFS="$(printf '\t')" read -r k ref _; do
+  [ "$k" = R ] || continue; n="$(name_of "$ref")"
+  if runs "$n" && [ "$(role_of "$n")" != builder ]; then used=$((used + 1)); fi
+done <<< "$rows"
+free=$((MAX - used)); [ "$free" -ge 0 ] || free=0
+
+start() {  # start <ref>: one bin/work builder for the ticket
+  "$B/work" --role builder --name "$(name_of "$1")" --prompt "bmad-build $1" "$F" </dev/null
+}
+join() { local IFS=,; [ $# -gt 0 ] && echo "$*" | sed 's/,/, /g' || echo none; }
+
+if [ -n "$APPROVE" ]; then
+  line=$(printf '%s\n' "$rows" | awk -F'\t' -v r="$APPROVE" '$2==r {print; exit}')
+  case "$line" in
+    R*) ;;
+    O*) echo "dispatch: $APPROVE is $(printf "%s" "$line" | cut -f3), not ready to start; nothing started" >&2; exit 1 ;;
+    *) echo "dispatch: no ticket '$APPROVE' in $F's tickets next; nothing started" >&2; exit 1 ;;
+  esac
+  n="$(name_of "$APPROVE")"
+  runs "$n" && { echo "dispatch: $APPROVE already runs (session $n); nothing started" >&2; exit 1; }
+  [ "$free" -gt 0 ] || { echo "dispatch: no free slot (HUB_DISPATCH_MAX $MAX, $used running); nothing started" >&2; exit 1; }
+  if start "$APPROVE"; then
+    echo "started: $APPROVE (approved)"; "$B/journal" "$F" "dispatch: started $APPROVE (approved by the owner)" >/dev/null; exit 0
+  fi
+  echo "dispatch: bin/work failed for $APPROVE" >&2
+  "$B/journal" "$F" "dispatch: bin/work failed for $APPROVE (approved by the owner)" >/dev/null; exit 1
+fi
+
+STARTED=(); WAITING=(); FAILED=""
+while IFS="$(printf '\t')" read -r k ref risk hitl; do
+  case "$k" in
+    B) echo "skipped: a ready ticket with a ref dispatch does not take: $ref" ;;
+    R) n="$(name_of "$ref")"
+      if runs "$n"; then echo "running: $ref (session $n)"; continue; fi
+      why=""
+      [ "$hitl" = 1 ] && why="hitl"
+      case "$risk" in low|medium) ;; high) why="${why:+$why, }high risk" ;; -) why="${why:+$why, }risk not set" ;; *) why="${why:+$why, }risk $risk" ;; esac
+      if [ -n "$why" ]; then
+        WAITING+=("$ref"); echo "waiting for the owner: $ref ($why); start it with bin/dispatch --approve $ref $F"; continue
+      fi
+      [ -z "$FAILED" ] || continue
+      if [ "$free" -le 0 ]; then echo "ready, no free slot: $ref"; continue; fi
+      if start "$ref"; then STARTED+=("$ref"); free=$((free - 1)); echo "started: $ref"
+      else FAILED="$ref"; echo "dispatch: bin/work failed for $ref; no more starts this run" >&2; fi ;;
+  esac
+done <<< "$rows"
+msg="dispatch: started $(join ${STARTED[@]+"${STARTED[@]}"}); waiting for the owner: $(join ${WAITING[@]+"${WAITING[@]}"})"
+[ -z "$FAILED" ] || msg="$msg; bin/work failed for $FAILED"
+"$B/journal" "$F" "$msg" >/dev/null
+[ -z "$FAILED" ]
