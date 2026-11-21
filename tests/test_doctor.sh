@@ -9,4 +9,16 @@ out=$(PATH=/usr/bin:/bin DOCTOR_OFFLINE=1 bin/doctor); echo "$out" | grep -q "re
 echo "$out" | grep -qE "^MISSING +brain index +none yet" || fail "no index reported"
 bin/brain index >/dev/null 2>&1; out=$(DOCTOR_OFFLINE=1 bin/doctor); echo "$out" | grep -qE "^OK +brain index" || fail "fresh index OK"
 echo "- new" >> memory/MEMORY.md; out=$(DOCTOR_OFFLINE=1 bin/doctor); echo "$out" | grep -qE "^MISSING +brain index +1 file" || fail "stale index reported"
+# a folder made before a hook was added to the template: doctor warns; bin/new --settings re-renders only that file
+bin/new projects/old >/dev/null 2>&1; S=projects/old/.claude/settings.json
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); del d["hooks"]["PostToolUse"]; json.dump(d, open(sys.argv[1],"w"))' "$S"
+echo "keep me" > projects/old/STATE.md
+out=$(DOCTOR_OFFLINE=1 bin/doctor); echo "$out" | grep -qE "^WARN +settings projects/old +.*PostToolUse.*bin/new --settings projects/old" || fail "no warning for old settings: [$out]"
+echo "$out" | grep -qE "settings projects/[^o]" && fail "a current folder warned"
+bin/new --settings projects/old >/dev/null || fail "bin/new --settings failed"
+[ -f "$S.bak" ] && ! grep -q PostToolUse "$S.bak" || fail "no .bak copy of the old settings"
+grep -q '"PostToolUse"' "$S" && grep -q "bin/inbox projects/old" "$S" || fail "settings not re-rendered: $(cat "$S")"
+assert_eq "$(cat projects/old/STATE.md)" "keep me" "--settings touches only the settings file"
+DOCTOR_OFFLINE=1 bin/doctor | grep -q "settings projects/old" && fail "still warned after the re-render"
+bin/new --settings projects/none >/dev/null 2>&1; assert_eq "$?" "2" "--settings on a missing folder exits 2"
 echo ok

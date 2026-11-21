@@ -1,6 +1,6 @@
 # C6: focus agents sync and notify each other through hooks
 
-Status: Ready for development (2026-11-21). Risk: high (cross-session messages reach running agents).
+Status: **Done (2026-11-21)** once CI (`bash tests/run.sh` on macOS) is green on this PR; builder suite 30 of 30 ok after the adversarial review's one fix round. Risk: high (cross-session messages reach running agents).
 Owner's intent (2026-11-21): "for our focus agent, we need to ensure they sync and notify each other via hooks."
 Builds on the folder hooks in `templates/folder-settings.json` (SessionStart `bin/context --rules`, UserPromptSubmit
 `bin/changes`, Stop `bin/stop-check`, SessionEnd `bin/session-end`) and `bin/sessions`. Verification: `bash tests/run.sh`.

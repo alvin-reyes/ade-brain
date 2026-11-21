@@ -129,6 +129,9 @@ else
   fi
 fi
 outcome "$RESULT"
+# an `ended` event for the hub's event log (story C6); never for the hub root, never fails the session end
+[ "$F" = . ] || H="$H" ST="$(state_dir)" python3 -I "$(dirname "$0")/events.py" write --auto --from "$F" --to main \
+  --kind ended --text "ended: commits: ${commits:-none}; hub: $RESULT" >/dev/null 2>&1
 # --since (the launcher's and a manual run): the steps in the foreground; the hook path: detached, not waited on
 if [ "$SINCE_GIVEN" = 1 ]; then after_steps; else start_detached; fi
 exit 0

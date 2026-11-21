@@ -37,3 +37,7 @@
 - 2026-11-21: decision 0006 (orchestrators and channels): an orchestrator is a named long-running session per hub with a list of channels; telegram is the first channel type; C5 reworked (10 ACs); ade-cli A2 adds ade orchestrator.
 - 2026-11-21: C4 Done: bash tests/run.sh green (29 of 29, exit 0); the brain indexes each checkout's .ade/context and .ade/knowledge read-only.
 - 2026-11-21: C3 Done: bash tests/run.sh green (30 of 30, exit 0) after the adversarial fix round; bin/dispatch starts at most 2 builders for ready low/medium tickets, high-risk and hitl wait for --approve at a terminal.
+- 2026-11-21: C6 Done: hub event log written by hooks and bin/notify, delivered on prompt, mid-work (bash pre-check, rate-limited) and once before stop; senders validated and labelled claimed; one adversarial fix round (10 findings).
+- 2026-11-21: sharded E1 (docs/stories/E1-gemini-engine-for-builders.md, 9 ACs, high): Gemini CLI as a builder/focus engine; orchestrator stays on Claude Code; GPT/Codex paused.
+- 2026-11-21: sharded E2 (Codex CLI for GPT builders/focus agents, 9 ACs, high), mirrors E1; owner lifted the GPT pause for focus agents.
+- 2026-11-21: owner: no GPT and no Codex; E2 removed. Focus agents: Claude Code, Gemini (E1), DeepSeek, GLM, Muse.

@@ -1,7 +1,11 @@
 #!/bin/bash
 # bin/new <projects|ops>/<name>: a folder from templates/, plus its named agent. Never overwrites.
-set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; F="${1:-}"
-[[ "$F" =~ ^(projects|ops)/[a-z0-9-]+$ ]] || { echo "usage: bin/new projects/<name>|ops/<name> (a-z 0-9 -)" >&2; exit 2; }
+# bin/new --settings <folder>: re-renders only that existing folder's .claude/settings.json from the template (hooks
+# added since the folder was made, story C6), after copying the old file to settings.json.bak.
+set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; F="${1:-}"; SETTINGS=0
+if [ "$F" = --settings ]; then SETTINGS=1; F="${2:-}"; fi
+[[ "$F" =~ ^(projects|ops)/[a-z0-9-]+$ ]] || { echo "usage: bin/new projects/<name>|ops/<name> (a-z 0-9 -) | bin/new --settings <folder>" >&2; exit 2; }
+[ "$SETTINGS" = 0 ] || [ -d "$H/$F" ] || { echo "new: no folder $F" >&2; exit 2; }
 NAME="${F#*/}"; AGENT="$(agent_name "$F")"
 put() {  # template destination
   local dst="$H/$2"; if [ -e "$dst" ]; then echo "kept $2"; return; fi
@@ -17,6 +21,11 @@ open(sys.argv[2], "w").write(s)
 PY
   echo "made $2"
 }
+if [ "$SETTINGS" = 1 ]; then
+  S="$H/$F/.claude/settings.json"
+  if [ -f "$S" ]; then cp -p "$S" "$S.bak" || { echo "new: could not copy $S to $S.bak" >&2; exit 1; }; rm -f "$S"; fi
+  put folder-settings.json "$F/.claude/settings.json"; exit 0
+fi
 put CLAUDE.md "$F/CLAUDE.md"; put ACCESS.md "$F/ACCESS.md"; put STATE.md "$F/STATE.md"
 put MEMORY.md "$F/memory/MEMORY.md"; put folder-settings.json "$F/.claude/settings.json"; put agent.md ".claude/agents/$AGENT.md"
 [ -x "$H/bin/setup" ] && "$H/bin/setup" >/dev/null
