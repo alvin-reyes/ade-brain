@@ -135,9 +135,11 @@ CONF
 render "$T/templates/hub/CLAUDE.md" "$H/CLAUDE.md"
 render "$T/templates/hub/ACCESS.md" "$H/ACCESS.md"
 render "$T/templates/hub/README.md" "$H/README.md"
-# the method at the pinned ref, so a new hub starts in step; offline, it keeps the template's copy (also the pin) and says so
+# the method at the pinned ref, so a new hub starts in step
+# a failed sync (offline, a missing pin, a ref with no rules.md) is recorded, so bin/method check and bin/doctor say so
 HUB="$H" AGENT_METHOD_REPO="$(method_repo)" "$H/bin/method" sync "$(method_pin)" >/dev/null ||
-  echo "init: could not sync the method from $(method_repo); kept the template's copy (run bin/method sync later)" >&2
+  { echo "synced no $(method_pin)" >> "$H/.ade/method-version"
+    echo "init: could not sync the method at $(method_pin) from $(method_repo); kept the template's copy (run bin/method sync)" >&2; }
 mkdir -p "$H/.claude/agents" "$H/journal" "$H/memory" "$H/projects" "$H/ops"
 render "$T/templates/hub/persona-agent.md" "$H/.claude/agents/$PERSONA.md"
 # BMAD's project name and output folder (python: the hub path may hold & or #); a failure stops init, never silently

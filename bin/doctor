@@ -29,6 +29,7 @@ done
 # the method (story C1): one row, the drifted files by name only, never their contents
 mr="$(awk '$1=="ref"{print $2}' "$H/.ade/method-version" 2>/dev/null)"
 if md="$("$H/bin/method" check 2>/dev/null)"; then line OK "method" "ade-method ${mr:-?}"
+elif echo "$md" | grep -q "^not synced at "; then line MISSING "method" "$(echo "$md" | grep "^not synced at " | head -1) (bin/method sync)"
 elif [ -z "$mr" ]; then line MISSING "method" "none recorded: bin/method sync"
 else line MISSING "method" "differs from ade-method $mr: $(echo "$md" | sed 's/^differs: //' | tr '\n' ' ')(bin/method sync)"; fi
 w="$(orchestrator_endpoint_warning)"; [ -z "$w" ] || line WARN "orchestrator" "$w"

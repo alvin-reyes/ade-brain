@@ -63,6 +63,32 @@ init_syncs_method() {
   assert_eq "$(. "$D/hub.conf"; echo "$HUB_METHOD_REF")" "$PIN" "init writes HUB_METHOD_REF"
   (HUB="$D" "$D/bin/method" check >/dev/null) || fail "a new hub starts in step"
 }
+stale_overrides_removed() {
+  # a newer ref (v3) no longer ships bmad-code-review.toml: sync removes it, but never an override the method did not install
+  G="$(mktemp -d)/ade-method"; method_repo "$G" v1; git -C "$G" rm -q bmad/custom/bmad-code-review.toml
+  echo "rules v3" > "$G/rules.md"; git -C "$G" commit -qam v3 && git -C "$G" tag v3
+  fresh; export AGENT_METHOD_REPO="$G"; bin/method sync v1 >/dev/null || fail "sync v1 failed"
+  echo "# mine" > _bmad/custom/mine.toml
+  bin/method sync v3 >/dev/null || fail "sync v3 failed"
+  [ -e _bmad/custom/bmad-code-review.toml ] && fail "an override v3 no longer ships was left in _bmad/custom"
+  assert_eq "$(cat _bmad/custom/mine.toml)" "# mine" "an override the method did not install is kept"
+  [ -f _bmad/custom/bmad-build.toml ] || fail "a shipped override was removed"
+  bin/method check >/dev/null || fail "check after sync v3 exits 0"
+}
+init_records_failed_sync() {
+  # the pin is missing from the repo, or its commit has no rules.md: init goes on, but check and doctor say so
+  N="$(mktemp -d)/ade-method"; method_repo "$N" v1
+  R="$(mktemp -d)/ade-method"; method_repo "$R" "$PIN"; git -C "$R" rm -q rules.md; git -C "$R" commit -qm norules
+  git -C "$R" tag -f "$PIN" >/dev/null
+  for repo in "$N" "$R"; do
+    fresh; D="$(mktemp -d)/h"; AGENT_METHOD_REPO="$repo" bin/init --persona tech-lead --client A --owner B --dest "$D" >/dev/null 2>&1 ||
+      fail "init failed when the method could not sync"
+    out=$(HUB="$D" "$D/bin/method" check 2>&1); assert_eq "$?" "1" "check after a failed init sync exits 1 ($repo)"
+    echo "$out" | grep -q "not synced at $PIN" || fail "check says not synced at the pin: $out"
+    out=$(cd "$D" && HUB="$D" PATH=/usr/bin:/bin DOCTOR_OFFLINE=1 bin/doctor)
+    echo "$out" | grep -E "^MISSING +method " | grep -q "not synced at $PIN" || fail "doctor says not synced at the pin: $out"
+  done
+}
 template_matches_pin() {
   assert_eq "$(awk '$1=="ref"{print $2}' "$REPO/.ade/method-version")" "$PIN" "the template's method is the pinned ref"
   (unset HUB; cd "$REPO" && bin/method check) || fail "the template's .ade/rules.md or _bmad/custom/ differ from $PIN"
@@ -70,5 +96,6 @@ template_matches_pin() {
   return 0
 }
 for t in sync_copies_method version_recorded ref_from_conf_or_arg bad_ref_changes_nothing check_finds_drift \
-         doctor_reports_drift init_syncs_method template_matches_pin; do (set -u; $t) || fail "$t"; done
+         doctor_reports_drift init_syncs_method stale_overrides_removed \
+         init_records_failed_sync template_matches_pin; do (set -u; $t) || fail "$t"; done
 echo ok

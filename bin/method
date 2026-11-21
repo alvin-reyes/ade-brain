@@ -2,10 +2,11 @@
 # bin/method: the hub takes the method from ade-method, its only home (story C1, .ade/context/method.md).
 #   bin/method sync [ref]   copy ade-method's rules.md to .ade/rules.md and bmad/custom/*.toml to _bmad/custom/, at ref
 #                           (default HUB_METHOD_REF from hub.conf, else the template's pin), and record it in .ade/method-version
-#   bin/method check        exit 1 naming each file that differs from the recorded ref, 0 when all match (offline)
+#   bin/method check        exit 1 naming each file that differs from the recorded ref (or "not synced at <ref>" after
+#                           a failed bin/init sync), 0 when all match (offline)
 # An unknown ref or an unreachable repo exits 1 and changes nothing.
 . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; V="$H/.ade/method-version"
-usage() { sed -n '2,6p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+usage() { sed -n '2,7p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
 case "${1:-}" in
   sync)
@@ -24,15 +25,20 @@ case "${1:-}" in
     { echo "# the method this hub runs, from ade-method (bin/method sync); bin/method check compares the files below"
       echo "ref $ref"; echo "commit $commit"
       for f in $files; do echo "file $(sha "$tmp/out/$f") $f"; done; } > "$tmp/out/.ade/method-version"
+    old="$(awk '$1=="file"{print $3}' "$V" 2>/dev/null)"
     mkdir -p "$H/.ade" "$H/_bmad/custom"
     for f in $files .ade/method-version; do cp "$tmp/out/$f" "$H/$f.method-new" && mv "$H/$f.method-new" "$H/$f" ||
       { echo "method: could not write $f" >&2; exit 1; }; done
+    # overrides the previous sync installed that this ref no longer ships (never one the method did not install)
+    for f in $old; do case " $files " in *" $f "*) ;; *) case "$f" in _bmad/custom/*.toml) rm -f "$H/$f"; echo "method: removed $f";; esac;; esac; done
     echo "method: ade-method $ref ($commit) synced: $files"
     ;;
   check)
     [ $# -eq 1 ] || usage
     [ -f "$V" ] || { echo "method: no .ade/method-version (bin/method sync)"; exit 1; }
     rc=0
+    # bin/init could not sync (story C1): the files are the template's, not the pinned ref's
+    nr="$(awk '$1=="synced" && $2=="no"{print $3}' "$V")"; [ -z "$nr" ] || { echo "not synced at $nr"; rc=1; }
     while read -r k h f; do [ "$k" = file ] || continue
       if [ ! -f "$H/$f" ] || [ "$(sha "$H/$f")" != "$h" ]; then echo "differs: $f"; rc=1; fi
     done < "$V"
