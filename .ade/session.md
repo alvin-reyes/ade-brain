@@ -42,3 +42,4 @@
 - 2026-11-21: sharded E2 (Codex CLI for GPT builders/focus agents, 9 ACs, high), mirrors E1; owner lifted the GPT pause for focus agents.
 - 2026-11-21: owner: no GPT and no Codex; E2 removed. Focus agents: Claude Code, Gemini (E1), DeepSeek, GLM, Muse.
 - 2026-11-21: C5 Done: the orchestrator with channels (Telegram first): bin/chat, short-lived 0600 token file, manual mode, lock, allowlist-only without a terminal, launchd service; one adversarial fix round.
+- 2026-11-21: sharded R1 (crash-proof continuity, 12 ACs, high) and C7 (Telegram formatting, buttons, talking to focus agents through the orchestrator, 6 ACs, high).
