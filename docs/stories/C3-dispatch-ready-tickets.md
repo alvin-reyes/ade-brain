@@ -1,6 +1,6 @@
 # C3: `bin/dispatch` starts focus agents for ready tickets
 
-Status: Ready for development (2026-11-21). Risk: high (starts agents unattended). Depends on: C2.
+Status: **Done (2026-11-21)**: `bash tests/run.sh` green (30 of 30 test files ok, exit 0) after the adversarial review's one fix round. Risk: high (starts agents unattended). Depends on: C2.
 Owner's decisions (2026-11-21): every work order is a BMAD ticket; the orchestrator runs one or two agents at a time;
 high-risk tickets stop for the owner before building and before Done, medium and low do not; a ticket may opt in with
 `hitl`. Verification command: `bash tests/run.sh`.
@@ -25,3 +25,6 @@ are listed as waiting for the owner instead; `bin/dispatch --approve <ref> <fold
 ## Out of scope
 The Done checkpoint for high-risk tickets (bmad-build's present step already stops); a schedule for dispatch (run by the
 orchestrator or by hand); trackers other than the repo store (plugins, later).
+
+## Verification
+Reviewer run (2026-11-21, after merging main): 30 ok, 0 FAIL, exit 0. Adversarial review: 10 findings, fixed in one round (session name = ticket, option-injection guard, fullmatch, run lock and start markers, terminal-only --approve plus Claude Code ask rules, max of file and entry risk, untested paths, journal dedupe). Residual risk recorded in .ade/context/dispatch.md.
