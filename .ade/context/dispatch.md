@@ -36,3 +36,6 @@
 - Exit: 0 done; 1 refused (no or several Code repos, no BMAD, no node, `tickets next` failing or unreadable, bin/sessions
   failing, the lock held, `--approve` of a ticket that is not ready, running or has no free slot, or not confirmed at a
   terminal) or a bin/work start failed (no more starts that run); 2 usage or unknown folder.
+
+## Requirement
+Python 3.11 or later (`tomllib`) to compare a ticket's file risk with its entry risk. With an older python3 every ticket that has a leaf file waits for the owner (fail-safe). macOS ships 3.9 at /usr/bin/python3; Ubuntu 24.04 ships 3.12.
