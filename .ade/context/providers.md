@@ -44,7 +44,7 @@ same table, never a copy. Findings: `engines.md`. Decision and terms: `decisions
 - `bin/work --role R <folder>` (story C2): `role_pick R` (`has`, no checkout dir) sets `--provider` and `--model`, then the
   same path and gates as `--provider` (focus go, key read, checkout settings). Excludes `--model`/`--provider` (exit 2);
   unknown role exit 2; none usable exit 1 with each skip. The pick wins over `HUB_MODEL`. Recorded as `role=` in the
-  session entry; `bin/sessions` shows it as the last column, ROLE (`-` when none).
+  session entry; `bin/sessions` shows it in the ROLE column after STARTED (`-` when none).
 - `bin/agent --role R --folder F`, task on stdin, runs in the folder's first checkout (else the hub folder). Exit 0 report;
   1 failed, timed out or killed, never retried elsewhere; 2 refused, nothing ran.
 - Engine: `claude -p --output-format text --no-session-persistence --model M --tools Read,Grep,Glob --safe-mode --restricted

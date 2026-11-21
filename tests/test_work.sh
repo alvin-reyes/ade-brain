@@ -251,8 +251,8 @@ sessions_show_role() {
   for _ in $(seq 1 50); do [ -f "$st/sessions/demo.$lp" ] && break; sleep 0.1; done
   out=$(AGENT_STATE="$st" bin/sessions)
   kill "$(pgrep -P "$lp" | head -1)" 2>/dev/null; wait "$lp" 2>/dev/null
-  echo "$out" | head -1 | grep -q " ROLE\$" || fail "header has ROLE: $out"
-  echo "$out" | grep -q "^demo  *projects/demo .* builder\$" || fail "the session shows its role: $out"
+  echo "$out" | head -1 | grep -q " STARTED  *ROLE  *STATUS " || fail "header has ROLE: $out"
+  echo "$out" | grep -q "^demo  *projects/demo .*Z  *builder  *- " || fail "the session shows its role: $out"
 }
 builder_default_opus() {
   printf '%s\n' 'HUB_MODEL=sonnet' > hub.conf
