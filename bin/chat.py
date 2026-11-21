@@ -4,7 +4,8 @@ bin/chat, never by a person. Env: ACCESS (the channel's access.json), AGENT_CHAT
 each payload as JSON on stdin), AGENT_TELEGRAM_API (default https://api.telegram.org).
 
   chat.py owner SENDER            exit 0 when SENDER is a paired owner (in access.json allowFrom), else 2
-  chat.py send [--buttons REF]    the text on stdin to every paired owner, plain text (no parse mode); --buttons adds
+  chat.py send [--buttons REF]    the text on stdin to every paired owner, plain text (no parse mode); exit 0 once
+                                  any owner got it, each miss named on stderr ("not delivered to <id>"); --buttons adds
                                   Approve / Deny inline buttons (callback data ask:approve:REF, ask:deny:REF). Without
                                   AGENT_CHAT_SEND the bot token is the first line of stdin and the rest is the text.
                                   Exit 0 sent to all, 1 not sent (not paired, or the channel failed)
@@ -37,7 +38,7 @@ def send(argv):
     if not text: return 0
     to = owners()
     if not to: print("chat: not paired (no allowFrom in access.json): nothing sent", file=sys.stderr); return 1
-    ok = True
+    ok = True; got = 0
     for chat_id in to:
         p = {"chat_id": chat_id, "text": text[:4096]}
         if ref:
@@ -46,18 +47,23 @@ def send(argv):
         body = json.dumps(p, ensure_ascii=False)
         if fake:
             import subprocess
-            try: ok = subprocess.run([fake], input=body.encode(), timeout=30).returncode == 0 and ok
-            except Exception: ok = False
+            try: one = subprocess.run([fake], input=body.encode(), timeout=30).returncode == 0
+            except Exception: one = False
+            got += one
+            if not one: print("chat: not delivered to %s" % chat_id, file=sys.stderr)
             continue
         api = os.environ.get("AGENT_TELEGRAM_API", "https://api.telegram.org").rstrip("/")
         req = urllib.request.Request("%s/bot%s/sendMessage" % (api, token), data=body.encode(),
                                      headers={"Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=20) as r: ok = json.load(r).get("ok") is True and ok
+            with urllib.request.urlopen(req, timeout=20) as r: one = json.load(r).get("ok") is True
         except Exception as e:
             # never the URL: it holds the token
-            print("chat: send failed (%s)" % e.__class__.__name__, file=sys.stderr); ok = False
-    return 0 if ok else 1
+            print("chat: send failed (%s)" % e.__class__.__name__, file=sys.stderr); one = False
+        got += one
+        if not one: print("chat: not delivered to %s" % chat_id, file=sys.stderr)
+    # sent once any owner got it (a line is never held back, or sent twice, for one unreachable owner)
+    return 0 if got else 1
 
 
 def width(s):
@@ -98,7 +104,11 @@ def main(a):
     if a[:1] == ["owner"] and len(a) == 2: return 0 if a[1] in owners() else 2
     if a[:1] == ["send"]: return send(a[1:])
     if a[:1] == ["agents"] and len(a) == 3 and a[1] in ("card", "table"): return agents(a[1], a[2])
-    if a[:1] == ["ref"]: print("".join(secrets.choice("abcdefghijkmnopqrstuvwxyz") for _ in range(5))); return 0
+    if a[:1] == ["ref"]:
+        # AGENT_CHAT_REFS (tests): the refs to hand out, the Nth for attempt N
+        fixed = os.environ.get("AGENT_CHAT_REFS", "").split(); n = int(a[1]) if len(a) > 1 and a[1].isdigit() else 0
+        if fixed: print(fixed[min(n, len(fixed) - 1)]); return 0
+        print("".join(secrets.choice("abcdefghijkmnopqrstuvwxyz") for _ in range(5))); return 0
     return 2
 
 

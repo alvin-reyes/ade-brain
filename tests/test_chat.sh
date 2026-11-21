@@ -242,13 +242,15 @@ state_per_orchestrator() {
 }
 
 # ---- story C7: formatting, approvals and talking to focus agents. A fake channel (AGENT_CHAT_SEND) records each
-# payload it is given; a fake bin/sessions lists three agents; a fake bin/notify records its argv.
+# payload it delivers (it fails for everyone with FAKE_SEND_FAIL=1, for one chat id with FAKE_FAIL_FOR); a fake
+# bin/sessions lists three agents; a fake bin/notify records its argv.
 c7_setup() {
   mkdir -p projects/api projects/web ops/infra
   cat > "$FAKE/bin/send" <<'STUB'
 #!/bin/bash
-cat >> "$FAKE/sent"; echo >> "$FAKE/sent"
-[ -z "${FAKE_SEND_FAIL:-}" ] || exit 1
+p="$(cat)"; [ -z "${FAKE_SEND_FAIL:-}" ] || exit 1
+[ -z "${FAKE_FAIL_FOR:-}" ] || case "$p" in *"\"chat_id\": \"$FAKE_FAIL_FOR\""*) exit 1 ;; esac
+printf '%s\n' "$p" >> "$FAKE/sent"
 STUB
   chmod +x "$FAKE/bin/send"; export AGENT_CHAT_SEND="$FAKE/bin/send"; : > "$FAKE/sent"
   [ -f "$FAKE/sessions.real" ] || cp bin/sessions "$FAKE/sessions.real"; [ -f "$FAKE/notify.real" ] || cp bin/notify "$FAKE/notify.real"
@@ -262,20 +264,44 @@ infra            ops/infra                  4103     -        2026-11-21T10:06:0
 T
 STUB
   printf '#!/bin/bash\nfor a in "$@"; do printf "[%%s]" "$a"; done >> "$FAKE/notify.log"; echo >> "$FAKE/notify.log"\n' > bin/notify
-  chmod +x bin/sessions bin/notify; : > "$FAKE/notify.log"; rm -rf "$AGENT_STATE/events.jsonl" "$AGENT_STATE/events-seen" "$AGENT_STATE/chat/asks"
+  chmod +x bin/sessions bin/notify; : > "$FAKE/notify.log"
+  rm -rf "$AGENT_STATE/events.jsonl" "$AGENT_STATE/events.jsonl.1" "$AGENT_STATE/events-seen" "$AGENT_STATE/chat/asks" \
+    "$AGENT_STATE/chat/forward.cursor" "$AGENT_STATE/chat/forward.lock" "$AGENT_STATE/logs/chat-send.log" ops/api
+  access "$CH" allowlist
 }
-c7_done() { cp "$FAKE/sessions.real" bin/sessions; cp "$FAKE/notify.real" bin/notify; unset AGENT_CHAT_SEND AGENT_CHAT_BUTTONS; }
+c7_done() { cp "$FAKE/sessions.real" bin/sessions; cp "$FAKE/notify.real" bin/notify; unset AGENT_CHAT_SEND AGENT_CHAT_BUTTONS AGENT_CHAT_REFS; access "$CH" allowlist; }
+two_owners() { printf '{"dmPolicy": "allowlist", "allowFrom": ["111", "222"], "groups": {}}\n' > "$CH/access.json"; }
 ev() { H="$HUB" ST="$AGENT_STATE" python3 -I bin/events.py write "$@" || fail "event write $*"; }
 sent_texts() { python3 -c 'import json,sys
 for l in open(sys.argv[1]):
     l=l.strip()
     if l: print(json.loads(l)["text"].replace("\n","\\n"))' "$FAKE/sent"; }
+sent_to() { python3 -c 'import json,sys
+for l in open(sys.argv[1]):
+    l=l.strip()
+    if l: d=json.loads(l); print(d["chat_id"], d["text"].replace("\n","\\n"))' "$FAKE/sent"; }
 
 telegram_style_rule() {
   for s in "Telegram replies" "markdownv2" "never a raw Markdown table" "aligned code block" "full text in <path>" \
-    "bin/chat status --card" "● busy" "○ idle" "⚠ blocked" "15 lines" "reply 1 to approve" "bin/chat to --sender" \
-    "bin/chat answer --sender" "bin/chat forward"; do
+    "bin/chat status --card" "● busy" "○ idle" "⚠ blocked" "15 lines" "reply 1 <ref> to approve" "bin/chat to --sender" \
+    "bin/chat answer --sender" "bin/chat forward" "<<'EOF'" "Allow" "claimed"; do
     assert_contains templates/hub/CLAUDE.md "$s" "hub CLAUDE.md Telegram style rule"; done
+}
+
+# AC5: an answer counts only after the owner's own Allow: recording it (and sending as main) is behind a permission
+# prompt in the hub root's settings, which the Telegram plugin shows the paired owner as Allow / Deny buttons
+answer_needs_owner_permission() {
+  python3 - .claude/settings.json "$HUB" <<'PY' || fail "the hub root's permissions.ask does not cover bin/chat answer and to"
+import fnmatch, json, sys
+ask = json.load(open(sys.argv[1]))["permissions"]["ask"]
+pats = [r[5:-1] for r in ask if r.startswith("Bash(") and r.endswith(")")]
+hit = lambda c: any(fnmatch.fnmatchcase(c, p) for p in pats)
+for c in ["bin/chat answer --sender 99887766 <<'EOF'\n1 abcde\nEOF", sys.argv[2] + "/bin/chat answer --sender 1",
+          "bin/chat to --sender 99887766 api <<'EOF'\nrebase\nEOF", "cd /x && bin/chat to --sender 1 web"]:
+    assert hit(c), c
+for c in ["bin/chat status --card", "bin/chat agents", "bin/chat asked abcde", "bin/chat forward"]:
+    assert not hit(c), c
+PY
 }
 
 status_card_golden() {
@@ -287,7 +313,6 @@ status_card_golden() {
 ○ web · projects/web · - · - · idle 13:50Z
 ⚠ infra · ops/infra · ops · - · blocked"
   assert_eq "$out" "$want" "the status card layout"
-  # a later event from the folder clears blocked; no agents gives one title line
   ev --auto --from ops/infra --to main --kind idle --text "unblocked"
   bin/chat status --card | grep -q '^○ infra · ops/infra · ops · - · idle$' || fail "a later idle clears blocked [$(bin/chat status --card)]"
   printf '#!/bin/bash\necho "NAME FOLDER PID PARENT STARTED ROLE STATUS LAST"\n' > bin/sessions
@@ -297,27 +322,31 @@ status_card_golden() {
 
 to_agent_notifies() {
   c7_setup
-  out="$(bin/chat to --sender 99887766 api "rebase on main" 2>&1)" || fail "to api [$out]"
-  assert_eq "$(cat "$FAKE/notify.log")" "[--from][main][projects/api][rebase on main]" "one notify to the resolved folder"
-  : > "$FAKE/notify.log"; bin/chat to --sender 99887766 T-1.2 "and run the tests" >/dev/null 2>&1 || fail "to by agent name"
+  printf '%s\n' "rebase on main; don't \"force\" it" > "$FAKE/msg"
+  out="$(bin/chat to --sender 99887766 api < "$FAKE/msg" 2>&1)" || fail "to api [$out]"
+  assert_eq "$(cat "$FAKE/notify.log")" "[--from][main][projects/api][rebase on main; don't \"force\" it]" "one notify, the text from stdin as it was"
+  assert_eq "$out" "sent to projects/api" "says where it went"
+  : > "$FAKE/notify.log"; echo "and run the tests" | bin/chat to --sender 99887766 T-1.2 >/dev/null 2>&1 || fail "to by agent name"
   assert_eq "$(cat "$FAKE/notify.log")" "[--from][main][projects/api][and run the tests]" "an agent name resolves to its folder"
-  # unknown: a reply listing the agents, no notify
-  : > "$FAKE/notify.log"; out="$(bin/chat to --sender 99887766 billing "hello" 2>&1)"; assert_eq "$?" "2" "an unknown agent"
+  # the text never comes as an argument
+  : > "$FAKE/notify.log"; bin/chat to --sender 99887766 api "as an argument" </dev/null >/dev/null 2>&1; assert_eq "$?" "2" "text as an argument"
+  [ -s "$FAKE/notify.log" ] && fail "an argument text was sent"
+  # unknown: the agents listed, no notify
+  out="$(echo hello | bin/chat to --sender 99887766 billing 2>&1)"; assert_eq "$?" "2" "an unknown agent"
   for a in T-1.2 web infra; do echo "$out" | grep -q "$a" || fail "the reply lists $a [$out]"; done
   [ -s "$FAKE/notify.log" ] && fail "an unknown name notified"
-  # ambiguous: two folders named api among the agents
-  cat > bin/sessions <<'STUB'
-#!/bin/bash
-echo "NAME FOLDER PID PARENT STARTED ROLE STATUS LAST"
-echo "api projects/api 1 - x builder busy -"
-echo "api-ops ops/api 2 - x - idle -"
-STUB
-  mkdir -p ops/api; out="$(bin/chat to --sender 99887766 api "hello" 2>&1)"; assert_eq "$?" "2" "an ambiguous name"
-  echo "$out" | grep -q "ops/api" || fail "the ambiguous reply lists the agents [$out]"; [ -s "$FAKE/notify.log" ] && fail "an ambiguous name notified"
+  # ambiguous like bin/notify: the name is two hub folders (projects/api and ops/api), even with one agent running
+  mkdir -p ops/api; out="$(echo hello | bin/chat to --sender 99887766 api 2>&1)"; assert_eq "$?" "2" "a name of two hub folders"
+  echo "$out" | grep -q "ops/api" || fail "the ambiguous reply names both [$out]"; [ -s "$FAKE/notify.log" ] && fail "an ambiguous name notified"
+  rm -rf ops/api
+  # ambiguous: a session's name is another folder's name (session "web" works in projects/api; projects/web exists)
+  printf '#!/bin/bash\necho "NAME FOLDER PID PARENT STARTED ROLE STATUS LAST"\necho "web projects/api 1 - x - idle -"\n' > bin/sessions
+  echo hello | bin/chat to --sender 99887766 web >/dev/null 2>&1; assert_eq "$?" "2" "a session named after another folder"
+  [ -s "$FAKE/notify.log" ] && fail "that notified"
   # only the paired owner
-  out="$(bin/chat to --sender 11111 web "hi" 2>&1)"; assert_eq "$?" "2" "a sender that is not paired"
+  out="$(echo hi | bin/chat to --sender 11111 web 2>&1)"; assert_eq "$?" "2" "a sender that is not paired"
   echo "$out" | grep -q "not the paired owner" || fail "the refusal says why [$out]"; [ -s "$FAKE/notify.log" ] && fail "an unpaired sender notified"
-  bin/chat to web "hi" >/dev/null 2>&1; assert_eq "$?" "2" "no --sender"; [ -s "$FAKE/notify.log" ] && fail "no sender notified"
+  echo hi | bin/chat to web >/dev/null 2>&1; assert_eq "$?" "2" "no --sender"; [ -s "$FAKE/notify.log" ] && fail "no sender notified"
   c7_done
 }
 
@@ -329,20 +358,20 @@ forward_agent_events_once() {
   ev --auto --from projects/api --to main --kind pushed --text "pushed c7" --repo /x --branch c7
   ev --auto --from projects/web --to main --kind ended --text "2 commits"
   bin/chat forward >/dev/null 2>&1 || fail "forward"
-  want='[api] idle: tests green, PR open
-[web] note: "need the staging URL"
-[web] ended: 2 commits'
-  assert_eq "$(sent_texts)" "$want" "agent events to main are forwarded, tagged, one each"
+  want='[projects/api, claimed] idle: "tests green, PR open"
+[projects/web, claimed] note: "need the staging URL"
+[projects/web, claimed] ended: "2 commits"'
+  assert_eq "$(sent_texts)" "$want" "agent events to main are forwarded, tagged with the folder and claimed, quoted"
   python3 -c 'import json,sys
 for l in open(sys.argv[1]):
     l=l.strip()
     if l: d=json.loads(l); assert d["chat_id"]=="99887766" and "parse_mode" not in d, d' "$FAKE/sent" || fail "sent as plain text to the paired owner"
   : > "$FAKE/sent"; bin/chat forward >/dev/null 2>&1 || fail "forward again"; [ -s "$FAKE/sent" ] && fail "an event was forwarded twice"
-  # a failed send is retried on the next run, then sent once
+  # nobody reached: retried on the next run, then sent once
   ev --auto --from projects/api --to main --kind idle --text "retry me"
   FAKE_SEND_FAIL=1 bin/chat forward >/dev/null 2>&1; assert_eq "$?" "1" "a failed send"
   : > "$FAKE/sent"; bin/chat forward >/dev/null 2>&1 || fail "forward after a failure"
-  assert_eq "$(sent_texts)" "[api] idle: retry me" "the failed event is sent on the next run"
+  assert_eq "$(sent_texts)" '[projects/api, claimed] idle: "retry me"' "the failed event is sent on the next run"
   : > "$FAKE/sent"; bin/chat forward >/dev/null 2>&1; [ -s "$FAKE/sent" ] && fail "the retried event was sent twice"
   # a text that looks like a secret is withheld
   printf '{"time":"2026-11-21T10:00:00Z","from":"projects/api","to":"main","kind":"idle","text":"token=ab12cd34ef"}\n' >> "$AGENT_STATE/events.jsonl"
@@ -350,36 +379,96 @@ for l in open(sys.argv[1]):
   c7_done
 }
 
+forward_partial_failure() {   # several owners, one unreachable: sent once to the one that got it, the miss logged
+  c7_setup; two_owners; ev --auto --from projects/api --to main --kind idle --text "to both"
+  FAKE_FAIL_FOR=222 bin/chat forward >/dev/null 2>&1 || fail "a line one owner got counts as sent"
+  assert_eq "$(sent_to)" '111 [projects/api, claimed] idle: "to both"' "the reachable owner got it"
+  grep -q "not delivered to 222" "$AGENT_STATE/logs/chat-send.log" || fail "the miss is logged with its chat id"
+  bin/chat forward >/dev/null 2>&1; assert_eq "$(sent_to | grep -c '^111 ')" "1" "never resent to the owner that got it"
+  ev --auto --from projects/api --to main --kind idle --text "next"
+  bin/chat forward >/dev/null 2>&1; sent_to | grep -q '^222 \[projects/api, claimed\] idle: "next"' || fail "the queue moved on [$(sent_to)]"
+  c7_done
+}
+
+forward_cap_per_run() {   # at most 20 lines a run; the rest folded into one line, the cursor past them
+  c7_setup; for i in $(seq 1 25); do ev --auto --from projects/api --to main --kind idle --text "e$i"; done
+  bin/chat forward >/dev/null 2>&1 || fail "forward"
+  assert_eq "$(sent_texts | grep -c 'idle: "e')" "20" "20 lines"
+  assert_eq "$(sent_texts | tail -1)" "(5 more events: bin/inbox)" "the rest folded into one line"
+  : > "$FAKE/sent"; bin/chat forward >/dev/null 2>&1; [ -s "$FAKE/sent" ] && fail "the folded events were sent later"
+  c7_done
+}
+
+forward_after_rotation() {   # the log rotated between runs: the rest of the old log first, then the new one
+  c7_setup; ev --auto --from projects/api --to main --kind idle --text "old 1"; bin/chat forward >/dev/null 2>&1
+  ev --auto --from projects/api --to main --kind idle --text "old 2"
+  mv "$AGENT_STATE/events.jsonl" "$AGENT_STATE/events.jsonl.1"; ev --auto --from projects/api --to main --kind idle --text "new 1"
+  : > "$FAKE/sent"; bin/chat forward >/dev/null 2>&1 || fail "forward after rotation"
+  assert_eq "$(sent_texts)" '[projects/api, claimed] idle: "old 2"
+[projects/api, claimed] idle: "new 1"' "the rotated log's rest, then the new log"
+  c7_done
+}
+
+forward_lock() {   # one forwarder at a time; a lock without a pid yet is live for a few seconds
+  c7_setup; ev --auto --from projects/api --to main --kind idle --text "locked"
+  mkdir -p "$AGENT_STATE/chat/forward.lock"; bin/chat forward >/dev/null 2>&1
+  [ -s "$FAKE/sent" ] && fail "a fresh lock with no pid yet was taken over"
+  touch -t 202001010000 "$AGENT_STATE/chat/forward.lock"; bin/chat forward >/dev/null 2>&1
+  [ -s "$FAKE/sent" ] || fail "an old lock with no pid was not taken over"
+  sleep 30 & live=$!; mkdir -p "$AGENT_STATE/chat/forward.lock"; echo "$live" > "$AGENT_STATE/chat/forward.lock/pid"
+  ev --auto --from projects/api --to main --kind idle --text "live holder"; : > "$FAKE/sent"; bin/chat forward >/dev/null 2>&1
+  [ -s "$FAKE/sent" ] && fail "a live holder's lock was taken"; kill "$live"; wait "$live" 2>/dev/null
+  rm -rf "$AGENT_STATE/chat/forward.lock"; c7_done
+}
+
+start_runs_forwarder() {   # bin/chat start runs the forward loop beside the session
+  c7_setup; reset_rec
+  AGENT_CHAT_FORWARD_EVERY=1 FAKE_SLEEP=8 bin/chat start </dev/null >/dev/null 2>&1 & bg=$!
+  wait_for "[ -f '$FAKE_REC/argv' ]" || fail "the session did not start"
+  ev --auto --from projects/api --to main --kind idle --text "while it runs"
+  wait_for "grep -q 'while it runs' '$FAKE/sent'" || fail "the loop forwarded nothing while the session ran"
+  bin/chat stop >/dev/null 2>&1; wait "$bg" 2>/dev/null; c7_done
+}
+
 approvals_buttons_or_numbered() {
   c7_setup
-  ref="$(bin/chat ask "Dispatch T-1.3 (high risk)?")" || fail "ask"
+  ref="$(echo "Dispatch T-1.3 (high risk)?" | bin/chat ask)" || fail "ask"
   [[ "$ref" =~ ^[a-z]{5}$ ]] || fail "ask prints a ref [$ref]"
-  assert_eq "$(sent_texts)" "Dispatch T-1.3 (high risk)?\\nreply 1 to approve, 2 to deny (ref $ref)" "Telegram: numbered replies"
+  assert_eq "$(sent_texts)" "Dispatch T-1.3 (high risk)?\\nreply 1 $ref to approve, 2 $ref to deny" "Telegram: numbered replies with the ref"
   grep -q reply_markup "$FAKE/sent" && fail "buttons sent where the plugin takes none"
-  # an unpaired sender's answer never counts
-  out="$(bin/chat answer --sender 11111 1 2>&1)"; assert_eq "$?" "2" "an unpaired answer"
+  # the question never comes as an argument; one that looks like a secret is refused and nothing is sent
+  bin/chat ask "as an argument" </dev/null >/dev/null 2>&1; assert_eq "$?" "2" "a question as an argument"
+  : > "$FAKE/sent"; echo "use token=ab12cd34ef?" | bin/chat ask >/dev/null 2>&1; assert_eq "$?" "2" "a secret-looking question"
+  [ -s "$FAKE/sent" ] && fail "a secret-looking question was sent"
+  # a long question is cut, never the reply line
+  : > "$FAKE/sent"; r3="$(python3 -c 'print("x" * 5000)' | bin/chat ask)" || fail "a long ask"
+  sent_texts | grep -q "…\\\\nreply 1 $r3 to approve, 2 $r3 to deny$" || fail "the reply line survives a long question [$(sent_texts | cut -c1-80)...]"
+  # an unpaired sender's answer never counts; a bare number (no ref) never counts
+  out="$(echo "1 $ref" | bin/chat answer --sender 11111 2>&1)"; assert_eq "$?" "2" "an unpaired answer"
   echo "$out" | grep -q "not the paired owner" || fail "says why [$out]"
-  assert_eq "$(bin/chat asked "$ref")" "pending" "still pending after an unpaired answer"
-  bin/chat answer --sender 99887766 1 >/dev/null 2>&1 || fail "the owner approves"
-  assert_eq "$(bin/chat asked "$ref")" "approved" "the owner's 1 approves"
+  out="$(echo 1 | bin/chat answer --sender 99887766 2>&1)"; assert_eq "$?" "2" "a bare 1"
+  echo "$out" | grep -q "with its ref" || fail "the refusal asks for the ref [$out]"
+  echo yes | bin/chat answer --sender 99887766 >/dev/null 2>&1; assert_eq "$?" "2" "a bare yes"
+  assert_eq "$(bin/chat asked "$ref")" "pending" "still pending"
+  echo "1 $ref" | bin/chat answer --sender 99887766 >/dev/null 2>&1 || fail "the owner approves"
+  assert_eq "$(bin/chat asked "$ref")" "approved" "the owner's 1 <ref> approves"
   grep -rq "approved $ref" journal/ || fail "the answer is journaled"
-  bin/chat answer --sender 99887766 2 >/dev/null 2>&1; assert_eq "$?" "2" "nothing left pending"
+  echo "2 $ref" | bin/chat answer --sender 99887766 >/dev/null 2>&1; assert_eq "$?" "2" "an answered ask"
   assert_eq "$(bin/chat asked "$ref")" "approved" "a late answer changes nothing"
   # a channel that takes buttons: Approve / Deny buttons, answered by their callback data
-  : > "$FAKE/sent"; r2="$(AGENT_CHAT_BUTTONS=all bin/chat ask "Restart web?")" || fail "ask with buttons"
+  : > "$FAKE/sent"; r2="$(echo "Restart web?" | AGENT_CHAT_BUTTONS=all bin/chat ask)" || fail "ask with buttons"
   python3 -c 'import json,sys
 d=json.loads(open(sys.argv[1]).readline()); k=d["reply_markup"]["inline_keyboard"][0]
 assert [b["text"] for b in k]==["Approve","Deny"], k
 assert [b["callback_data"] for b in k]==["ask:approve:"+sys.argv[2],"ask:deny:"+sys.argv[2]], k
 assert d["text"]=="Restart web?", d' "$FAKE/sent" "$r2" || fail "buttons payload [$(cat "$FAKE/sent")]"
-  bin/chat answer --sender 11111 "ask:approve:$r2" >/dev/null 2>&1; assert_eq "$(bin/chat asked "$r2")" "pending" "an unpaired button press"
-  bin/chat answer --sender 99887766 "ask:deny:$r2" >/dev/null 2>&1 || fail "the owner's button"
+  echo "ask:approve:$r2" | bin/chat answer --sender 11111 >/dev/null 2>&1; assert_eq "$(bin/chat asked "$r2")" "pending" "an unpaired button press"
+  echo "ask:deny:$r2" | bin/chat answer --sender 99887766 >/dev/null 2>&1 || fail "the owner's button"
   assert_eq "$(bin/chat asked "$r2")" "denied" "the owner's Deny button"
-  # two pending: a bare number is ambiguous, a ref picks one
-  a="$(bin/chat ask "one?")"; b="$(bin/chat ask "two?")"
-  bin/chat answer --sender 99887766 1 >/dev/null 2>&1; assert_eq "$?" "2" "a bare answer with two pending"
-  bin/chat answer --sender 99887766 "2 $b" >/dev/null 2>&1 || fail "answer by ref"
-  assert_eq "$(bin/chat asked "$b") $(bin/chat asked "$a")" "denied pending" "the ref picks the ask"
+  # a new ask never reuses a ref that exists (asked, or answered)
+  mkdir -p "$AGENT_STATE/chat/asks"; echo old > "$AGENT_STATE/chat/asks/aaaaa"; echo "approved x" > "$AGENT_STATE/chat/asks/bbbbb.answer"
+  r4="$(echo "fresh?" | AGENT_CHAT_REFS="aaaaa bbbbb ccccc" bin/chat ask)" || fail "ask with taken refs"
+  assert_eq "$r4" "ccccc" "a taken ref is skipped"
   c7_done
 }
 
@@ -412,7 +501,7 @@ PYS
   AGENT_TELEGRAM_API="http://127.0.0.1:$(cat "$SRV/port")" bin/chat forward >"$FAKE/out" 2>&1 || fail "forward through the bot [$(cat "$FAKE/out")]"
   kill "$srv" 2>/dev/null; wait "$srv" 2>/dev/null
   assert_contains "$SRV/req" "/bot$K/sendMessage" "the token is used in the Bot API path"
-  assert_contains "$SRV/req" '"text": "[api] idle: via the bot"' "the text is sent"
+  assert_contains "$SRV/req" '"text": "[projects/api, claimed] idle: \"via the bot\""' "the text is sent"
   grep -qF "$K" "$FAKE/out" && fail "the token was printed"
   grep -qF "$K" "$STORE.argv" && fail "the token is in a security argument"
   c7_done
@@ -421,10 +510,10 @@ PYS
 # bash tests/test_chat.sh <check>: run the checks up to and including one (to see each fail on its own)
 if [ $# -gt 0 ]; then for c in start_launches_channel_session token_short_lived_file missing_token_refuses skip_permissions_refused \
   single_instance stop_and_status start_lock_and_access same_folder_name schedule_installs_chat_job claude_md_forwarded_content_rule channels_from_conf state_per_orchestrator \
-  telegram_style_rule status_card_golden to_agent_notifies forward_agent_events_once approvals_buttons_or_numbered agents_list bot_send_token_on_stdin_only; do
+  telegram_style_rule answer_needs_owner_permission status_card_golden to_agent_notifies forward_agent_events_once forward_partial_failure forward_cap_per_run forward_after_rotation forward_lock start_runs_forwarder approvals_buttons_or_numbered agents_list bot_send_token_on_stdin_only; do
   [ "$c" = "$1" ] && { "$c"; echo ok; exit 0; }; ( "$c" ) >/dev/null 2>&1; done; fi
 start_launches_channel_session; token_short_lived_file; missing_token_refuses; skip_permissions_refused
 single_instance; stop_and_status; start_lock_and_access; same_folder_name; schedule_installs_chat_job; claude_md_forwarded_content_rule; channels_from_conf
 state_per_orchestrator
-telegram_style_rule; status_card_golden; to_agent_notifies; forward_agent_events_once; approvals_buttons_or_numbered; agents_list; bot_send_token_on_stdin_only
+telegram_style_rule; answer_needs_owner_permission; status_card_golden; to_agent_notifies; forward_agent_events_once; forward_partial_failure; forward_cap_per_run; forward_after_rotation; forward_lock; start_runs_forwarder; approvals_buttons_or_numbered; agents_list; bot_send_token_on_stdin_only
 echo ok

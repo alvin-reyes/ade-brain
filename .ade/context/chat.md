@@ -77,3 +77,23 @@
   `<state dir>/chat/asks/<ref>` (the question) and `<ref>.answer` (`approved|denied <UTC>`); a ref is five letters
   a-z without l. `answer` takes `1|2|approve|deny|yes|no [ref]` or the callback data; a bare answer needs exactly one
   pending ask; an answered ask never changes; each answer is one journal line `chat: <approved|denied> <ref>: <question>`.
+
+## C7 review (adversarial, one fix round)
+- **Owner's Allow:** `.claude/settings.json` (hub root) `permissions.ask` holds `Bash(*bin/chat answer*)`,
+  `Bash(*bin/chat to *)` (and the `ade chat` forms): recording an answer and sending as main raise a permission prompt,
+  which the plugin shows the paired owner as Allow / Deny. `asked`, `agents`, `status`, `forward` do not.
+- **Stdin only:** `to --sender <id> <agent>`, `ask` and `answer --sender <id>` read the owner's text from stdin (a
+  quoted heredoc); an argument or an empty stdin exits 2. Lines are joined with spaces. `ask` refuses a question that
+  matches the event log's secret patterns (`events.py secret`), and cuts a question over 3500 characters to 3499 plus
+  "…", never the reply line `reply 1 <ref> to approve, 2 <ref> to deny`.
+- **Answers need the ref:** `1|2|approve|deny|yes|no <ref>` or `ask:(approve|deny):<ref>`; a bare one exits 2. A new ref
+  is never one that exists in `asks/` (asked or answered); `AGENT_CHAT_REFS` (tests) fixes the sequence.
+- **`to` resolution:** the name must match a running agent; with a bare name, the hub folders of that name
+  (`projects/<n>`, `ops/<n>`) join the candidates, so `projects/x` + `ops/x`, or a session named after another
+  folder, is ambiguous (exit 2, candidates named). Success prints `sent to <folder>`.
+- **Forward lines:** `[<folder>, claimed] <kind>: "<text>"` (JSON-quoted for every kind). At most 20 a run; the rest
+  become `(N more events: bin/inbox)` and the cursor moves past them. A line counts as sent once any owner got it;
+  each miss is logged as `chat: not delivered to <id>` in `<state dir>/logs/chat-send.log` (never the journal); none
+  reached: exit 1, retried. After a rotation the cursor's old log (`events.jsonl.1`, same inode) is read from the
+  cursor first, then the new log.
+- **Forward lock:** a lock with no pid yet is live for 10 s (its folder's mtime), then taken over.

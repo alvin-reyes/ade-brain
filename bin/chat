@@ -12,13 +12,14 @@
 # Story C7 (the orchestrator is the switchboard between the owner's chat and the focus agents):
 #   status --card                 the status card: a title line, then one line per agent (● busy ○ idle ⚠ blocked)
 #   agents                        the /agents table: name, folder, role, ticket, state
-#   to --sender <id> <agent> <text>  one bin/notify from main to that agent's folder (an agent name, folder or folder
-#                                 name among the running agents); unknown or ambiguous: exit 2 with the agents listed
+#   to --sender <id> <agent>      the text on stdin: one bin/notify from main to that agent's folder ("sent to <folder>");
+#                                 unknown or ambiguous (as bin/notify): exit 2 with the agents listed
 #   forward                       send the agents' idle/ended/note events to main to the chat, tagged [<agent>], once
 #                                 each (start runs it every AGENT_CHAT_FORWARD_EVERY s, default 15, 0 = never)
-#   ask <question>                offer an approval: Approve/Deny buttons where the channel takes them, else "reply 1
-#                                 to approve, 2 to deny (ref <ref>)"; prints the ref
-#   answer --sender <id> <reply>  record the owner's answer (1, 2, approve, deny, optionally a ref; or a button's data)
+#   ask                           the question on stdin: Approve/Deny buttons where the channel takes them, else "reply
+#                                 1 <ref> to approve, 2 <ref> to deny"; prints the ref. A secret-looking question: exit 2
+#   answer --sender <id>          the reply on stdin: "1 <ref>" / "2 <ref>" (always with the ref) or a button's data.
+#                                 It and `to` sit behind permissions.ask (.claude/settings.json): the owner's own Allow
 #   asked <ref>                   pending, approved or denied
 # --sender is the user_id of the inbound channel message: only a paired owner (access.json allowFrom) counts.
 # Never skips permissions: dangerously/bypassPermissions in an argument, a HUB setting or the claude wrapper exits 2.
@@ -27,7 +28,7 @@
 set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; S="$(state_dir)"; PIDF="$S/chat/chat.pid"; LOCK="$S/chat/lock"
 LA="${AGENT_LAUNCHAGENTS:-$HOME/Library/LaunchAgents}"; LABEL="ai.agent-hub.$(hub_name).chat"
 NAME="${HUB_ORCHESTRATOR:-$(hub_name)}"
-usage() { echo "usage: bin/chat start | stop | status [--card] | setup [channel] | agents | to --sender <id> <agent> <text> | forward | ask <question> | answer --sender <id> <reply> | asked <ref> (channels: $(channel_types))" >&2; exit 2; }
+usage() { echo "usage: bin/chat start | stop | status [--card] | setup [channel] | agents | to --sender <id> <agent> (text on stdin) | forward | ask (question on stdin) | answer --sender <id> (reply on stdin) | asked <ref> (channels: $(channel_types))" >&2; exit 2; }
 CHANNELS="${HUB_CHANNELS-telegram}"
 check_channels() {
   [ -n "${CHANNELS// /}" ] || { echo "chat: HUB_CHANNELS is empty (known channel types: $(channel_types))" >&2; exit 2; }
@@ -77,8 +78,17 @@ ev_py() { H="$H" ST="$S" python3 -I "$PY_EV" "$@"; }
 agents_view() { local s; s="$("$H/bin/sessions" 2>/dev/null)" || { echo "chat: bin/sessions failed" >&2; return 1; }
   printf '%s\n' "$s" | LATEST="$(ev_py latest 2>/dev/null)" python3 -I "$PY_CHAT" agents "$1" "$2"; }
 # resolve <agent>: the one folder among the running agents that the name names (agent name, folder, or folder name)
-resolve() { "$H/bin/sessions" 2>/dev/null | awk -v t="$1" 'NR>1 && NF>=2 { n=$2; sub(/.*\//,"",n); if ($1==t || $2==t || n==t) f[$2]=1 }
-  END { for (k in f) { c++; o=k } if (c==1) print o; exit c!=1 }'; }
+# resolve <agent>: the one folder it names. It must match a running agent (its name, folder, or folder's name); it is
+# ambiguous, as in bin/notify, when the name is more than one hub folder (projects/x and ops/x) or a session's name is
+# another folder's name. Prints the candidates on stderr when there is not exactly one.
+resolve() { local c t; c="$("$H/bin/sessions" 2>/dev/null | awk -v t="$1" 'NR>1 && NF>=2 { n=$2; sub(/.*\//,"",n); if ($1==t || $2==t || n==t) print $2 }')"
+  [ -n "$c" ] || return 1
+  case "$1" in */*) ;; *) for t in projects ops; do [ -d "$H/$t/$1" ] && c="$c"$'\n'"$t/$1"; done ;; esac
+  c="$(printf '%s\n' "$c" | sort -u | grep .)"
+  [ "$(printf '%s\n' "$c" | grep -c .)" = 1 ] || { echo "chat: '$1' names more than one folder: $(printf '%s\n' "$c" | tr '\n' ' ')" >&2; return 1; }
+  printf '%s\n' "$c"; }
+# owner text (a /to message, a question, an answer) comes on stdin, from a quoted heredoc: never a shell argument
+read_text() { local t; [ -t 0 ] && return 1; t="$(cat)"; t="$(printf '%s' "$t" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"; [ -n "$t" ] || return 1; printf '%s' "$t"; }
 pending() { local f; for f in "$ASKS"/*; do [ -f "$f" ] || continue; case "$f" in *.answer) continue ;; esac
   [ -f "$f.answer" ] || basename "$f"; done; }
 
@@ -167,37 +177,49 @@ This orchestrator's channel state stays in $(channel_dir "$c"), never in the sha
 EOF
     ;;
   agents) [ $# -eq 1 ] || usage; agents_view table "" ;;
-  to) [ "${2:-}" = --sender ] && [ $# -eq 5 ] || usage; is_owner "$3" || exit 2
+  to) [ "${2:-}" = --sender ] && [ $# -eq 4 ] || usage; is_owner "$3" || exit 2
+    text="$(read_text)" || { echo "chat: the message comes on stdin (bin/chat to --sender <id> <agent> <<'EOF' ... EOF)" >&2; exit 2; }
     if ! f="$(resolve "$4")"; then echo "chat: no single agent named '$4'; the agents:" >&2; agents_view table "" >&2; exit 2; fi
-    "$H/bin/notify" --from main "$f" "$5" ;;
+    "$H/bin/notify" --from main "$f" "$text" && echo "sent to $f" ;;
   forward) [ $# -eq 1 ] || usage; mkdir -p "$S/chat" && chmod 700 "$S/chat" || exit 1; FL="$S/chat/forward.lock"
     # one forwarder at a time; a lock whose holder is gone is taken over
+    # a lock with no pid yet belongs to a forwarder that is just starting: live for 10 s (the folder's mtime)
     if ! mkdir "$FL" 2>/dev/null; then p="$(cat "$FL/pid" 2>/dev/null)"
-      case "$p" in ''|*[!0-9]*) ;; *) kill -0 "$p" 2>/dev/null && exit 0 ;; esac
+      case "$p" in ''|*[!0-9]*) m="$(stat -f %m "$FL" 2>/dev/null || echo 0)"; [ $(( $(date +%s) - m )) -gt 10 ] || exit 0 ;;
+        *) kill -0 "$p" 2>/dev/null && exit 0 ;; esac
       rm -rf "${FL:?}"; mkdir "$FL" 2>/dev/null || exit 0; fi
     echo $$ > "$FL/pid"; trap 'rm -rf "${FL:?}"' EXIT
     out="$(ev_py outbox)" || { echo "chat: the event log is unreadable" >&2; exit 1; }
+    # at most CAP lines a run; the rest become one "(N more events: bin/inbox)" line and the cursor moves past them.
+    # A line counts as sent once any owner got it; each miss goes to <state dir>/logs/chat-send.log.
+    CAP=20; n=0; last=""; total="$(printf '%s\n' "$out" | grep -c .)"; SL="$S/logs/chat-send.log"; mkdir -p "$S/logs"
     while IFS="$(printf '\t')" read -r cur text; do [ -n "$cur" ] || continue
-      printf '%s\n' "$text" | chat_send || exit 1
+      n=$((n + 1)); if [ "$n" -gt "$CAP" ]; then last="$cur"; continue; fi
+      printf '%s\n' "$text" | chat_send 2>>"$SL" || exit 1
       ev_py ack $cur || exit 1
-    done <<< "$out" ;;
-  ask) [ $# -eq 2 ] && [ -n "$2" ] || usage; mkdir -p "$ASKS" && chmod 700 "$S/chat" || exit 1
-    ref="$(python3 -I "$PY_CHAT" ref)" && [ -n "$ref" ] || exit 1; printf '%s\n' "$2" > "$ASKS/$ref"
+    done <<< "$out"
+    if [ -n "$last" ]; then echo "($((total - CAP)) more events: bin/inbox)" | chat_send 2>>"$SL" || exit 1; ev_py ack $last || exit 1; fi ;;
+  ask) [ $# -eq 1 ] || usage; mkdir -p "$ASKS" && chmod 700 "$S/chat" || exit 1
+    q="$(read_text)" || { echo "chat: the question comes on stdin (bin/chat ask <<'EOF' ... EOF)" >&2; exit 2; }
+    printf '%s' "$q" | ev_py secret && { echo "chat: refused: the question looks like it holds a secret; nothing sent" >&2; exit 2; }
+    # the question is cut to fit one message; the reply line never is
+    [ "${#q}" -le 3500 ] || q="$(printf '%s' "$q" | python3 -I -c 'import sys; print(sys.stdin.read()[:3499] + "\u2026", end="")')"
+    # a ref that exists (asked or answered) is never handed out again
+    ref=""; for i in 0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19; do r="$(python3 -I "$PY_CHAT" ref "$i")" || exit 1
+      [ -e "$ASKS/$r" ] || [ -e "$ASKS/$r.answer" ] || { ref="$r"; break; }; done
+    [ -n "$ref" ] || { echo "chat: could not pick a free ref" >&2; exit 1; }; printf '%s\n' "$q" > "$ASKS/$ref"
     b="${AGENT_CHAT_BUTTONS:-$(channel_buttons "$(first_channel)")}"
-    if [ "$b" = all ]; then printf '%s\n' "$2" | chat_send --buttons "$ref"
-    else printf '%s\nreply 1 to approve, 2 to deny (ref %s)\n' "$2" "$ref" | chat_send; fi || { rm -f "${ASKS:?}/${ref:?}"; exit 1; }
+    if [ "$b" = all ]; then printf '%s\n' "$q" | chat_send --buttons "$ref"
+    else printf '%s\nreply 1 %s to approve, 2 %s to deny\n' "$q" "$ref" "$ref" | chat_send; fi || { rm -f "${ASKS:?}/${ref:?}"; exit 1; }
     echo "$ref" ;;
-  answer) [ "${2:-}" = --sender ] && [ $# -eq 4 ] || usage; is_owner "$3" || exit 2; a="$4"; ref=""
+  answer) [ "${2:-}" = --sender ] && [ $# -eq 3 ] || usage; is_owner "$3" || exit 2; ref=""
+    a="$(read_text)" || { echo "chat: the answer comes on stdin (bin/chat answer --sender <id> <<'EOF' ... EOF)" >&2; exit 2; }
+    # an answer always names its ask: "1 <ref>", "2 <ref>", or a button's ask:approve:<ref> (never a bare 1 or yes)
     if [[ "$a" =~ ^ask:(approve|deny):([a-z]{5})$ ]]; then v="${BASH_REMATCH[1]}"; ref="${BASH_REMATCH[2]}"
-    elif [[ "$a" =~ ^[[:space:]]*(1|2|approve|deny|yes|no)([[:space:]]+([a-z]{5}))?[[:space:]]*$ ]]; then v="${BASH_REMATCH[1]}"; ref="${BASH_REMATCH[3]}"
-    else echo "chat: not an answer (reply 1 to approve, 2 to deny)" >&2; exit 2; fi
+    elif [[ "$a" =~ ^[[:space:]]*(1|2|approve|deny|yes|no)[[:space:]]+([a-z]{5})[[:space:]]*$ ]]; then v="${BASH_REMATCH[1]}"; ref="${BASH_REMATCH[2]}"
+    else echo "chat: not an answer: reply with its ref, 1 <ref> to approve or 2 <ref> to deny" >&2; exit 2; fi
     case "$v" in 1|approve|yes) v=approved ;; *) v=denied ;; esac
     p="$(pending)"
-    if [ -z "$ref" ]; then set -- $p
-      if [ $# -ne 1 ]; then
-        if [ $# -eq 0 ]; then echo "chat: nothing is waiting for an answer" >&2; else echo "chat: more than one is waiting ($*); reply with the ref too: 1 <ref>" >&2; fi
-        exit 2; fi
-      ref="$1"; fi
     printf '%s\n' "$p" | grep -qx "$ref" || { echo "chat: no ask $ref is waiting" >&2; exit 2; }
     echo "$v $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$ASKS/$ref.answer"; q="$(head -1 "$ASKS/$ref")"
     "$H/bin/journal" . "chat: $v $ref: $q"; echo "$v $ref: $q" ;;
