@@ -3,8 +3,21 @@
 # event (repo, branch) and an Edit/Write under a checkout's .ade/context/ as a `contract` event (repo, path), then
 # delivers this session's unread events from $(state_dir)/events.jsonl as additionalContext JSON, at most once per 60 s
 # per session (hook stdin session_id), each line marked as data, not instructions. Story C6, .ade/context/events.md.
-# Reads stdin for at most 1 s; always exits 0 (a broken log never blocks a session).
+# Cheap path first, in bash: a call that mentions neither a push nor .ade/context/ starts no python when the log is
+# not newer than the session's cursor or its last delivery is under 60 s old. Reads stdin for at most 1 s (a stdin
+# that never closes counts as empty); always exits 0 (a broken log never blocks a session).
 . "$(dirname "$0")/lib.sh" 2>/dev/null || exit 0
-F="${1:-}"; R=""; [ -z "$F" ] || R="$(repos_of "$F" 2>/dev/null)"
-H="$(hub_root)" ST="$(state_dir)" REPOS="$R" python3 -I "$(dirname "$0")/events.py" hook-tool "$F" 2>/dev/null
+F="${1:-}"; IN=""; IFS= read -r -d '' -t 1 IN
+re='"session_id"[[:space:]]*:[[:space:]]*"([A-Za-z0-9_-]{1,80})"'; SID=""; [[ "$IN" =~ $re ]] && SID="${BASH_REMATCH[1]}"
+ST="$(state_dir)"; E="$ST/events.jsonl"; C="$ST/events-seen/$SID"
+case "$IN" in
+  *push*|*/.ade/context/*) ;;
+  *) [ -n "$SID" ] || exit 0
+     # no log yet: this session's baseline is the empty log (it will read every event from the first one)
+     [ -f "$E" ] || { [ -f "$C" ] || { mkdir -p "$ST/events-seen" 2>/dev/null && printf '0 0\n' > "$C" 2>/dev/null; }; exit 0; }
+     [ -f "$C" ] && [ "$C" -nt "$E" ] && exit 0
+     if [ -f "$C.at" ]; then a=$(stat -f %m "$C.at" 2>/dev/null); [ -n "$a" ] && [ $(( $(date +%s) - a )) -lt 60 ] && exit 0; fi ;;
+esac
+R=""; [ -z "$F" ] || R="$(repos_of "$F" 2>/dev/null)"
+printf '%s' "$IN" | H="$(hub_root)" ST="$ST" REPOS="$R" python3 -I "$(dirname "$0")/events.py" hook-tool "$F" 2>/dev/null
 exit 0
