@@ -392,11 +392,11 @@ FORWARDED = ("idle", "ended", "note")
 
 
 def chat_text(e):
-    """one chat line for an agent's event: tagged with the agent (its folder's name), the text cleaned, a note quoted"""
+    """one chat line for an agent's event: tagged with its full folder and "claimed" (senders are not authenticated),
+    the text cleaned and JSON-quoted for every kind, so it reads as data"""
     txt = clean(e.get("text", ""))
     if secret(txt): txt = "(text withheld: looks like a secret)"
-    if e.get("kind") == "note": txt = json.dumps(txt, ensure_ascii=False)
-    return "[%s] %s: %s" % (str(e.get("from")).split("/")[-1], e.get("kind"), txt)
+    return "[%s, claimed] %s: %s" % (e.get("from"), e.get("kind"), json.dumps(txt, ensure_ascii=False))
 
 
 def _window():
@@ -412,9 +412,31 @@ def _window():
     return ino, off, size, c is None
 
 
+def _rest_of_rotated(c):
+    """the cursor names the log that rotated away (events.jsonl.1): its lines after the cursor, as (inode, lines)"""
+    old = LOG + ".1"
+    try: st = os.stat(old)
+    except OSError: return None
+    if not c or st.st_ino != c[0] or not stat.S_ISREG(st.st_mode) or c[1] >= st.st_size: return None
+    with open(old, "rb") as fh:
+        fh.seek(c[1]); data = fh.read(st.st_size - c[1])
+    return st.st_ino, _parse(data, c[1])
+
+
+def _forwardable(e):
+    return e.get("kind") in FORWARDED and e.get("to") in ("main", "all") and FROM_RE.match(str(e.get("from", ""))) \
+        and e.get("from") != "main"
+
+
 def outbox():
     try: ino, off, size, first = _window()
     except OSError: return 1
+    c = _pos(FORWARD)
+    if c and c[0] != ino:
+        r = _rest_of_rotated(c)   # rotated since the last run: the old log's rest goes first
+        if r:
+            for pos, e in r[1]:
+                if _forwardable(e): print("%d %d\t%s" % (r[0], pos, chat_text(e)))
     if size - off > 1 << 20: off = size - (1 << 20)
     if size <= off:
         if _pos(FORWARD) != (ino, off): save(FORWARD, (ino, off))
@@ -423,8 +445,7 @@ def outbox():
         fh.seek(off); data = fh.read(size - off)
     cut = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - BACKLOG))
     for pos, e in _parse(data, off):
-        if e.get("kind") not in FORWARDED or e.get("to") not in ("main", "all"): continue
-        if not FROM_RE.match(str(e.get("from", ""))) or e.get("from") == "main": continue
+        if not _forwardable(e): continue
         if first and str(e.get("time", "")) < cut: continue
         print("%d %d\t%s" % (ino, pos, chat_text(e)))
     return 0
@@ -495,6 +516,7 @@ def main(a):
     if a[:1] == ["ack"] and len(a) == 3 and a[1].isdigit() and a[2].isdigit(): save(FORWARD, (int(a[1]), int(a[2]))); return 0
     if a[:1] == ["latest"]: return latest()
     if a[:1] == ["repair"]: return repair(a[1:] == ["--check"])
+    if a[:1] == ["secret"]: return 0 if secret(sys.stdin.read()) else 1   # bin/chat ask: exit 0 = looks like a secret
     own = a[1] if len(a) > 1 else ""
     try:
         if a[:1] == ["hook-tool"]: hook_tool(own); return 0
