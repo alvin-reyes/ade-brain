@@ -1,0 +1,64 @@
+{
+  "generation_hash": "0b904b9b52ebc4b25187",
+  "inputs": {
+    "project_root": "/Users/alvin-reyes/Project/ai-agent-hub-template",
+    "renderer_sha256": "358578b7fb10cd482e74993b479de3b97443a711539d37f8d4ba270369bb1aff",
+    "resolved_values": {
+      "config.core.output_folder": "_bmad-output",
+      "customization.workflow.activation_steps_append": [],
+      "customization.workflow.activation_steps_prepend": [],
+      "customization.workflow.implementation_handoff": "Launch a subagent on the Opus model (pass model \"opus\" to the Agent tool) with no prior conversation context, with this prompt:\n> Read {plan_file} fully and implement it — the plan is the sole source of truth. Load every file listed in its frontmatter `context:` before you start.\n>\n> When done, report what you changed, how you verified it, and anything left incomplete or risky.\n",
+      "customization.workflow.on_complete": "",
+      "customization.workflow.open_plan": "",
+      "customization.workflow.persistent_facts": [
+        "Code is written only by an Opus model (Opus 5.5 or later). If this session is not running on Opus, take route full whatever the size, so the Opus implementation subagent writes the code.",
+        "Every review-lens subagent this workflow launches (the oneshot review and step-04, quick or thorough) runs on the Sonnet model: pass model \"sonnet\" to the Agent tool for each one. This replaces the rule that review subagents match the session's model. Triage stays in this session. Exception: when the user asks for an Opus review, launch the lenses on \"opus\" instead."
+      ],
+      "customization.workflow.quick_lenses": [
+        {
+          "id": "quick",
+          "instruction": "Launch a context-free subagent with this prompt:\n\nRead `{plan_file}` — the plan holding the acceptance criteria and intent — and the files its frontmatter `context:` lists. Read the agent instruction files (`AGENTS.md`, `CLAUDE.md`, or equivalents) at the repository root and in the directories the diff touches; those are the rules. Then read the unified diff at `{diff_file}` — it is the change under review.\n\nReport unmet acceptance criteria, broken rules, and bugs. Each finding: the location, what goes wrong, and evidence checked against the surrounding code. Output a Markdown list of findings only — no severity, priority, or ranking.\n\nDo not invoke any skill, and do not spawn subagents of your own — you are the reviewer. Return your findings as text in your final message; do not route them through any findings-reporting tool the host may offer.\n\n",
+          "name": "Quick"
+        }
+      ],
+      "customization.workflow.review": "quick",
+      "customization.workflow.route": "auto",
+      "customization.workflow.route_selection": "Decide whether to use a coding subagent (full) or implement directly (oneshot).\nIf this session is not running on Opus, choose full.\nOtherwise, using the information already gathered, with no further reading and minimal\nextra reasoning, estimate the lines of code to add or modify.\n200 lines or fewer: oneshot. Otherwise: full.\nIf the change touches more than five files and is not simple or mechanical,\nconsider upgrading to full.\n"
+    },
+    "skill_root": ".claude/skills/bmad-build",
+    "source_sha256": {
+      "plan-template.md": "f27a97ac7e90b1d8c129e5836029dbef85263bce7d81399f3201970ef26b717c",
+      "references/claims-check.md": "6cb20a86d819b95272876bca0dffef59ca07ba6a373d804295066751043867c0",
+      "references/deletion-check.md": "0f1f124e4e957147e89164a272b10bedc694ad0d9ad2618c8610ac74ee9cb0da",
+      "review-prompts/edge-case-hunter.md": "b909fe0ec8e4daaf2550d0ec783618c5146261d0dbc0e054698ce00d0905a3d1",
+      "review-prompts/verification-gap.md": "45ab0b8c4c56c5c055c97a293a8591a67e256d0b1a2058ce1f093cd866be8d03",
+      "step-01-clarify-and-route.md": "2bdc905370e8d982ddd53591df26e63e1c635c199b76f453797ee0fc299d9028",
+      "step-02-plan.md": "79df56a93fb25a5fd72b25c0fa9f85a39f9b14076a1b16321ce1d6778b6f2f99",
+      "step-03-implement.md": "df1a0f8a8fdb524581d371505a12a33a25d5150ecb442a58a9d8145d2b284954",
+      "step-04-review.md": "170bbabde8a2a1172db409e56d1efa5e9d4f03ae8e7ea12c96d680c448d1aca6",
+      "step-05-present.md": "8c3a4f5e627524b05c3f1db4850b6ab68ae6930d8046c340a3e1590dccc4ed61",
+      "step-oneshot.md": "430727834dd9c1c8355a3f5e163f3be1b70ea2ef47228fada5586b4a0627a863",
+      "workflow.md": "950ac14d37a2e2cd67112195f07e0cff4bec477c8c9788da3fe3fee046793592"
+    },
+    "template_engine": "ade-runtime/bmad-v6 jinja2 subset"
+  },
+  "outputs": {
+    "plan-template.md": "f27a97ac7e90b1d8c129e5836029dbef85263bce7d81399f3201970ef26b717c",
+    "references/claims-check.md": "6cb20a86d819b95272876bca0dffef59ca07ba6a373d804295066751043867c0",
+    "references/deletion-check.md": "0f1f124e4e957147e89164a272b10bedc694ad0d9ad2618c8610ac74ee9cb0da",
+    "review-prompts/edge-case-hunter.md": "b909fe0ec8e4daaf2550d0ec783618c5146261d0dbc0e054698ce00d0905a3d1",
+    "review-prompts/verification-gap.md": "45ab0b8c4c56c5c055c97a293a8591a67e256d0b1a2058ce1f093cd866be8d03",
+    "step-01-clarify-and-route.md": "93867759f2c54fdeeb4d5c8f836eff41eb51c3c651e7800a7e8099391df5dc2f",
+    "step-02-plan.md": "53f1fb0cfac4693556df81d84b9ec2f37eec4d3787e14e26d1c9cf8bbfec3483",
+    "step-03-implement.md": "e4cade924ecc6db7281ef2f16352360a853ea5d0baa37e812ed8bd7807ef7dff",
+    "step-04-review.md": "359c0fe408b2288c724613df9c18b8391c31deec8748e1f72ed5552c8f9e65a3",
+    "step-05-present.md": "edda56d0325a599734fef653501c2e56cd45ace615343113768b6a3f4f1b3540",
+    "step-oneshot.md": "41b7118bea0937e70bd2e66e6461067fc689672ff04808f9a402c12ab8484bdc",
+    "workflow.md": "80bf22a04279f02b8b7d3458c9fc53cb13c902b66c0cf69c7f5e3392c74ddf5e"
+  },
+  "project_root": "/Users/alvin-reyes/Project/ai-agent-hub-template",
+  "project_slug": "ai-agent-hub-template",
+  "root_hash": "bb5f5ac45470",
+  "schema_version": 1,
+  "skill": "bmad-build"
+}

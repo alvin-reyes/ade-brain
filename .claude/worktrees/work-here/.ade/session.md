@@ -1,0 +1,27 @@
+# Session journal
+
+- 2026-11-09: owner approved the plan for agents on other AI CLIs (docs/plans/2026-11-09-other-ai-cli-agents.md): engines opt-in per hub, default claude; persona agent stays on Claude. Adversarial review before S1.
+- 2026-11-09: adversarial review blocked the plan (3 blockers, 12 majors); revision 2 answers every finding and goes back to the owner for re-approval.
+- 2026-11-09: re-review blocked revision 2 (orphaned engine on caller timeout, untestable stdin/HUP design, auth vs cleared env); revision 3 adds the hub inbox, moves the launcher to S2 and answers every finding.
+- 2026-11-09: review 3 blocked revision 3 (launcher failed under a real pty, inbox races); owner kept full scope; revision 4: Python launcher behind a pty proof gate, per-launch inbox, version gate, write snapshots, S2/S3 split into five stories.
+- 2026-11-09: review 4 blocked revision 4 (session end lost on window close; inbox, watchdog, gate and passthrough gaps) but confirmed the Python launcher by prototype; revision 5 answers every finding.
+- 2026-11-09: review 5 passed everything except S3b (busy-checkout check, .git/config denylist); revision 6 fixes both and carries the minors into stories.
+- 2026-11-09: revision 6 passed the adversarial review (follow-up); its three S3b minors folded in (push URLs reverted, owner-only HUB_WRITE_UNCHECKED fallback, hand-started sessions documented). Awaiting owner re-approval.
+- 2026-11-09: owner approved revision 6 of the other-AI-CLI plan. Next: S0 spike.
+- 2026-11-09: owner: Claude only for now; Codex and Gemini testing paused. S0 limited to Claude items; S1 and Claude-only S3a can proceed.
+- 2026-11-09: owner asked for DeepSeek and GLM; revision 7 adds them as providers behind Claude Code (story SP, S0 item 21). Needs review and approval.
+- 2026-11-09: owner approved revision 7 (subject to its review) and added Meta Muse; priority: S0 item 21 and SP (DeepSeek, GLM, Muse) first, S1 alongside.
+- 2026-11-09: provider review blocked (Remote Control claim, fail-open key read, key in child env, non-hermetic test); fixed in revision 7.
+- 2026-11-09: provider review addendum (Muse): enforced per-provider go/no-go, behavioural canary checks, Meta values marked unconfirmed, provider id renamed to meta.
+- 2026-11-09: provider review addendum (Muse): enforced per-provider go/no-go, behavioural canary checks, Meta values marked unconfirmed, provider id renamed to meta.
+- 2026-11-09: providers section passed review; owner approval of revision 7 is now effective; five review minors folded in.
+- 2026-11-09: sharded S1 (docs/stories/S1-session-end-without-hook.md, 18 ACs): bounded stdin read, --since, sync lock for session-end and sync --yes, log; the held-pipe-under-script test verified to hang on today's code.
+- 2026-11-09: sharded SP (docs/stories/SP-providers.md, 24 ACs, blocked on S0 item 21): providers deepseek, glm, meta; fail-closed key read, merged settings, go/no-go, wrapper refusal, name-only doctor rows. bin/agent parts left to S3a.
+- 2026-11-09: re-sharded SP for DeepSeek only (docs/stories/SP-providers.md, 30 ACs, unblocked): S0 item 21 answered for deepseek; glm shipped no-go; meta left out (AC18); /model fixed by a per-provider CLAUDE_CONFIG_DIR, --resume refused; key pre-check mandatory. Open: owner data-sharing decision and DeepSeek terms, live Keychain-login check.
+- 2026-11-09: S1 (docs/stories/S1-session-end-without-hook.md) Done: QA mapped all 18 ACs to named checks and `bash tests/run.sh` passed (exit 0, all 20 test files ok).
+- 2026-11-09: S1 reopened: code review blocked (stale-lock takeover race, two tests pass with the bug, timing-sensitive waits); back to the developer.
+- 2026-11-09: S1 re-verified by QA after the reopen (fixes bccbd79): `bash tests/run.sh` all 20 test files ok, new lock/log/--since/stdin checks present and asserting; awaiting code re-review before Done.
+- 2026-11-09: S1 Done: QA re-verification green and the adversarial code re-review passed (race, mutation and flakiness checks). Owner decisions open: 120-minute lock age rule; SessionEnd hook time limit.
+- 2026-11-09: owner decisions: (1) sync lock: an old lock is removed only when its owner process is gone or its pid is unreadable (replaces S1 AC9's 120-minute age-only rule); (2) session end detaches the brain index and sync into the background so the SessionEnd hook stays short; (3) DeepSeek: opt-in per hub, after its API terms are recorded in ADR 0002; (4) the agent hub template may be bundled in ADE's public installers (the repo stays private). (1) and (2) become story S1b.
+- 2026-11-09: SP QA passed, awaiting code review: `bash tests/run.sh` (hermetic) all 21 test files ok, exit 0; AC1-AC34 mapped to named checks, AC7 and AC19 are documented SKIPs matching engines.md; not Done until the adversarial review clears.
+- 2026-11-09: SP Done: QA re-verification at 2569843 green (two hermetic runs, the second with fake ANTHROPIC_* credentials; 21 of 21 test files ok, AC1-AC45 mapped, AC7 and AC19 documented SKIPs) and the adversarial code re-review passed; follow-ups n1-n3 carried. Owner items still open: ADR 0002 acceptance and the live Keychain-login check.

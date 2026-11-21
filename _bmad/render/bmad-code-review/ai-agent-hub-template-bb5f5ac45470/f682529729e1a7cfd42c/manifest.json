@@ -1,0 +1,54 @@
+{
+  "generation_hash": "f682529729e1a7cfd42c",
+  "inputs": {
+    "project_root": "/Users/alvin-reyes/Project/ai-agent-hub-template",
+    "renderer_sha256": "358578b7fb10cd482e74993b479de3b97443a711539d37f8d4ba270369bb1aff",
+    "resolved_values": {
+      "config.core.output_folder": "_bmad-output",
+      "customization.workflow.activation_steps_append": [],
+      "customization.workflow.activation_steps_prepend": [],
+      "customization.workflow.on_complete": "",
+      "customization.workflow.persistent_facts": [
+        "Every review-lens subagent this workflow launches (quick or thorough: Blind Hunter, Edge Case Hunter, Verification Gap and the rest) runs on the Sonnet model: pass model \"sonnet\" to the Agent tool for each one. Triage and presentation stay in this session. Exception: when the user asks for an Opus review, launch the lenses on \"opus\" instead.",
+        "When this run is a quick review and the diff has more than 200 changed lines, say so when you present the findings and offer a thorough run (bmad-code-review thorough)."
+      ],
+      "customization.workflow.quick_lenses": [
+        {
+          "id": "quick",
+          "instruction": "Launch a context-free subagent with this prompt:\n\nRead `{plan_file}` — the plan holding the acceptance criteria and intent; it is empty when there is none — and the files its frontmatter `context:` lists. Read the agent instruction files (`AGENTS.md`, `CLAUDE.md`, or equivalents) at the repository root and in the directories the diff touches; those are the rules. Then read the unified diff at `{diff_file}` — it is the change under review.\n\nReport unmet acceptance criteria, broken rules, and bugs. Each finding: the location, what goes wrong, and evidence checked against the surrounding code. Output a Markdown list of findings only — no severity, priority, or ranking.\n\nDo not invoke any skill, and do not spawn subagents of your own — you are the reviewer. Return your findings as text in your final message; do not route them through any findings-reporting tool the host may offer.\n\n",
+          "name": "Quick"
+        }
+      ],
+      "customization.workflow.review": "quick"
+    },
+    "skill_root": ".claude/skills/bmad-code-review",
+    "source_sha256": {
+      "references/claims-check.md": "7be5d35dd90a1950addc2062acdf8669026b239117efe1e398da1e8161cfa6f9",
+      "references/deletion-check.md": "0f1f124e4e957147e89164a272b10bedc694ad0d9ad2618c8610ac74ee9cb0da",
+      "review-prompts/edge-case-hunter.md": "5f4572d57340b4c0d155f33454d644a44af101cd7fd02a01591be68a4ebb8b7f",
+      "review-prompts/verification-gap.md": "06f6184d7d94c808970d0146cdc4585dfd66b94a7b7ab2988277fb6fc4208508",
+      "step-01-gather-context.md": "dfc157d13b4bdc47059201e48a7d6506a8c71691aa9d68fc5596afd4e23c8824",
+      "step-02-review.md": "4b81354318c5f57ab4fd0faab1ea49d9bcd3f012b1acad5b491f8a89c3d0c300",
+      "step-03-triage.md": "d6f0f0362c47b2ebe0d8b4d99215c76bedeb3aec58be91756962616ccbb0a969",
+      "step-04-present.md": "ba764bc7b5206c450130df0787687c1611a5453997255b8c450ab77240ce4db7",
+      "workflow.md": "4b904fb2bb24febea92f859218c3382f71eb8a69c86663eb5bbb9212c30f3a4d"
+    },
+    "template_engine": "ade-runtime/bmad-v6 jinja2 subset"
+  },
+  "outputs": {
+    "references/claims-check.md": "7be5d35dd90a1950addc2062acdf8669026b239117efe1e398da1e8161cfa6f9",
+    "references/deletion-check.md": "0f1f124e4e957147e89164a272b10bedc694ad0d9ad2618c8610ac74ee9cb0da",
+    "review-prompts/edge-case-hunter.md": "5f4572d57340b4c0d155f33454d644a44af101cd7fd02a01591be68a4ebb8b7f",
+    "review-prompts/verification-gap.md": "06f6184d7d94c808970d0146cdc4585dfd66b94a7b7ab2988277fb6fc4208508",
+    "step-01-gather-context.md": "c7cb053697de8ad1404b59bdcd7d80a95f739a2ac4177746e107ea88a72ef118",
+    "step-02-review.md": "3f2e380d39d5c37e6db8deee0b8451fad09da1679d7a4b6ed5d0f6da7c7b2724",
+    "step-03-triage.md": "68a988bec5cd42f7f6e61ac4b8a227b4dcf8322273f49bd1bea0dcff9db195fe",
+    "step-04-present.md": "5dbb36e635bf61fe54cc2ab8802ee8169cdb89c7db674f1d23f9f553ca06cb4d",
+    "workflow.md": "1c0d9c35781eb242d585fc6258280c36fef3409686a47686ab2793dacd41a928"
+  },
+  "project_root": "/Users/alvin-reyes/Project/ai-agent-hub-template",
+  "project_slug": "ai-agent-hub-template",
+  "root_hash": "bb5f5ac45470",
+  "schema_version": 1,
+  "skill": "bmad-code-review"
+}
