@@ -63,7 +63,7 @@ monitors and every setting, with flow diagrams.
 
 ```bash
 # on GitHub: create a private repo from this template, then clone it
-gh repo create my-acme-sre --private --template alvin-reyes/ade-brain --clone
+gh repo create my-acme-sre --private --template better-ade/ade-brain --clone
 cd my-acme-sre
 bin/init --list                                   # the personas
 bin/init --persona devops-sre --client "Acme Corp" --owner "Sam Lee" \

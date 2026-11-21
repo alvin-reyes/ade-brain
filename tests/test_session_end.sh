@@ -1,12 +1,13 @@
 #!/bin/bash
 # bin/session-end run without Claude Code's hook: bounded stdin, --since, the sync lock, the session-end log.
 . "$(dirname "$0")/helpers.sh"
-export AGENT_LOCK_WAIT=3
+export AGENT_LOCK_WAIT=3 AGENT_HOOK_LOCK_WAIT=3
 KIDS=""; trap 'for k in $KIDS; do kill "$k" 2>/dev/null; done' EXIT
 f() { fail "$CHECK: $*"; }
 # a fresh hub per check: projects/demo with one code checkout, everything committed
 setup() {
-  make_hub; cd "$HUB"; export AGENT_STATE="$(mktemp -d)" AGENT_SESSION_END_LOG="$(mktemp -d)/session-end.log"
+  make_hub; cd "$HUB"; unset AGENT_SYNC_CMD
+  export AGENT_STATE="$(mktemp -d)" AGENT_SESSION_END_LOG="$(mktemp -d)/session-end.log"
   K="$AGENT_SYNC_LOCK"; J="journal/$(date -u +%Y-%m-%d).md"; NOW=$(date +%s)
   bin/new projects/demo >/dev/null
   R="$(mktemp -d)/demo-code"; mkdir -p "$R" && git -C "$R" init -q && git -C "$R" config user.email t@t && git -C "$R" config user.name t
@@ -30,6 +31,25 @@ run_held() {
 hold_lock() { mkdir "$K"; sleep 30 & SP=$!; KIDS="$KIDS $SP"; echo "$SP" > "$K/pid"; }
 committed() { git log -1 --pretty=%s | grep -q "^session projects/demo "; }
 hook() { echo '{"transcript_path":""}' | bin/session-end "$@"; }
+# stubs <brain-secs> <brain-exit> <sync-secs> <sync-exit>: bin/brain and the sync command (AGENT_SYNC_CMD, auto sync
+# on) sleep, then write their markers ($M/brain.mark, $M/sync.mark: a date +%s); the sync stub notes whether the brain
+# marker was already there ($M/order), the brain stub its session id ($M/sid; ps -o sess is
+# always 0 on macOS, so python os.getsid) and that session leader's command ($M/leader)
+stubs() {
+  M="$AGENT_STATE"
+  cat > bin/brain <<STUB
+#!/bin/bash
+python3 -c 'import os; print(os.getsid(0))' > "$M/sid.t"; ps -o command= -p "\$(cat "$M/sid.t")" > "$M/leader"; mv "$M/sid.t" "$M/sid"
+sleep $1
+date +%s > "$M/brain.mark"
+exit $2
+STUB
+  printf '#!/bin/bash\nsleep %s\n[ -e "%s/brain.mark" ] && echo after > "%s/order"\ndate +%%s > "%s/sync.mark"\nexit %s\n' "$3" "$M" "$M" "$M" "$4" > "$M/sync-stub"
+  chmod +x bin/brain "$M/sync-stub"; export AGENT_AUTO_SYNC=1 AGENT_SYNC_CMD="$M/sync-stub"
+}
+# poll <test>: true once <test> holds, polled for up to 30 s
+poll() { local i=0; while [ $i -lt 150 ]; do eval "$1" && return 0; sleep 0.2; i=$((i + 1)); done; return 1; }
+st() { bash -c '. "$1"; proc_start "$2"' _ "$HUB/bin/lib.sh" "$1"; }   # proc_start of a pid, from bin/lib.sh
 
 CHECK=held_pipe_under_script_finishes; setup
 echo more >> projects/demo/STATE.md
@@ -77,14 +97,14 @@ assert_eq "$(git rev-parse HEAD)" "$h" "$CHECK: committed anyway"
 
 CHECK=waits_for_lock_then_commits; setup
 echo more >> projects/demo/STATE.md; hold_lock; (sleep 1; date +%s > "$AGENT_STATE/released"; rm -rf "$K") & r=$!
-AGENT_LOCK_WAIT=5 hook projects/demo; rc=$?; wait $r
+AGENT_HOOK_LOCK_WAIT=5 hook projects/demo; rc=$?; wait $r
 assert_eq "$rc" 0 "$CHECK: exit"; committed || f "folder not committed"
 [ "$(git log -1 --format=%ct)" -ge "$(cat "$AGENT_STATE/released")" ] || f "committed before the lock was released"
 [ -d "$K" ] && f "lock left behind"
 
 CHECK=busy_lock_skips_and_journals; setup
 code_commit newfix $((NOW - 600)); echo more >> projects/demo/STATE.md; h=$(git rev-parse HEAD); hold_lock
-hook projects/demo; assert_eq "$?" 0 "$CHECK: exit"
+AGENT_HOOK_LOCK_WAIT=3 hook projects/demo; assert_eq "$?" 0 "$CHECK: exit"
 assert_eq "$(git rev-parse HEAD)" "$h" "$CHECK: committed under a busy lock"
 git status --porcelain | grep -q "projects/demo/STATE.md" || f "hub file not left uncommitted"
 assert_eq "$(grep -c "sync lock busy" "$J" 2>/dev/null)" 1 "$CHECK: journal lines about the busy lock"
@@ -96,8 +116,8 @@ CHECK=stale_lock_removed; setup
 echo more >> projects/demo/STATE.md; mkdir "$K"; sh -c 'echo $$ > '"$K"'/pid'   # owner gone
 hook projects/demo; committed || f "dead owner: not committed"; [ -d "$K" ] && f "dead owner's lock kept"
 echo more >> projects/demo/STATE.md; h=$(git rev-parse HEAD)
-hold_lock; touch -t 202001010000 "$K"                                          # over 120 minutes old
-hook projects/demo; [ "$(git rev-parse HEAD)" != "$h" ] || f "old lock: not committed"; [ -d "$K" ] && f "old lock kept"
+mkdir "$K"; : > "$K/pid"; touch -t 202001010000 "$K"                          # empty pid file, older than the grace
+hook projects/demo; [ "$(git rev-parse HEAD)" != "$h" ] || f "old pid-less lock: not committed"; [ -d "$K" ] && f "old pid-less lock kept"
 assert_eq "$(grep -c "removed stale lock" "$AGENT_SESSION_END_LOG" 2>/dev/null)" 2 "$CHECK: stale locks logged"
 
 CHECK=release_before_auto_sync; setup
@@ -105,13 +125,14 @@ S="$(mktemp -d)"; printf '#!/bin/bash\nexit 0\n' > "$S/gitleaks"; chmod +x "$S/g
 git config core.hooksPath .githooks; echo more >> projects/demo/STATE.md; echo m >> memory/MEMORY.md
 printf '#!/bin/bash\nif [ -d "%s" ]; then echo held; else echo free; fi > "%s"\n' "$K" "$AGENT_STATE/at-brain" > bin/brain
 PATH="$S:$PATH" AGENT_AUTO_SYNC=1 hook projects/demo; assert_eq "$?" 0 "$CHECK: exit"
-for i in $(seq 1 50); do grep -qE "synced:|skipped:|failed:|refused:" "$AGENT_SYNC_LOG" 2>/dev/null && break; sleep 0.2; done
+# both steps run detached: wait for the brain marker and the sync's log line
+poll '[ -s "$AGENT_STATE/at-brain" ] && grep -qE "synced:|skipped:|failed:|refused:" "$AGENT_SYNC_LOG" 2>/dev/null'
 grep -q "skipped: another sync is running" "$AGENT_SYNC_LOG" 2>/dev/null && f "the follow-on sync found the lock held"
 grep -q "synced:" "$AGENT_SYNC_LOG" 2>/dev/null || f "the follow-on sync did not sync: $(cat "$AGENT_SYNC_LOG" 2>/dev/null)"
 assert_eq "$(cat "$AGENT_STATE/at-brain" 2>/dev/null)" free "$CHECK: lock state when the step before auto_sync ran"
 
 CHECK=since_writes_session_end_log; setup
-S0=$((NOW - 3600)); L="$AGENT_SESSION_END_LOG"
+S0=$((NOW - 3600)); L="$AGENT_SESSION_END_LOG"; printf '#!/bin/bash\nexit 0\n' > bin/brain   # no bg step failed line
 echo more >> projects/demo/STATE.md; bin/session-end projects/demo --since $S0 < /dev/null
 bin/session-end projects/demo --since $S0 < /dev/null
 hold_lock; echo more >> projects/demo/STATE.md; bin/session-end projects/demo --since $S0 < /dev/null; kill $SP; rm -rf "$K"
@@ -202,4 +223,135 @@ echo more >> projects/demo/STATE.md; s=$(date +%s)
 yes 2>/dev/null | bin/session-end projects/demo; el=$(( $(date +%s) - s ))
 committed || f "folder not committed"
 [ "$el" -le 5 ] || f "took ${el} s with a flooding stdin"
+CHECK=live_old_lock_kept; setup
+echo more >> projects/demo/STATE.md; h=$(git rev-parse HEAD); hold_lock; touch -t 202001010000 "$K"   # pid only, old
+hook projects/demo; assert_eq "$?" 0 "$CHECK: exit"
+assert_eq "$(git rev-parse HEAD)" "$h" "$CHECK: committed under a live owner's old lock"
+git status --porcelain | grep -q "projects/demo/STATE.md" || f "hub file not left uncommitted"
+grep -q "hub commit skipped: sync lock busy" "$J" 2>/dev/null || f "no busy-lock journal line"
+[ -d "$K" ] || f "live owner's old lock removed"; assert_eq "$(cat "$K/pid" 2>/dev/null)" "$SP" "$CHECK: lock owner"
+
+CHECK=fresh_pidless_lock_kept; setup
+echo more >> projects/demo/STATE.md; h=$(git rev-parse HEAD); mkdir "$K"   # no pid file yet, created just now
+hook projects/demo; assert_eq "$?" 0 "$CHECK: exit"
+assert_eq "$(git rev-parse HEAD)" "$h" "$CHECK: committed under a fresh pid-less lock"
+[ -d "$K" ] || f "fresh pid-less lock removed"
+
+CHECK=lock_grace_is_10; setup
+assert_eq "$(bash -c '. bin/lib.sh; sync_lock_grace' 2>/dev/null)" 10 "$CHECK: grace"
+
+CHECK=hook_returns_within_bound; setup; stubs 8 0 8 0
+echo more >> projects/demo/STATE.md; s=$(date +%s)
+out=$(echo '{"transcript_path":""}' | bin/session-end projects/demo 2>&1 | cat); el=$(( $(date +%s) - s ))
+[ -d "$K" ] && f "lock still there when the hook returned"
+[ "$el" -lt 5 ] || f "hook took $el s"
+assert_eq "$out" "" "$CHECK: the hook prints nothing"
+committed || f "folder not committed"
+
+CHECK=background_runs_to_completion
+poll '[ -s "$M/brain.mark" ]' || f "brain marker never appeared"
+poll '[ -s "$M/sync.mark" ]' || f "sync marker never appeared"
+assert_eq "$(cat "$M/order" 2>/dev/null)" after "$CHECK: sync ran before the brain index finished"
+
+CHECK=background_failure_logged; setup; stubs 0 3 0 1
+out=$(hook projects/demo 2>&1); rc=$?; assert_eq "$rc" 0 "$CHECK: exit"; assert_eq "$out" "" "$CHECK: hook output"
+L="$AGENT_SESSION_END_LOG"
+poll '[ "$(grep -c "bg step failed: sync exit 1" "$L" 2>/dev/null)" = 1 ]' || f "no sync failure line: $(cat "$L" 2>/dev/null)"
+assert_eq "$(grep -c "bg step failed: brain index exit 3$" "$L")" 1 "$CHECK: brain failure lines"
+assert_eq "$(grep -c "bg step failed: sync exit 1$" "$L")" 1 "$CHECK: sync failure lines"
+
+CHECK=since_runs_foreground; setup; stubs 1 0 1 0
+echo more >> projects/demo/STATE.md; bin/session-end projects/demo --since $((NOW - 3600)) < /dev/null
+[ -s "$M/brain.mark" ] || f "brain step not done when session-end returned"
+[ -s "$M/sync.mark" ] || f "sync step not done when session-end returned"
+grep -q "projects/demo since=$((NOW - 3600)) committed$" "$AGENT_SESSION_END_LOG" || f "outcome line: $(cat "$AGENT_SESSION_END_LOG")"
+grep -q "bg step failed" "$AGENT_SESSION_END_LOG" && f "steps that succeeded logged a failure"
+[ -d "$K" ] && f "lock left behind"
+
+CHECK=hook_logs_nothing_on_success; setup; stubs 0 0 0 0
+echo more >> projects/demo/STATE.md; hook projects/demo
+poll '[ -s "$M/sync.mark" ]' || f "sync marker never appeared"; sleep 0.5
+[ -s "$AGENT_SESSION_END_LOG" ] && f "log written: $(cat "$AGENT_SESSION_END_LOG")"
+
+CHECK=background_own_session; setup; stubs 0 0 0 0
+hook projects/demo; poll '[ -s "$M/sid" ]' || f "brain stub never ran"
+[ "$(cat "$M/sid")" != "$(python3 -c 'import os, sys; print(os.getsid(int(sys.argv[1])))' $$)" ] || f "brain step ran in the test shell's session"
+grep -q "session-end" "$M/leader" || f "the brain step's session is not led by the detached session-end: $(cat "$M/leader")"
+
+CHECK=start_record_tz_independent; setup
+# the taker and the judge may run under different TZ (a tool exporting TZ=UTC, launchd): the owner is still the owner
+echo more >> projects/demo/STATE.md; h=$(git rev-parse HEAD); hold_lock
+echo "$SP $(TZ=America/Toronto st "$SP")" > "$K/start"
+TZ=UTC hook projects/demo; assert_eq "$?" 0 "$CHECK: exit"
+assert_eq "$(git rev-parse HEAD)" "$h" "$CHECK: committed under the owner's lock"
+assert_eq "$(cat "$K/pid" 2>/dev/null)" "$SP" "$CHECK: lock owner"
+
+CHECK=lock_records_start; setup
+B="$(mktemp -d)"
+out=$(bash -c '. "$1"; sync_lock_take "$2/l" 0 || exit 1; echo "$$"; cat "$2/l/start"; cat "$2/l/pid"; proc_start $$' _ "$HUB/bin/lib.sh" "$B" 2>/dev/null)
+p=$(echo "$out" | sed -n 1p); rec=$(echo "$out" | sed -n 2p)
+assert_eq "${rec%% *}" "$p" "$CHECK: start record pid"
+assert_eq "$(echo "$out" | sed -n 3p)" "$p" "$CHECK: pid file"
+[ -n "$(echo "$out" | sed -n 4p)" ] || f "proc_start printed nothing"
+assert_eq "${rec#* }" "$(echo "$out" | sed -n 4p)" "$CHECK: start record start"
+bash -c '. "$1"; proc_start() { :; }; sync_lock_take "$2/m" 0' _ "$HUB/bin/lib.sh" "$B" || f "lock not taken without a start time"
+[ -e "$B/m/start" ] && f "start record written without a start time"
+[ -s "$B/m/pid" ] || f "no pid file without a start time"
+
+CHECK=pid_reused_lock_removed; setup
+echo more >> projects/demo/STATE.md; hold_lock; echo "$SP Mon Jan  1 00:00:00 2001" > "$K/start"
+hook projects/demo; assert_eq "$?" 0 "$CHECK: exit"
+committed || f "folder not committed"
+assert_eq "$(grep -c "removed stale lock" "$AGENT_SESSION_END_LOG" 2>/dev/null)" 1 "$CHECK: removal logged"
+
+CHECK=same_pid_same_start_kept; setup
+echo more >> projects/demo/STATE.md; h=$(git rev-parse HEAD); hold_lock; echo "$SP $(st "$SP")" > "$K/start"
+hook projects/demo; assert_eq "$?" 0 "$CHECK: exit"
+assert_eq "$(git rev-parse HEAD)" "$h" "$CHECK: committed under the owner's lock"
+grep -q "hub commit skipped: sync lock busy" "$J" 2>/dev/null || f "no busy-lock journal line"
+assert_eq "$(cat "$K/pid" 2>/dev/null)" "$SP" "$CHECK: lock owner"
+
+CHECK=old_format_judged_by_pid; setup
+echo more >> projects/demo/STATE.md; h=$(git rev-parse HEAD); hold_lock; touch -t 202001010000 "$K"
+hook projects/demo; assert_eq "$(git rev-parse HEAD)" "$h" "$CHECK: live pid: committed"
+assert_eq "$(cat "$K/pid" 2>/dev/null)" "$SP" "$CHECK: live pid: lock owner"
+rm -rf "$K"; mkdir "$K"; sh -c 'echo $$ > '"$K"'/pid'
+hook projects/demo; committed || f "dead pid: not committed"; [ -d "$K" ] && f "dead pid: lock kept"
+
+CHECK=rewritten_pid_judged_alone; setup
+sleep 30 & A=$!; KIDS="$KIDS $A"; sleep 1.1; sleep 30 & SB=$!; KIDS="$KIDS $SB"
+echo more >> projects/demo/STATE.md; h=$(git rev-parse HEAD)
+mkdir "$K"; echo "$A $(st "$A")" > "$K/start"; echo "$SB" > "$K/pid"
+hook projects/demo; assert_eq "$?" 0 "$CHECK: exit"
+assert_eq "$(git rev-parse HEAD)" "$h" "$CHECK: committed under B's lock"
+assert_eq "$(cat "$K/pid" 2>/dev/null)" "$SB" "$CHECK: lock owner"
+
+CHECK=pidless_grace_still_applies; setup
+echo more >> projects/demo/STATE.md; h=$(git rev-parse HEAD)
+mkdir "$K"; echo abc > "$K/pid"; echo "$$ Mon Jan  1 00:00:00 2001" > "$K/start"
+hook projects/demo; assert_eq "$?" 0 "$CHECK: fresh: exit"
+assert_eq "$(git rev-parse HEAD)" "$h" "$CHECK: fresh: committed"; [ -d "$K" ] || f "fresh unusable-pid lock removed"
+touch -t 202001010000 "$K"; hook projects/demo
+committed || f "old unusable-pid lock: not committed"; [ -d "$K" ] && f "old unusable-pid lock kept"
+
+CHECK=hook_lock_gives_up_5s; setup
+echo more >> projects/demo/STATE.md; h=$(git rev-parse HEAD); hold_lock; s=$(date +%s)
+echo '{"transcript_path":""}' | env -u AGENT_HOOK_LOCK_WAIT bin/session-end projects/demo; rc=$?; el=$(( $(date +%s) - s ))
+assert_eq "$rc" 0 "$CHECK: exit"
+[ "$el" -ge 4 ] && [ "$el" -le 9 ] || f "hook took $el s, want 4 to 9"
+assert_eq "$(git rev-parse HEAD)" "$h" "$CHECK: committed under a busy lock"
+grep -q "hub commit skipped: sync lock busy" "$J" 2>/dev/null || f "no busy-lock journal line"
+assert_eq "$(cat "$K/pid" 2>/dev/null)" "$SP" "$CHECK: lock owner"
+
+CHECK=since_waits_full_window; setup
+echo more >> projects/demo/STATE.md; hold_lock; (sleep 8; rm -rf "$K") & r=$!; s=$(date +%s)
+env -u AGENT_HOOK_LOCK_WAIT AGENT_LOCK_WAIT=12 bin/session-end projects/demo --since $((NOW - 3600)) < /dev/null; rc=$?
+el=$(( $(date +%s) - s )); wait $r
+assert_eq "$rc" 0 "$CHECK: exit"; committed || f "folder not committed"
+grep -q "since=$((NOW - 3600)) committed$" "$AGENT_SESSION_END_LOG" || f "outcome: $(cat "$AGENT_SESSION_END_LOG")"
+[ "$el" -ge 7 ] || f "took $el s, want >= 7"
+
+CHECK=hook_lock_wait_default_is_5; setup
+assert_eq "$(env -u AGENT_HOOK_LOCK_WAIT bash -c '. bin/lib.sh; sync_hook_lock_wait' 2>/dev/null)" 5 "$CHECK: default"
+assert_eq "$(AGENT_HOOK_LOCK_WAIT=7 bash -c '. bin/lib.sh; sync_hook_lock_wait' 2>/dev/null)" 7 "$CHECK: AGENT_HOOK_LOCK_WAIT"
 echo ok
