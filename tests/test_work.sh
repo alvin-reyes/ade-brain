@@ -237,11 +237,28 @@ role_keeps_provider_gates() {
   local out; out=$(WT_SECRET_MODE=empty WORK_NO_OPEN=1 bin/work --role builder projects/demo 2>&1); assert_eq "$?" "1" "empty key refused"
   echo "$out" | grep -q "work: no .* in the Keychain; store it with: bin/secret --set deepseek-api-key" || fail "bin/work's key gate: $out"
   echo "$out" | grep -q "^cd \|^launcher: " && fail "nothing launched without a key: $out"
-  out=$(with_focus_nogo 2>&1); assert_eq "$?" "2" "the focus no-go applies to a role pick"
+  # a provider that is no go for focus is skipped like any refused candidate: exit 1 when none is left, else the next one
+  out=$(with_focus_nogo 2>&1); assert_eq "$?" "1" "the only candidate is no go for focus"
+  echo "$out" | grep -q "skipped deepseek:deepseek-flash: " || fail "the focus no-go is a skip reason: $out"
+  owner_conf 'HUB_ROLE_BUILDER="deepseek:deepseek-flash anthropic:opus"'
+  out=$(with_focus_nogo 2>&1) || fail "focus no-go falls back to the next candidate: $out"
+  echo "$out" | grep -q -- "--model opus" && ! echo "$out" | grep -q "providers/deepseek" || fail "fell back to anthropic:opus: $out"
+  # plain claude is judged on the install this session runs (--claude), not the hub default
+  out=$(env -u AGENT_CLAUDE WORK_DRY=1 bin/work --role builder --claude mywrapper projects/demo 2>&1) || fail "--claude wrapper falls back: $out"
+  echo "$out" | grep -q "mywrapper --settings" && echo "$out" | grep -q -- "--model opus" || fail "--claude wrapper: anthropic:opus: $out"
+  owner_conf 'HUB_ROLE_BUILDER="deepseek:deepseek-flash anthropic:opus"' 'HUB_CLAUDE=mywrapper'
+  out=$(env -u AGENT_CLAUDE WORK_DRY=1 bin/work --role builder --claude claude projects/demo 2>&1) || fail "--claude claude on a wrapper hub: $out"
+  echo "$out" | grep -q "providers/deepseek" || fail "--claude claude on a wrapper hub picks deepseek: $out"
   : > "$WT_STORED"; rm -f hub.conf
 }
 with_focus_nogo() { local b; b="$(mktemp)"; cp bin/lib.sh "$b"; sed -i '' '/deepseek:focus)/d' bin/lib.sh
   WORK_DRY=1 bin/work --role builder projects/demo; local r=$?; cp "$b" bin/lib.sh; rm -f "$b"; return "$r"; }
+role_one_m_context() {
+  printf '%s\n' 'HUB_ROLE_BUILDER="anthropic:opus[1m]"' > hub.conf
+  local out; out=$(WORK_DRY=1 bin/work --role builder projects/demo 2>&1) || fail "anthropic:opus[1m] pick: $out"
+  echo "$out" | grep -qF -- "--model opus\[1m\]" || fail "the session opens on opus[1m] (quoted for the launcher): $out"
+  rm -f hub.conf
+}
 sessions_show_role() {
   rm -f hub.conf; local st f lp out; st="$(mktemp -d)"
   printf '#!/bin/bash\nexec sleep 30\n' > "$WT/claude-stub"; chmod +x "$WT/claude-stub"
@@ -262,6 +279,6 @@ builder_default_opus() {
   rm -f hub.conf
 }
 for t in role_sets_provider_and_model role_follows_hub_conf role_excludes_model_and_provider unknown_role_refused \
-  no_usable_candidate role_keeps_provider_gates sessions_show_role builder_default_opus; do "$t"; done
+  no_usable_candidate role_keeps_provider_gates sessions_show_role builder_default_opus role_one_m_context; do "$t"; done
 cp "$WT/secret.real" bin/secret
 echo ok

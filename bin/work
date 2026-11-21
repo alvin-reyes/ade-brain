@@ -53,12 +53,21 @@ done
 # --role: one way to choose; the pick becomes --provider and --model, so every check below applies to it
 if [ -n "$ROLE" ]; then
   [ -z "$MODEL" ] && [ "$PSET" = 0 ] || { echo "work: --role picks the provider and model; drop --model and --provider" >&2; exit 2; }
-  role_pick "$ROLE"; s=$?
-  [ "$s" != 2 ] || exit 2   # unknown role or bad table: role_candidates said why
-  [ "$s" = 0 ] || { echo "work: no usable model for role $ROLE" >&2; printf '%s' "$ROLE_SKIPS" | sed 's/^/  /' >&2; exit 1; }
+  # role_pick's candidate_refusal (delegation), judged for this session: a focus go and plain claude on this install ($CL)
+  cs="$(role_candidates "$ROLE")" || exit 2   # unknown role or bad table: role_candidates said why
+  ROLE_PICK=""; ROLE_SKIPS=""
+  for c in $cs; do
+    why="$(AGENT_CLAUDE="$CL" candidate_refusal "$c")"; p="${c%%:*}"
+    [ -n "$why" ] || [ "$p" = anthropic ] || provider_feature_go "$p" focus || why="$(provider_no_go_reason "$p" focus)"
+    [ -n "$why" ] || { ROLE_PICK="$c"; break; }
+    ROLE_SKIPS="${ROLE_SKIPS}skipped $c: $why"$'\n'
+  done
+  [ -n "$ROLE_PICK" ] || { echo "work: no usable model for role $ROLE" >&2; printf '%s' "$ROLE_SKIPS" | sed 's/^/  /' >&2; exit 1; }
   PROV="${ROLE_PICK%%:*}"; MODEL="${ROLE_PICK#*:}"
 fi
-[ -z "$MODEL" ] || [[ "$MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
+# an Anthropic model may carry the 1M-context suffix, opus[1m] (role tables allow it); it is quoted for the launcher
+MRE='^[A-Za-z0-9._:/-]+$'; [ "$PROV" != anthropic ] || MRE='^[A-Za-z0-9._:/-]+(\[1m\])?$'
+[ -z "$MODEL" ] || [[ "$MODEL" =~ $MRE ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
 case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
 # subagents that name no model: an inherited CLAUDE_CODE_SUBAGENT_MODEL (ADE sets models) wins, else hub.conf, else sonnet.
 # Set in the launcher, never in settings (a settings env would replace ADE's). An explicit Agent or agent-file model still wins.
@@ -76,7 +85,7 @@ CWIN="${HUB_COMPACT_WINDOW:-200000}"; BMAX="${HUB_BASH_MAX_CHARS:-8000}"
 [ -n "$MODEL" ] || [ "$PROV" != anthropic ] || MODEL="${HUB_MODEL:-}"; [ -n "$EFFORT" ] || EFFORT="${HUB_EFFORT:-}"
 [ -n "$MODE" ] || MODE="${HUB_WORK_MODE:-auto}"
 case "$MODE" in auto|manual|acceptEdits|plan) ;; *) echo "work: mode must be auto|manual|acceptEdits|plan" >&2; exit 2 ;; esac
-[ -z "$MODEL" ] || [[ "$MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
+[ -z "$MODEL" ] || [[ "$MODEL" =~ $MRE ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
 case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
 # the provider: allowed in hub.conf, permitted for this hub, plain claude, a go for each feature used, no resume, its own models
 [[ "$PROV" =~ ^[a-z0-9-]+$ ]] || { echo "work: bad provider name '$PROV'" >&2; exit 2; }
@@ -224,7 +233,7 @@ else
 fi
 [ -n "$agents" ] && cmd="$cmd --agents $(printf %q "$agents")"
 cmd="$cmd --permission-mode $MODE"
-[ -n "$MODEL" ] && cmd="$cmd --model $MODEL"
+[ -n "$MODEL" ] && cmd="$cmd --model $(printf %q "$MODEL")"
 [ -n "$EFFORT" ] && cmd="$cmd --effort $EFFORT"
 [ "$REMOTE" = 1 ] && cmd="$cmd --remote-control $(printf %q "${RNAME:-${F##*/}}")"
 [ -n "$PROMPT" ] && cmd="$cmd -- $(printf %q "$PROMPT")"
