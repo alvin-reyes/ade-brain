@@ -24,7 +24,10 @@ chmod +x "$FAKE/bin/claude" "$FAKE/bin/bun" "$FAKE/bin/launchctl"; export FAKE P
 unset TELEGRAM_BOT_TOKEN TELEGRAM_STATE_DIR HUB_CHAT HUB_CHANNELS CLAUDE_CONFIG_DIR
 CH="$AGENT_STATE/channels/telegram"
 # access state as the plugin keeps it after pairing; a start without a terminal needs allowlist and no groups
-access() { mkdir -p "$1"; printf '{"dmPolicy": "%s", "allowFrom": ["99887766"], "groups": %s}\n' "$2" "${3:-{\}}" > "$1/access.json"; }
+# (the groups default is set apart: Bash 3.2 keeps the backslash in "${3:-{\}}", Bash 5 drops it)
+access() { local g="${3:-}"; [ -n "$g" ] || g='{}'; mkdir -p "$1"
+  printf '{"dmPolicy": "%s", "allowFrom": ["99887766"], "groups": %s}\n' "$2" "$g" > "$1/access.json"
+  python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$1/access.json" 2>/dev/null || fail "the access.json fixture is not JSON [$(cat "$1/access.json")]"; }
 access "$CH" allowlist
 reset_rec() { rm -f "$FAKE_REC"/*; }
 launched() { [ -f "$FAKE_REC/argv" ]; }
@@ -154,7 +157,7 @@ start_lock_and_access() {
   [ -d "$L" ] || fail "a refused start removed another's lock"; kill "$f"; wait "$f" 2>/dev/null
   echo 999999 > "$L/pid"; reset_rec; bin/chat start </dev/null >/dev/null 2>&1 || fail "a stale lock is taken over"; launched || fail "stale lock: nothing launched"
   # without a terminal (launchd) only an allowlist with no groups starts; in a terminal pairing may run
-  for a in "pairing" "allowlist|{\"-100123\": {}}" "disabled"; do access "$CH" "${a%%|*}" "$(case "$a" in *"|"*) echo "${a#*|}";; esac)"
+  for a in "pairing" "allowlist|{\"-100123\": {}}" "disabled"; do g=""; case "$a" in *"|"*) g="${a#*|}" ;; esac; access "$CH" "${a%%|*}" "$g"
     reset_rec; out=$(bin/chat start </dev/null 2>&1); assert_eq "$?" "1" "no terminal, access [$a]"
     echo "$out" | grep -qi "allowlist" || fail "the refusal says allowlist [$out]"; launched && fail "launched with access [$a]"; done
   rm -f "$CH/access.json"; reset_rec; bin/chat start </dev/null >/dev/null 2>&1; assert_eq "$?" "1" "no terminal, not paired"
