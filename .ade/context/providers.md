@@ -64,7 +64,7 @@ same table, never a copy. Findings: `engines.md`. Decision and terms: `decisions
 
 ## Keys (`bin/keys`)
 - `bin/keys` lists `anthropic` (Claude login, no key) and each `key_tools` entry: `deepseek`, `glm`, `muse`
-  (`meta-model-api-key`), `gemini` (`gemini-api-key`), with stored or missing and what the tool still needs for `bin/agent`. Never a value. `key_tools`, `key_secret` and
+  (`meta-model-api-key`), `gemini` (`gemini-api-key`), `telegram` (`telegram-bot-token`, the bot for `bin/chat`, .ade/context/chat.md), with stored or missing and what the tool still needs for `bin/agent`. Never a value. `key_tools`, `key_secret` and
   `key_source` are in `bin/lib.sh`; `muse` has no provider row, so it shows "not connected yet"; `gemini` is the Gemini CLI
   engine (story E1) and shows what it still needs (a sign-in counts as well as a key).
 - `bin/keys set <tool>` reads the key from a hidden prompt or stdin through `bin/secret --set`; `bin/keys forget <tool>` removes

@@ -12,6 +12,7 @@ keychain() { command -v security >/dev/null || { echo "keys: needs the macOS Key
 tool_name() { case " $(key_tools) " in *" $1 "*) key_secret "$1" ;; *) echo "keys: unknown tool" >&2; bad ;; esac; }
 # tool_state <tool>: what stands between this tool and a run, other than its key (empty = nothing)
 tool_state() {
+  [ "$1" = telegram ] && return 0   # a chat channel's bot token (bin/chat), not an AI provider
   local why
   if [ "$(engine_of "$1")" = gemini ]; then why="$(candidate_refusal "gemini:gemini-2.5-pro")"
   else provider_field "$1" base_url >/dev/null 2>&1 || { echo "$1 is not connected yet"; return 0; }; why="$(candidate_refusal "$1:sonnet")"; fi
@@ -25,7 +26,7 @@ case "${1:-}" in
       if "$H/bin/secret" --has "$s"; then st=stored; else st=missing; fi
       printf '%-10s %-8s %s\n' "$t" "$st" "$s"
       [ "$st" = stored ] || echo "  set it: bin/keys set $t (key from $(key_source "$t"))"
-      if [ -n "$why" ]; then echo "  not usable yet: $why"; elif [ "$st" = stored ]; then echo "  ready for bin/agent"; fi
+      if [ -n "$why" ]; then echo "  not usable yet: $why"; elif [ "$st" = stored ]; then [ "$t" = telegram ] && echo "  ready for bin/chat" || echo "  ready for bin/agent"; fi
     done ;;
   set) [ $# -eq 2 ] || bad; s="$(tool_name "$2")" || exit 2; keychain; exec "$H/bin/secret" --set "$s" ;;
   forget) [ $# -eq 2 ] || bad; s="$(tool_name "$2")" || exit 2; keychain
