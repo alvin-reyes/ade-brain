@@ -1,6 +1,6 @@
 # S1b: lock owner rule and short session end
 
-Status: Ready for development (2026-11-09; revised the same day with the owner's answers to the two open questions).
+Status: **Done (2026-11-21)**: verification green twice, quick review findings fixed. Earlier: Ready for development (2026-11-09; revised the same day with the owner's answers to the two open questions).
 Follows S1 (`docs/stories/S1-session-end-without-hook.md`, Done).
 Source: owner decisions 2026-11-09 in `.ade/session.md` (1: sync lock rule; 2: session end detaches brain and sync), and
 the owner's answers of 2026-11-09 on pid reuse and on the hook's lock wait (see "Owner decisions carried in", 3 and 4).
@@ -270,4 +270,16 @@ with a `date +%s` and nothing else to stdout.
 
 Command: `bash tests/run.sh` (must print `ok    test_session_end.sh` and `ok    test_sync.sh`, and exit 0).
 
-Real output recorded by QA:
+Real output recorded by the reviewer (2026-11-21, after the review fixes; `bash tests/run.sh` run twice in a row):
+
+```
+== run 1 06:50:34
+exit 0
+== run 2 07:11:52
+exit 0
+== done 07:34:24
+```
+
+Each run printed `ok` for all 28 test files, including `test_session_end.sh`, `test_sync.sh` and `test_report.sh`.
+Quick review: 5 findings fixed (TZ-independent start record, test_report timing, AC28 session check, context entry), 1 rejected; see the plan's triage log.
+

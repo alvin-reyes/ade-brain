@@ -1,12 +1,15 @@
 #!/bin/bash
 # bin/session-end [folder] [--since <epoch>]: SessionEnd hook (no model), also run by hand or by a launcher. Journals
 # the commits made during the session, then commits that folder's hub files and the journal to the hub (only those
-# paths) under the sync lock, releases it, then starts `bin/sync --auto` in the background, which pushes (off:
-# HUB_AUTO_SYNC=0 in hub.conf or AGENT_AUTO_SYNC=0; AGENT_SYNC_CMD replaces the command, for tests).
+# paths) under the sync lock, releases it, then runs `bin/brain index` and then `bin/sync --auto`, which pushes (off:
+# HUB_AUTO_SYNC=0 in hub.conf or AGENT_AUTO_SYNC=0; AGENT_SYNC_CMD replaces the command, for tests). On the hook path
+# (no --since) those two steps run detached, in their own session with no pipe of the hook's, and the hook returns
+# without waiting on them; with --since they run in the foreground. A failed step logs `bg step failed: <step> exit <n>`.
 # Reads the hook JSON on stdin for at most 2 s (a stdin that never closes, or a terminal, is not waited on).
 # Session start = --since, else the first transcript line's timestamp, else the last 8 hours.
-# The sync lock is waited on for at least AGENT_LOCK_WAIT seconds (default 30); still busy: nothing is committed and one
-# journal line says the hub commit was skipped (written even with no repo commits, when hub files are pending).
+# The sync lock is waited on for at least AGENT_HOOK_LOCK_WAIT seconds (default 5) on the hook path, AGENT_LOCK_WAIT
+# (default 30) with --since; still busy: nothing is committed and one journal line says the hub commit was skipped
+# (written even with no repo commits, when hub files are pending).
 # With --since (9-11 digits), one line per run goes to $AGENT_SESSION_END_LOG (default $(state_dir)/logs/session-end.log).
 # Otherwise writes nothing to the journal when no repo has commits since the start. Exit 0; 2 = bad usage.
 . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; F=""; SINCE=""; SINCE_OK=""; SINCE_GIVEN=0
@@ -15,6 +18,23 @@ log() { mkdir -p "$(dirname "$LOG")" 2>/dev/null; echo "$(date -u '+%Y-%m-%dT%H:
 # the log names the start only once it is a valid epoch; a raw --since value never reaches it
 outcome() { [ "$SINCE_GIVEN" = 1 ] && log "${F:-.} since=${SINCE_OK:-?} $*"; return 0; }
 refuse() { echo "session-end: $1${2:+, got '$2'}" >&2; outcome "refused: $1"; exit 2; }
+refresh_brain() { [ -x "$H/bin/brain" ] || return 0; timeout 120 "$H/bin/brain" index >/dev/null 2>&1; }
+# then push the hub: bin/sync --auto
+auto_sync() {
+  [ "${AGENT_AUTO_SYNC:-${HUB_AUTO_SYNC:-1}}" = 0 ] && return 0
+  if [ -n "${AGENT_SYNC_CMD:-}" ]; then (cd "$H" && $AGENT_SYNC_CMD) >/dev/null 2>&1 < /dev/null
+  else (cd "$H" && "$H/bin/sync" --auto) >/dev/null 2>&1 < /dev/null; fi
+}
+# the steps after the commit, in order; a failure is one log line (step name and status only, never its output)
+after_steps() {
+  local rc
+  refresh_brain; rc=$?; [ "$rc" = 0 ] || log "bg step failed: brain index exit $rc"
+  auto_sync; rc=$?; [ "$rc" = 0 ] || log "bg step failed: sync exit $rc"
+  return 0
+}
+# the detached job re-enters this script (internal, never an option): only the steps, no journal line
+if [ "${AGENT_SESSION_END_BG:-}" = 1 ]; then unset AGENT_SESSION_END_BG; after_steps; exit 0; fi
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 while [ $# -gt 0 ]; do
   case "$1" in
     --since) SINCE_GIVEN=1; [ $# -ge 2 ] || refuse "--since needs an epoch"; SINCE="$2"; shift 2 ;;
@@ -77,13 +97,18 @@ commit_folder() {
   return 0
 }
 pending() { [ "$F" != . ] && [ -n "$(cd "$H" && git status --porcelain -- "$F" journal 2>/dev/null)" ]; }
-refresh_brain() { [ -x "$H/bin/brain" ] && timeout 120 "$H/bin/brain" index >/dev/null 2>&1; return 0; }
-# then push the hub: bin/sync --auto, detached so the session never waits on it
-auto_sync() {
-  [ "${AGENT_AUTO_SYNC:-${HUB_AUTO_SYNC:-1}}" = 0 ] && return 0
-  if [ -n "${AGENT_SYNC_CMD:-}" ]; then (cd "$H" && nohup $AGENT_SYNC_CMD >/dev/null 2>&1 < /dev/null &) 2>/dev/null
-  else (cd "$H" && nohup "$H/bin/sync" --auto >/dev/null 2>&1 < /dev/null &) 2>/dev/null; fi
-  return 0
+# start_detached: run the steps in a new session (python3 forks, then os.setsid), stdin /dev/null, stdout and stderr
+# to the session-end log, not waited on. Claude Code waits on the hook's pipes, so no child may keep them open.
+# Without python3 it falls back to nohup (same session and process group, but the same redirects).
+start_detached() {
+  local out="$LOG"; mkdir -p "$(dirname "$LOG")" 2>/dev/null; { : >> "$LOG"; } 2>/dev/null || out=/dev/null
+  if command -v python3 >/dev/null 2>&1; then
+    AGENT_SESSION_END_BG=1 python3 -c 'import os, sys
+if os.fork(): os._exit(0)
+os.setsid(); os.execv(sys.argv[1], sys.argv[1:])' "$SELF" "$F" < /dev/null >> "$out" 2>&1 &
+  else
+    AGENT_SESSION_END_BG=1 nohup "$SELF" "$F" < /dev/null >> "$out" 2>&1 &
+  fi
 }
 line=""
 if [ -n "$commits" ]; then
@@ -91,8 +116,8 @@ if [ -n "$commits" ]; then
   line="auto: session ended; commits: $commits${pushed:+; branches pushed: $pushed}; changed files in folder: ${files:-none}"
 fi
 # the journal line and the commit run under the sync lock, released before the follow-on sync needs it
-LOCK="$(sync_lock_path)"
-if sync_lock_take "$LOCK" "$(sync_lock_wait)" log; then
+LOCK="$(sync_lock_path)"; W="$(sync_hook_lock_wait)"; [ "$SINCE_GIVEN" = 1 ] && W="$(sync_lock_wait)"
+if sync_lock_take "$LOCK" "$W" log; then
   trap 'sync_lock_release "$LOCK"' EXIT
   [ -n "$line" ] && "$(dirname "$0")/journal" "$F" "$line"
   commit_folder
@@ -104,6 +129,6 @@ else
   fi
 fi
 outcome "$RESULT"
-refresh_brain
-auto_sync
+# --since (the launcher's and a manual run): the steps in the foreground; the hook path: detached, not waited on
+if [ "$SINCE_GIVEN" = 1 ]; then after_steps; else start_detached; fi
 exit 0

@@ -1,7 +1,7 @@
 #!/bin/bash
 # bin/sync [--yes|--auto]: review, then commit and push hub files only (never repos/, never other staged files).
 # --yes and --auto hold the sync lock ($(state_dir)/sync.lock); --yes waits at least AGENT_LOCK_WAIT seconds (default 30) for it,
-# then exits 1 ("another sync is running").
+# then exits 1 ("another sync is running"). A lock is removed only when its owner is gone (see sync_lock_take in bin/lib.sh).
 # --auto: unattended --yes for the 30-minute launchd job and the end of every focus session. One run at a time
 # (lock), skips while git is busy (index.lock, rebase, merge), refuses without gitleaks, rebases once if the push is rejected,
 # one line per run in $AGENT_SYNC_LOG (default $(state_dir)/logs/sync.log). HUB_AUTO_SYNC=0 in hub.conf turns it off.
@@ -24,7 +24,8 @@ if [ "$MODE" = "--auto" ]; then
   LOG="${AGENT_SYNC_LOG:-$(state_dir)/logs/sync.log}"; mkdir -p "$(dirname "$LOG")" 2>/dev/null
   log() { echo "$(date -u '+%Y-%m-%dT%H:%M:%SZ') $*" >> "$LOG" 2>/dev/null; }
   [ "${HUB_AUTO_SYNC:-1}" = 0 ] && { log "skipped: auto sync is off (HUB_AUTO_SYNC=0 in hub.conf)"; exit 0; }
-  # one run at a time, no waiting; a stale lock (owner gone, or over 2 hours old: a run killed mid-way) is removed
+  # one run at a time, no waiting; a stale lock (its owner process gone or its pid reused, or no pid file after a 10 s
+  # grace: a run killed mid-way) is removed; a live owner's lock is kept however old
   LOCK="$(sync_lock_path)"; sync_lock_take "$LOCK" 0 log || { log "skipped: another sync is running"; exit 0; }
   trap 'sync_lock_release "$LOCK"' EXIT
   G="$(git rev-parse --git-dir 2>/dev/null)" || { log "failed: not a git repo"; exit 1; }
@@ -35,7 +36,7 @@ if [ "$MODE" = "--auto" ]; then
   [ "$(git config core.hooksPath)" = .githooks ] || { log "refused: core.hooksPath is not .githooks (run bin/setup), so the pre-commit secret check would not run"; exit 1; }
 fi
 if [ "$MODE" = "--yes" ]; then
-  # the same lock as --auto, but waits at least AGENT_LOCK_WAIT seconds (default 30) for it
+  # the same lock as --auto, but waits at least AGENT_LOCK_WAIT seconds (default 30) for it (never AGENT_HOOK_LOCK_WAIT)
   warn() { echo "$*" >&2; }
   LOCK="$(sync_lock_path)"; sync_lock_take "$LOCK" "$(sync_lock_wait)" warn || { echo "another sync is running" >&2; exit 1; }
   trap 'sync_lock_release "$LOCK"' EXIT
