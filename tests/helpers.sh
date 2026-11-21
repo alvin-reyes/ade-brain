@@ -1,6 +1,8 @@
 #!/bin/bash
 set -u
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# tests never depend on the machine's git defaults: every `git init` (hubs, bare remotes, fixtures) starts on main
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=init.defaultBranch GIT_CONFIG_VALUE_0=main
 fail() { echo "FAIL: $*" >&2; exit 1; }
 assert_eq() { [ "$1" = "$2" ] || fail "$3: got [$1] want [$2]"; }
 assert_contains() { grep -qF -- "$2" "$1" || fail "$3: [$2] not in $1"; }

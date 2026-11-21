@@ -37,7 +37,7 @@ while [ $# -gt 0 ]; do
       case "$1" in --mode) MODE="$2" ;; --model) MODEL="$2" ;; --effort) EFFORT="$2" ;; --provider) PROV="$2"; PSET=1 ;; --role) ROLE="$2" ;; *) CL="$2" ;; esac; shift 2 ;;
     --no-remote) REMOTE=0; shift ;;
     --force) FORCE=1; shift ;;
-    --name) [ $# -ge 2 ] && [[ "$2" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "work: --name needs a name of A-Za-z0-9._- only" >&2; exit 2; }
+    --name) [ $# -ge 2 ] && [[ "$2" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "work: --name needs a name of A-Za-z0-9._- only, starting with a letter or digit" >&2; exit 2; }
       RNAME="$2"; shift 2 ;;
     --prompt) [ $# -ge 2 ] && [ -n "$2" ] || { echo "$USAGE" >&2; exit 2; }; PROMPT="$2"; shift 2 ;;
     --agent-model|--agent-effort) [ $# -ge 2 ] || { echo "$USAGE" >&2; exit 2; }
@@ -265,11 +265,11 @@ if [ "$PROV" = anthropic ] && [ -z "${CLAUDE_HOME:-}" ] && [ "${WORK_NO_OPEN:-}"
   fi
 fi
 # the command (it may hold quotes from the agents JSON) runs from a launcher script, so no AppleScript escaping is needed
-# the launcher registers the session in $(state_dir)/sessions/<name>.<launcher pid> while it runs (bin/sessions lists them);
+# the launcher registers the session in $(state_dir)/sessions/<name>.<launcher pid> (name = --name N, else the folder name) while it runs (bin/sessions lists them);
 # parent = the Claude session that ran bin/work ($CLAUDE_PID), so an orchestrator can list its own children
 SD="$(state_dir)/sessions"
 reg=$(printf 'R=%q.$$\nmkdir -p %q && printf '"'"'name=%%s\\nfolder=%%s\\nlauncher=%%s\\nparent=%%s\\nstarted=%%s\\ncwd=%%s\\nrole=%%s\\n'"'"' %q %q "$$" %q "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)" %q %q > "$R"' \
-  "$SD/${F##*/}" "$SD" "${F##*/}" "$F" "${CLAUDE_PID:--}" "$dir" "${ROLE:--}")
+  "$SD/${RNAME:-${F##*/}}" "$SD" "${RNAME:-${F##*/}}" "$F" "${CLAUDE_PID:--}" "$dir" "${ROLE:--}")
 # an Anthropic session's subagent default ($SUBM, checked above) is exported by the launcher, so a value its own shell has
 # still wins; a provider session never sets it (.ade/context/providers.md)
 sub=""; [ "$PROV" = anthropic ] && sub="export CLAUDE_CODE_SUBAGENT_MODEL=\"\${CLAUDE_CODE_SUBAGENT_MODEL:-$SUBM}\""$'\n'

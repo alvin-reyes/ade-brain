@@ -1,6 +1,7 @@
 {
   "autoCompactWindow": 200000,
   "bashOutputMaxChars": 8000,
+  "permissions": { "ask": ["Bash(*bin/dispatch --approve*)", "Bash(*ade dispatch --approve*)", "Bash(script *)"] },
   "hooks": {
     "PreCompact": [
       { "hooks": [ { "type": "command", "command": "\"$CLAUDE_PROJECT_DIR\"/bin/journal hub \"(compaction at the hub root: update the folders' STATE.md for anything in progress)\"" } ] }
