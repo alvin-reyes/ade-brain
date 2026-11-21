@@ -61,7 +61,7 @@ bin/sync --auto >/dev/null
 mkdir "$K"; echo a3 >> memory/MEMORY.md; h=$(git rev-parse HEAD); bin/sync --auto; assert_eq "$?" "0" "locked: exit 0"
 assert_eq "$(git rev-parse HEAD)" "$h" "locked: no commit"; grep -q "skipped: another sync is running" "$L" || fail "lock skip logged"
 [ -d "$K" ] || fail "skipped run removed someone else's lock"
-# stale lock (over 2 hours old) is removed and the run goes on
+# stale lock (no pid file, older than the 10 s grace: a run killed before it wrote one) is removed and the run goes on
 touch -t 202001010000 "$K"; bin/sync --auto; [ -d "$K" ] && fail "lock left behind"
 grep -q "removed stale lock" "$L" || fail "stale lock not logged"; assert_eq "$(git --git-dir="$B" rev-parse HEAD)" "$(git rev-parse HEAD)" "synced after stale lock"
 # lock whose owner is gone (dead pid) is removed; a live owner's lock is kept
@@ -122,6 +122,19 @@ bin/sync --yes > /dev/null 2> "$K.err"; assert_eq "$?" 1 "$CHECK: exit"
 grep -q "another sync is running" "$K.err" || fail "$CHECK: no 'another sync is running' on stderr"
 assert_eq "$(git rev-parse HEAD)" "$h" "$CHECK: committed anyway"; [ -d "$K" ] || fail "$CHECK: other process's lock removed"
 git diff --cached --name-only | grep -qx memory/MEMORY.md && fail "$CHECK: files left staged"
+CHECK=sync_yes_live_old_kept
+# a live owner's lock (pid only) is kept however old
+touch -t 202001010000 "$K"; h=$(git rev-parse HEAD)
+bin/sync --yes > /dev/null 2> "$K.err"; assert_eq "$?" 1 "$CHECK: exit"
+grep -q "another sync is running" "$K.err" || fail "$CHECK: no 'another sync is running' on stderr"
+assert_eq "$(git rev-parse HEAD)" "$h" "$CHECK: committed anyway"
+[ -d "$K" ] || fail "$CHECK: live owner's old lock removed"; assert_eq "$(cat "$K/pid" 2>/dev/null)" "$sp" "$CHECK: lock owner"
+CHECK=sync_yes_uses_lock_wait
+# --yes waits AGENT_LOCK_WAIT, never the hook's AGENT_HOOK_LOCK_WAIT
+(sleep 6; rm -rf "$K") & r=$!
+AGENT_HOOK_LOCK_WAIT=1 AGENT_LOCK_WAIT=10 bin/sync --yes >/dev/null 2>&1; rc=$?; wait $r
+assert_eq "$rc" 0 "$CHECK: exit"; git log -1 --pretty=%s | grep -q "^sync " || fail "$CHECK: not committed"
+mkdir "$K"; echo $sp > "$K/pid"; echo y4 >> memory/MEMORY.md   # the lock and a pending change for the next check
 CHECK=sync_review_takes_no_lock
 out=$(bin/sync); assert_eq "$?" 0 "$CHECK: exit"; echo "$out" | grep -q "memory/MEMORY.md" || fail "$CHECK: pending change not listed"
 [ -d "$K" ] && [ "$(cat "$K/pid")" = "$sp" ] || fail "$CHECK: review touched the lock"
