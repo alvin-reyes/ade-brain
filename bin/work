@@ -19,7 +19,8 @@
 # exit 1 with each skip reason, nothing opened. The role is recorded for bin/sessions.
 # A gemini pick (--role, or --provider gemini --model gemini-*; story E1, .ade/context/engines.md "Gemini CLI engine") runs
 # the Gemini CLI through bin/gemini-run instead of Claude Code: its own checks (allowlist, owner-only unless
-# HUB_GEMINI_CLIENT_APPROVED=1, a sign-in or a stored key, the checkout's .gemini files), never yolo (any spelling: exit 2),
+# HUB_GEMINI_CLIENT_APPROVED=1, the CLI installed, a sign-in or a stored key, the checkout's own .gemini configuration),
+# never yolo (any spelling: exit 2); bin/gemini-run checks them again and gives the CLI the hub's settings and policy,
 # no Claude Code flag (--effort, --agent-*, --claude: exit 2), --mode as the CLI's approval mode (auto and acceptEdits =
 # auto_edit, manual = default, plan = plan), --prompt as its first message (-i), no Remote Control, no --agents.
 # --agent-model / --agent-effort (repeatable) set the folder's specialist agents: a bare value sets all, name=value one (it wins). WORK_DRY=1 only prints the command. AGENT_TERMINAL=iterm uses iTerm.
@@ -105,6 +106,8 @@ if [ "$PROV" = gemini ]; then
   why="$(provider_own_hub_refusal)"; [ -z "$why" ] || { echo "work: $why" >&2; exit 2; }
   why="$(provider_hub_refusal gemini)"; [ -z "$why" ] || { echo "work: $why" >&2; exit 2; }
   provider_feature_go gemini focus || { echo "work: $(provider_no_go_reason gemini focus)" >&2; exit 2; }
+  why="$(gemini_system_refusal)"; [ -z "$why" ] || { echo "work: $why" >&2; exit 2; }
+  command -v "$(gemini_cmd)" >/dev/null 2>&1 || { echo "work: the Gemini CLI ($(gemini_cmd)) is not installed" >&2; exit 1; }
   [ -n "$MODEL" ] && gemini_model_ok "$MODEL" || { echo "work: the Gemini CLI needs a Gemini model (--model gemini-*), not '${MODEL:-none}'" >&2; exit 2; }
   why="$(gemini_yolo_refusal ${POS[@]+"${POS[@]}"})"; [ -z "$why" ] || { echo "work: $why" >&2; exit 2; }
   [ -z "$EFFORT" ] && [ -z "$ASET" ] && [ "$CL" = "$(claude_cmd)" ] || { echo "work: --effort, --agent-model, --agent-effort and --claude are Claude Code flags; the Gemini CLI takes none of them" >&2; exit 2; }
@@ -244,12 +247,9 @@ if [ "$PROV" = gemini ]; then
   # fail closed, before anything is written: the CLI's own Google login, else a stored key (read once, never kept)
   GA="read"; [ "${WORK_DRY:-}" != 1 ] || GA="has"
   GAUTH="$(gemini_auth "$GA")" || { echo "work: $(gemini_auth_hint)" >&2; exit 1; }
-  MS=$(mktemp "${TMPDIR:-/tmp}/agent-gemini.XXXXXX") && chmod 600 "$MS" || exit 2
-  gemini_settings_write "$MS" "$GAUTH" focus "$GMODE" || exit 2
   echo "work: Gemini CLI signed in with $([ "$GAUTH" = google ] && echo "its Google login" || echo "the stored gemini-api-key")" >&2
-  cmd="cd $(sq "$dir") && AGENT_FOLDER='$F' $(sq "$H/bin/gemini-run") --system-settings $(sq "$MS") --auth $GAUTH -m $(printf %q "$MODEL") --approval-mode $GMODE"
+  cmd="cd $(sq "$dir") && AGENT_FOLDER='$F' $(sq "$H/bin/gemini-run") --auth $GAUTH --mode focus -m $(printf %q "$MODEL") --approval-mode $GMODE"
   [ -z "$PROMPT" ] || cmd="$cmd -i $(printf %q "$PROMPT")"
-  TRAP="rm -f \"\$0\" $(sq "$MS")"
 elif [ "$PROV" = anthropic ]; then
   # the caller's install: a bare name runs what the caller's PATH finds, since a new window's login shell may find another
   # claude first (an explicit path, or a name not on PATH, is kept as given)

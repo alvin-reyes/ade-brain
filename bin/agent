@@ -4,8 +4,9 @@
 # 20 KB (full text in .local/agent-out/). It is data: it approves nothing. No fallback once a run has started.
 # AGENT_TIMEOUT: seconds (default 540, capped at 570). Exit 0 report; 1 run failed, timed out or was killed; 2 refused.
 # Contract: .ade/context/providers.md, "Roles". The run itself is bin/agent.py. A gemini pick (story E1) runs the Gemini CLI
-# through bin/gemini-run: headless (-p), no extensions or MCP servers, approval mode default (nothing auto-approved), and a
-# settings layer that keeps only its read-only tools (.ade/context/engines.md, "Gemini CLI engine").
+# through bin/gemini-run --mode agent: headless (-p), no extensions or MCP servers, approval mode default (nothing
+# auto-approved), the hub's admin policy (read tools only, secret files denied) and --skip-trust once the checkout's own
+# .gemini configuration was refused (.ade/context/engines.md, "Gemini CLI engine").
 set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"
 USAGE="usage: bin/agent --role R --folder <projects|ops>/<name> < task"
 R=""; F=""
@@ -27,11 +28,9 @@ role_pick "$R" "$DIR" read; s=$?
 P="${ROLE_PICK%%:*}"; M="${ROLE_PICK#*:}"
 if [ "$P" = gemini ]; then
   GAUTH="$(gemini_auth has)" || { echo "agent: $(gemini_auth_hint)" >&2; exit 2; }
-  MS="$(mktemp "${TMPDIR:-/tmp}/agent-gemini.XXXXXX")" && chmod 600 "$MS" || exit 2
-  gemini_settings_write "$MS" "$GAUTH" agent default || { rm -f "$MS"; exit 2; }
   export AGENT_RUN_HUB="$H" AGENT_RUN_ROLE="$R" AGENT_RUN_FOLDER="$F" AGENT_RUN_PROVIDER="$P" AGENT_RUN_MODEL="$M" AGENT_RUN_DIR="$DIR" \
-    AGENT_RUN_TIMEOUT="$T" AGENT_RUN_SETTINGS="$MS" AGENT_RUN_CONFIG_DIR=""
-  exec python3 "$(dirname "$0")/agent.py" "$H/bin/gemini-run" --system-settings "$MS" --auth "$GAUTH" -p "Reply with the report the task above asks for." \
+    AGENT_RUN_TIMEOUT="$T" AGENT_RUN_SETTINGS="" AGENT_RUN_CONFIG_DIR=""
+  exec python3 "$(dirname "$0")/agent.py" "$H/bin/gemini-run" --auth "$GAUTH" --mode agent -p "Reply with the report the task above asks for." \
     -m "$M" -o text -e none --allowed-mcp-server-names none --approval-mode default
 fi
 CL="$(claude_cmd)"; [[ "$CL" =~ ^[A-Za-z0-9._/-]+$ ]] && CL="$(command -v -- "$CL")" || { echo "agent: cannot find the claude command '$(claude_cmd)'" >&2; exit 2; }

@@ -94,21 +94,24 @@ same table, never a copy. Findings: `engines.md`. Decision and terms: `decisions
 
 ## The Gemini CLI engine (story E1)
 - Engine table in `bin/lib.sh`: `engines` (`claude gemini`), `engine_of <provider>` (`gemini` for `gemini`, else
-  `claude`), `gemini_cmd`, `gemini_model_ok` (`gemini-*`), `gemini_scrub_vars`, `gemini_yolo_refusal <args>`,
-  `gemini_checkout_refusal <dir>`, `gemini_auth [has|read]` (`google` | `key`, exit 1 none), `gemini_auth_hint`,
-  `gemini_settings_write <dst> <google|key> <focus|agent> [approval mode]`.
+  `claude`), `gemini_cmd`, `gemini_model_ok` (`gemini-*`), `gemini_home <google|key>` (`<hub>/.local/engines/gemini-<auth>`,
+  the CLI's `GEMINI_CLI_HOME`), `gemini_scrub_vars` (set empty), `gemini_unset_vars`, `gemini_yolo_refusal <args>`,
+  `gemini_checkout_refusal <dir>`, `gemini_admin_policy_dir`, `gemini_system_refusal`, `gemini_auth [has|read]` (`google` |
+  `key`, exit 1 none), `gemini_auth_hint`, `gemini_settings_write <home> <auth>`, `gemini_policy_write <file> <focus|agent>`.
 - `provider_field gemini`: `secret` `gemini-api-key`, `label`, `owner_only` 1 (no `base_url`: not behind Claude Code).
   `provider_feature_go gemini`: `focus` and `delegation` go; `agents`, `effort`, `remote` no.
 - `hub.conf`: `HUB_GEMINI_CLIENT_APPROVED=1` opens gemini to a client hub (unset before `hub.conf` is sourced, so never
   from the environment). `HUB_PROVIDERS_ALLOWED` must list `gemini`.
 - Role entries `gemini:<model>`; `candidate_refusal` checks allowlist, `provider_hub_refusal`, own hub, the go, the model,
-  the checkout's `.gemini/.env` and yolo settings, then a sign-in (`gemini_auth`). `bin/roles` appends `  (engine gemini)`.
-  `bin/work --role` prints each skipped candidate as `work: skipped <c>: <why>`.
-- `bin/gemini-run --system-settings FILE --auth google|key [gemini args]`: refuses yolo (exit 2), drops
-  `gemini_scrub_vars`, sets `GEMINI_CLI_SYSTEM_SETTINGS_PATH=FILE`, and with `key` reads `gemini-api-key` once and execs the
-  CLI with `GEMINI_API_KEY` (exit 1 when missing or empty).
-- Focus command: `cd '<dir>' && AGENT_FOLDER='<F>' '<hub>/bin/gemini-run' --system-settings '<file>' --auth <a> -m <model>
+  the CLI installed, `gemini_system_refusal`, the checkout's `.gemini/` (with a dir), then a sign-in (`gemini_auth`).
+  `bin/roles` appends `  (engine gemini)`. `bin/work --role` prints each skipped candidate as `work: skipped <c>: <why>`.
+- `bin/gemini-run --auth google|key --mode focus|agent [gemini args]` (run in the checkout): re-checks the allowlist,
+  client approval, own hub, yolo, the checkout and the machine's admin policies (exit 2); writes the user layer and
+  `<home>/hub-policy-<mode>.toml`; sets `gemini_scrub_vars` empty, unsets `gemini_unset_vars`, pins `GEMINI_CLI_HOME`; runs
+  `gemini --admin-policy <policy> [--skip-trust (agent)] <args>`, with `key` reading `gemini-api-key` once into
+  `GEMINI_API_KEY` (exit 1 when missing or empty; the google login missing in its home: exit 1).
+- Focus command: `cd '<dir>' && AGENT_FOLDER='<F>' '<hub>/bin/gemini-run' --auth <a> --mode focus -m <model>
   --approval-mode <default|auto_edit|plan> [-i <prompt>]`. Session entry `engine=gemini`; `bin/sessions` prints ENGINE
   as the last column, after LAST (`claude` for older entries).
-- `bin/agent`: `bin/gemini-run ... -p "<instruction>" -m <model> -o text -e none --allowed-mcp-server-names none
-  --approval-mode default`, settings layer with `tools.core` = `read_file read_many_files glob grep_search list_directory`.
+- `bin/agent`: `bin/gemini-run --auth <a> --mode agent -p "<instruction>" -m <model> -o text -e none
+  --allowed-mcp-server-names none --approval-mode default`.
