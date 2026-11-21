@@ -37,6 +37,16 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"{{HUB}}\"/bin/inbox {{FOLDER}}"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

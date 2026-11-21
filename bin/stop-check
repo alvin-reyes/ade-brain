@@ -1,20 +1,28 @@
 #!/bin/bash
-# bin/stop-check <folder>: Stop hook. Blocks once per commit when a repo has commits newer than STATE.md.
-# Without repos it only prints a plain reminder if STATE.md was not updated today (UTC).
+# bin/stop-check [folder]: Stop hook (hub root and every folder). Blocks once per commit when a repo has commits newer
+# than STATE.md. Without repos it only prints a plain reminder if STATE.md was not updated today (UTC).
+# Events (story C6, .ade/context/events.md): otherwise it blocks once when a note addressed to this session is unread
+# in $(state_dir)/events.jsonl (never inside a stop-hook continuation), and a folder session that is not blocked
+# appends an `idle` event (its last STATE line). Reads the hook stdin for at most 1 s. Always exits 0.
 . "$(dirname "$0")/lib.sh"; H="$(hub_root)"; F="${1:-.}"; S="$H/$F/STATE.md"
 session_mark "$F" idle   # the turn ended: bin/sessions shows the focus session as idle (busy again if this hook blocks)
-[ -f "$S" ] || exit 0
-if [ -n "$(repos_of "$F")" ]; then
+blocked=0
+if [ -f "$S" ] && [ -n "$(repos_of "$F")" ]; then
   line=$(stale_repos "$F" | head -1)
   if [ -n "$line" ]; then
     repo="${line% *}"; hash="${line##* }"; K="$(state_dir)/stop-check/$(encode_path "$F")"
     if [ "$(cat "$K" 2>/dev/null)" != "$hash" ]; then
       mkdir -p "$(dirname "$K")"; echo "$hash" > "$K"
-      session_mark "$F" busy
+      session_mark "$F" busy; blocked=1
       printf '{"decision":"block","reason":"Commits were made in %s since STATE.md was updated. Update %s/STATE.md (Live/Open/Waiting on) and run bin/journal %s \\"...\\" before finishing."}\n' "$repo" "$F" "$F"
     fi
   fi
-  exit 0
 fi
+# one block per turn: when the commit check blocked, unread events wait for the next stop (or prompt, or tool call)
+R=""; [ "$F" = . ] || R="$(repos_of "$F" 2>/dev/null)"
+EV_NO_BLOCK="$blocked" H="$H" ST="$(state_dir)" REPOS="$R" python3 -I "$(dirname "$0")/events.py" hook-stop "$F" 2>/dev/null
+[ $? = 3 ] && { session_mark "$F" busy; exit 0; }
+[ "$F" != . ] && [ -f "$S" ] || exit 0
+[ -n "$(repos_of "$F")" ] && exit 0
 [ "$(date -u -r "$S" +%Y-%m-%d)" = "$(utc_today)" ] || echo "Reminder: $F/STATE.md was not updated today. Update it and run bin/journal $F \"...\" if anything changed."
 exit 0

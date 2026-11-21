@@ -32,6 +32,13 @@ if md="$("$H/bin/method" check 2>/dev/null)"; then line OK "method" "ade-method 
 elif echo "$md" | grep -q "^not synced at "; then line MISSING "method" "$(echo "$md" | grep "^not synced at " | head -1) (bin/method sync)"
 elif [ -z "$mr" ]; then line MISSING "method" "none recorded: bin/method sync"
 else line MISSING "method" "differs from ade-method $mr: $(echo "$md" | sed 's/^differs: //' | tr '\n' ' ')(bin/method sync)"; fi
+# folders made before a hook was added to the template (story C6): each hook event the template has and a folder's
+# settings lack, by name; bin/new --settings re-renders that file (keeping a .bak)
+tev=$(grep -oE '"[A-Za-z]+": \[' "$H/templates/folder-settings.json" 2>/dev/null | tr -d '":[ ' | grep -vx hooks)
+for f in $(folders); do s="$H/$f/.claude/settings.json"; [ -f "$s" ] || continue; miss=""
+  for e in $tev; do grep -q "\"$e\"" "$s" || miss="$miss $e"; done
+  [ -z "$miss" ] || line WARN "settings $f" "no${miss} hook from the template (bin/new --settings $f)"
+done
 w="$(orchestrator_endpoint_warning)"; [ -z "$w" ] || line WARN "orchestrator" "$w"
 [ "${DOCTOR_OFFLINE:-}" = 1 ] && exit 0
 command -v gh >/dev/null && { gh auth status >/dev/null 2>&1 && line OK "github login" "$(gh api user --jq .login 2>/dev/null)" || line MISSING "github login" "gh auth login"; }

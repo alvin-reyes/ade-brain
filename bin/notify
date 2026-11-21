@@ -1,0 +1,39 @@
+#!/bin/bash
+# bin/notify [--from <folder|main>] <folder|name|main|all> <text>: append one note to the hub's event log
+# ($(state_dir)/events.jsonl, story C6, .ade/context/events.md). A bare name (api) must name exactly one folder
+# (projects/api or ops/api) and is stored as that folder. The text is one line of at most 500 characters (ANSI and
+# control characters removed); a text that looks like a secret is refused and nothing is written. The sender is the
+# focus session this runs in (its bin/work launcher among this process's ancestors); inside one, --from may only name
+# that session's folder. Outside one it is --from, else main. Receivers see every sender as claimed, the text as data.
+# Exit 0 written, 2 refused, 1 log unusable.
+. "$(dirname "$0")/lib.sh"; H="$(hub_root)"
+usage() { echo "usage: bin/notify [--from <folder|main>] <folder|name|main|all> <text>" >&2; exit 2; }
+folder_ok() { [[ "$1" =~ ^(projects|ops)/[A-Za-z0-9._-]+$ ]] && [ "${1##*/}" != . ] && [ "${1##*/}" != .. ] && [ -d "$H/$1" ]; }
+FROM=""; FROM_GIVEN=0
+if [ "${1:-}" = --from ]; then
+  [ $# -ge 2 ] || usage; FROM="$2"; FROM_GIVEN=1; shift 2
+  [ "$FROM" = main ] || folder_ok "$FROM" || { echo "notify: --from must be main or a hub folder, got '$FROM'" >&2; exit 2; }
+fi
+[ $# -eq 2 ] || usage; TO="$1"; TEXT="$2"
+case "$TO" in
+  main|all) ;;
+  */*) folder_ok "$TO" || { echo "notify: no hub folder '$TO'" >&2; exit 2; } ;;
+  *) [[ "$TO" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "notify: bad target '$TO'" >&2; exit 2; }
+     m=""; for t in projects ops; do folder_ok "$t/$TO" && m="$m $t/$TO"; done; set -- $m
+     [ $# -eq 1 ] || { if [ $# -eq 0 ]; then echo "notify: no folder named '$TO' (use main, all, projects/<name> or ops/<name>)" >&2
+       else echo "notify: '$TO' names more than one folder ($m ); use the full folder" >&2; fi; exit 2; }
+     TO="$1" ;;
+esac
+# inside a focus session: the bin/work launcher among this process's ancestors (as session_mark finds it)
+IN=""; p=$$; SD="$(state_dir)/sessions"
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' '); [[ "$p" =~ ^[0-9]+$ ]] && [ "$p" -gt 1 ] || break
+  e=$(ls "$SD"/*."$p" 2>/dev/null | head -1); [ -n "$e" ] || continue
+  IN=$(sed -n 's/^folder=//p' "$e" | head -1); break
+done
+if [ -n "$IN" ]; then
+  folder_ok "$IN" || { echo "notify: this focus session's folder '$IN' is not a hub folder" >&2; exit 2; }
+  [ "$FROM_GIVEN" = 0 ] || [ "$FROM" = "$IN" ] || { echo "notify: inside the focus session for $IN, --from cannot be '$FROM'" >&2; exit 2; }
+  FROM="$IN"
+fi
+H="$H" ST="$(state_dir)" python3 -I "$(dirname "$0")/events.py" write --from "${FROM:-main}" --to "$TO" --kind note --text "$TEXT"
