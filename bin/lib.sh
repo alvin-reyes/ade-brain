@@ -525,6 +525,8 @@ file_low9() { local m; m="$(file_mode "$1")" || return 1; [ -n "$m" ] || return 
 dir_loose() { local m o; m="$(file_mode "$1")" || return 0; [ -n "$m" ] || return 0; o="$(file_owner "$1")"
   [ "$o" = "$(id -u)" ] || [ "$o" = 0 ] || { echo "$1 is owned by uid $o, not you"; return 0; }
   [ $(( 8#$m & 022 )) = 0 ] || [ $(( 8#$m & 01000 )) != 0 ] || echo "$1 is writable by group or others (mode $m): chmod go-w $1"; }
+# script(1) for a pseudo-terminal: util-linux takes the command as -c "<cmd>" before the file, BSD takes it after
+script_is_util_linux() { script --version 2>/dev/null | grep -q util-linux; }
 # utc_epoch <YYYY-MM-DDTHH:MM:SS>: that UTC time in seconds (GNU date -d or BSD date -j); nothing when unreadable
 utc_epoch() { date -u -d "$1" +%s 2>/dev/null || date -j -u -f "%Y-%m-%dT%H:%M:%S" "$1" +%s 2>/dev/null; }
 # Desktop notifications: macOS only (osascript); elsewhere nothing (bin/monitor writes an event instead).
