@@ -5,7 +5,11 @@
     "ask": [
       "Bash(*bin/dispatch --approve*)",
       "Bash(*ade dispatch --approve*)",
-      "Bash(script *)"
+      "Bash(script *)",
+      "Bash(*bin/chat answer*)",
+      "Bash(*ade chat answer*)",
+      "Bash(*bin/chat to *)",
+      "Bash(*ade chat to *)"
     ]
   },
   "hooks": {
