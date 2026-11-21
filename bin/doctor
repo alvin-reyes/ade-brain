@@ -26,6 +26,12 @@ for p in ${HUB_PROVIDERS_ALLOWED:-}; do s="$(provider_field "$p" secret)" || con
   "$H/bin/secret" --has "$s" && line OK "$l" "$s in the Keychain" || line MISSING "$l" "$s: bin/secret --set $s"
   [ -z "$(provider_hub_refusal "$p")" ] || line MISSING "client hub" "HUB_PROVIDERS_ALLOWED lists $p, which needs HUB_OWNED_BY_OWNER=1 (owner's own hubs only, ADR 0002); remove it"
 done
+# the method (story C1): one row, the drifted files by name only, never their contents
+mr="$(awk '$1=="ref"{print $2}' "$H/.ade/method-version" 2>/dev/null)"
+if md="$("$H/bin/method" check 2>/dev/null)"; then line OK "method" "ade-method ${mr:-?}"
+elif echo "$md" | grep -q "^not synced at "; then line MISSING "method" "$(echo "$md" | grep "^not synced at " | head -1) (bin/method sync)"
+elif [ -z "$mr" ]; then line MISSING "method" "none recorded: bin/method sync"
+else line MISSING "method" "differs from ade-method $mr: $(echo "$md" | sed 's/^differs: //' | tr '\n' ' ')(bin/method sync)"; fi
 w="$(orchestrator_endpoint_warning)"; [ -z "$w" ] || line WARN "orchestrator" "$w"
 [ "${DOCTOR_OFFLINE:-}" = 1 ] && exit 0
 command -v gh >/dev/null && { gh auth status >/dev/null 2>&1 && line OK "github login" "$(gh api user --jq .login 2>/dev/null)" || line MISSING "github login" "gh auth login"; }

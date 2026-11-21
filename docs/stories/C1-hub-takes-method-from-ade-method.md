@@ -1,6 +1,6 @@
 # C1: the hub takes the method from ade-method
 
-Status: Ready for development (2026-11-21). Risk: medium. Depends on: ade-method v2 merged and tagged (`v2.0.0`).
+Status: **Done (2026-11-21)**: `bash tests/run.sh` green (29 of 29 test files ok, exit 0) after the quick review's fixes. Risk: medium. Depends on: ade-method v2 merged and tagged (`v2.0.0`).
 Owner's intent (2026-11-21): ade-method is the only home of the method (ADR 0004); the hub keeps no copy of its own.
 Verification command: `bash tests/run.sh`.
 
@@ -23,3 +23,6 @@ A test fails when the hub's copies differ from the pinned ref's files, so they c
 
 ## Out of scope
 Personas, hub CLAUDE.md, ADE's vendoring, skills selection by `ade.json` (later).
+
+## Verification
+Reviewer run (2026-11-21, after merging main): `bash tests/run.sh` → 29 ok, 0 FAIL, exit 0. Quick review: ADR 0005 supersedes 0003's Opus-only rule, README updated, stale overrides removed on sync, failed init sync recorded; 2 findings rejected (network-free pin test by design; mid-write failure unlikely).

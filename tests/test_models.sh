@@ -59,14 +59,7 @@ sub env 'CLAUDE_CODE_SUBAGENT_MODEL=a"b' >/dev/null 2>&1; assert_eq "$?" "2" "a 
 out=$(sub env 'CLAUDE_CODE_SUBAGENT_MODEL=sonnet[1m]') || fail "an inherited sonnet[1m] was refused"
 x=$(echo "$out" | grep '^export CLAUDE_CODE_SUBAGENT_MODEL=')
 assert_eq "$(env -u CLAUDE_CODE_SUBAGENT_MODEL bash -c "$x; echo \$CLAUDE_CODE_SUBAGENT_MODEL")" "sonnet[1m]" "a bracket suffix reaches the session"
-# --- BMAD overrides: review lenses pass no model (they follow the subagent default), code on Opus, quick code review ---
-for t in bmad-build bmad-code-review; do
-  grep -q 'pass no model' "$REPO/_bmad/custom/$t.toml" || fail "$t review lenses pass no model"
-  grep -q 'pass model \\"sonnet\\"' "$REPO/_bmad/custom/$t.toml" && fail "$t must not pin sonnet (ADE decides)"
-  grep -q 'Opus review' "$REPO/_bmad/custom/$t.toml" || fail "$t: an Opus review runs the lenses on opus"; done
-grep -q 'written only by an Opus model' "$REPO/_bmad/custom/bmad-build.toml" || fail "bmad-build writes code on Opus"
-grep -q '^review = "quick"' "$REPO/_bmad/custom/bmad-code-review.toml" || fail "bmad-code-review defaults to quick"
-grep -q 'more than 200 changed lines' "$REPO/_bmad/custom/bmad-code-review.toml" || fail "a quick review of a big diff offers a thorough run"
+# --- BMAD overrides: their wording is ade-method's (story C1); test_method.sh keeps _bmad/custom/ equal to the pin ---
 # --- persona model suggestion: the default when --model is not given ---
 grep -q "^model: opus" personas/fractional-cto.md || fail "fractional CTO suggests opus"
 assert_eq "$(. "$D3/hub.conf"; echo "$HUB_MODEL")" "$(awk -F': ' '$1=="model"{print $2; exit}' personas/qa-test-engineer.md)" "persona model is the default"

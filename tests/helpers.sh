@@ -15,6 +15,9 @@ make_hub() {
   git -C "$HUB" init -q && git -C "$HUB" config user.name t && git -C "$HUB" config user.email t@t
   CLAUDE_HOME="$(mktemp -d)"; export HUB CLAUDE_HOME
   export AGENT_OLLAMA_URL=http://127.0.0.1:9   # tests never reach a real Ollama (test_brain runs a fake one)
+  # tests never fetch ade-method: bin/method and bin/init sync from a local fixture of the template's own method files
+  if [ -z "${METHOD_FIXTURE:-}" ]; then METHOD_FIXTURE="$(mktemp -d)/ade-method"; method_repo_from_template "$METHOD_FIXTURE"; fi
+  export AGENT_METHOD_REPO="$METHOD_FIXTURE"
   # tests never push a real hub or touch the real sync log/lock; test_report turns auto sync on with a stub
   export AGENT_AUTO_SYNC=0 AGENT_SYNC_LOG="$(mktemp -d)/sync.log" AGENT_SYNC_LOCK="$(mktemp -d)/sync.lock"
 }
@@ -39,4 +42,18 @@ case "$op" in
 esac
 STUB
   chmod +x "$d/security"; export PATH="$d:$PATH"
+}
+# method_repo DIR TAG...: a local stand-in for ade-method (story C1), never the network. Each tag's commit holds
+# rules.md "rules TAG" and bmad/custom/bmad-build.toml, bmad-code-review.toml ("# build TAG", "# review TAG").
+method_repo() {
+  local d="$1" t; shift; mkdir -p "$d/bmad/custom" && git -C "$d" init -q && git -C "$d" config user.name t && git -C "$d" config user.email t@t
+  for t in "$@"; do echo "rules $t" > "$d/rules.md"; echo "# build $t" > "$d/bmad/custom/bmad-build.toml"
+    echo "# review $t" > "$d/bmad/custom/bmad-code-review.toml"; git -C "$d" add -A && git -C "$d" commit -qm "$t" && git -C "$d" tag "$t"; done
+}
+# method_repo_from_template DIR: a stand-in whose pinned tag holds the template's own method files, so bin/init in any
+# test syncs what the template already has (make_hub points AGENT_METHOD_REPO at it)
+method_repo_from_template() {
+  local d="$1"; mkdir -p "$d/bmad/custom" && git -C "$d" init -q && git -C "$d" config user.name t && git -C "$d" config user.email t@t
+  cp "$REPO/.ade/rules.md" "$d/rules.md"; cp "$REPO"/_bmad/custom/*.toml "$d/bmad/custom/"
+  git -C "$d" add -A && git -C "$d" commit -qm pin && git -C "$d" tag "$(bash -c ". '$REPO/bin/lib.sh' && method_pin")"
 }
