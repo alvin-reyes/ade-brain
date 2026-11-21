@@ -1,5 +1,5 @@
 #!/bin/bash
-# bin/work [--provider P] [--claude CMD] [--model M] [--effort E] [--prompt TEXT] [--mode M] [--name N] [--no-remote] [--force] [--agent-model [name=]M] [--agent-effort [name=]E] <folder> [repo]: deep work in a new Terminal, inside the project's checkout, with the folder's hooks.
+# bin/work [--role R | --provider P --model M] [--claude CMD] [--model M] [--effort E] [--prompt TEXT] [--mode M] [--name N] [--no-remote] [--force] [--agent-model [name=]M] [--agent-effort [name=]E] <folder> [repo]: deep work in a new Terminal, inside the project's checkout, with the folder's hooks.
 # A folder with no repo (none, or a "(none ...)" row) works in the hub folder itself. Clones a missing checkout (owner/name as given, else HUB_CODE_OWNER/<name>) to ${AGENT_CODE_DIR:-$HOME/Project}/<name> and records the path in ACCESS.md.
 # --claude picks the Claude install (default: claude_cmd in lib.sh); a bare name runs what the caller's PATH finds, and the
 # session keeps the caller's CLAUDE_CONFIG_DIR (or none), so it runs as the same install and account. --model / --effort (anywhere in the arguments) pass through to claude for this session.
@@ -14,6 +14,9 @@
 # --provider P (default HUB_PROVIDER from hub.conf, else anthropic) runs Claude Code against another provider's endpoint (story SP,
 # .ade/context/providers.md): only providers in hub.conf's HUB_PROVIDERS_ALLOWED; plain claude; no Remote Control, no resume;
 # its own config dir; a merged settings file whose apiKeyHelper reads the key (the key is checked once, never written).
+# --role R (story C2) picks the provider and model with role_pick (bin/lib.sh; .ade/context/providers.md, "Roles"), then
+# takes the --provider/--model path with all its gates; it excludes --model and --provider (exit 2). No usable candidate:
+# exit 1 with each skip reason, nothing opened. The role is recorded for bin/sessions.
 # --agent-model / --agent-effort (repeatable) set the folder's specialist agents: a bare value sets all, name=value one (it wins). WORK_DRY=1 only prints the command. AGENT_TERMINAL=iterm uses iTerm.
 # Inside an ADE terminal (ADE_HOOK_BIN executable; ADE_HOOK_PORT, ADE_HOOK_TOKEN, ADE_PTY_ID set) the session opens as a
 # sub-terminal of the caller's tab and NEVER in a Terminal or iTerm window (owner, 2026-11-09; stories W1 and W1b):
@@ -26,12 +29,12 @@
 set -u; . "$(dirname "$0")/lib.sh"; H="$(hub_root)"
 # temp files (merged settings, launcher) go on any exit until the launcher is handed off; the launcher then removes them
 MS=""; L=""; trap '[ -z "$MS" ] || rm -f "$MS"; [ -z "$L" ] || rm -f "$L"' EXIT
-USAGE="usage: bin/work [--provider P] [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--mode auto|manual|acceptEdits|plan] [--name N] [--no-remote] [--force] [--agent-model [name=]M] [--agent-effort [name=]E] <projects|ops>/<name> [repo]  (AGENT_TERMINAL=terminal|iterm|ade)"
-MODEL=""; EFFORT=""; PROMPT=""; MODE=""; REMOTE=1; RNAME=""; FORCE=0; CL="$(claude_cmd)"; POS=(); ASET=""; PROV="${HUB_PROVIDER:-anthropic}"
+USAGE="usage: bin/work [--role R] [--provider P] [--claude CMD] [--model M] [--effort low|medium|high|xhigh|max] [--prompt TEXT] [--mode auto|manual|acceptEdits|plan] [--name N] [--no-remote] [--force] [--agent-model [name=]M] [--agent-effort [name=]E] <projects|ops>/<name> [repo]  (AGENT_TERMINAL=terminal|iterm|ade)"
+MODEL=""; EFFORT=""; PROMPT=""; MODE=""; REMOTE=1; RNAME=""; FORCE=0; CL="$(claude_cmd)"; POS=(); ASET=""; PROV="${HUB_PROVIDER:-anthropic}"; ROLE=""; PSET=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --model|--effort|--claude|--provider|--mode) [ $# -ge 2 ] || { echo "$USAGE" >&2; exit 2; }
-      case "$1" in --mode) MODE="$2" ;; --model) MODEL="$2" ;; --effort) EFFORT="$2" ;; --provider) PROV="$2" ;; *) CL="$2" ;; esac; shift 2 ;;
+    --model|--effort|--claude|--provider|--mode|--role) [ $# -ge 2 ] || { echo "$USAGE" >&2; exit 2; }
+      case "$1" in --mode) MODE="$2" ;; --model) MODEL="$2" ;; --effort) EFFORT="$2" ;; --provider) PROV="$2"; PSET=1 ;; --role) ROLE="$2" ;; *) CL="$2" ;; esac; shift 2 ;;
     --no-remote) REMOTE=0; shift ;;
     --force) FORCE=1; shift ;;
     --name) [ $# -ge 2 ] && [[ "$2" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "work: --name needs a name of A-Za-z0-9._- only" >&2; exit 2; }
@@ -47,7 +50,24 @@ while [ $# -gt 0 ]; do
   esac
 done
 [[ "$CL" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "work: bad claude command '$CL'" >&2; exit 2; }
-[ -z "$MODEL" ] || [[ "$MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
+# --role: one way to choose; the pick becomes --provider and --model, so every check below applies to it
+if [ -n "$ROLE" ]; then
+  [ -z "$MODEL" ] && [ "$PSET" = 0 ] || { echo "work: --role picks the provider and model; drop --model and --provider" >&2; exit 2; }
+  # role_pick's candidate_refusal (delegation), judged for this session: a focus go and plain claude on this install ($CL)
+  cs="$(role_candidates "$ROLE")" || exit 2   # unknown role or bad table: role_candidates said why
+  ROLE_PICK=""; ROLE_SKIPS=""
+  for c in $cs; do
+    why="$(AGENT_CLAUDE="$CL" candidate_refusal "$c")"; p="${c%%:*}"
+    [ -n "$why" ] || [ "$p" = anthropic ] || provider_feature_go "$p" focus || why="$(provider_no_go_reason "$p" focus)"
+    [ -n "$why" ] || { ROLE_PICK="$c"; break; }
+    ROLE_SKIPS="${ROLE_SKIPS}skipped $c: $why"$'\n'
+  done
+  [ -n "$ROLE_PICK" ] || { echo "work: no usable model for role $ROLE" >&2; printf '%s' "$ROLE_SKIPS" | sed 's/^/  /' >&2; exit 1; }
+  PROV="${ROLE_PICK%%:*}"; MODEL="${ROLE_PICK#*:}"
+fi
+# an Anthropic model may carry the 1M-context suffix, opus[1m] (role tables allow it); it is quoted for the launcher
+MRE='^[A-Za-z0-9._:/-]+$'; [ "$PROV" != anthropic ] || MRE='^[A-Za-z0-9._:/-]+(\[1m\])?$'
+[ -z "$MODEL" ] || [[ "$MODEL" =~ $MRE ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
 case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
 # subagents that name no model: an inherited CLAUDE_CODE_SUBAGENT_MODEL (ADE sets models) wins, else hub.conf, else sonnet.
 # Set in the launcher, never in settings (a settings env would replace ADE's). An explicit Agent or agent-file model still wins.
@@ -65,7 +85,7 @@ CWIN="${HUB_COMPACT_WINDOW:-200000}"; BMAX="${HUB_BASH_MAX_CHARS:-8000}"
 [ -n "$MODEL" ] || [ "$PROV" != anthropic ] || MODEL="${HUB_MODEL:-}"; [ -n "$EFFORT" ] || EFFORT="${HUB_EFFORT:-}"
 [ -n "$MODE" ] || MODE="${HUB_WORK_MODE:-auto}"
 case "$MODE" in auto|manual|acceptEdits|plan) ;; *) echo "work: mode must be auto|manual|acceptEdits|plan" >&2; exit 2 ;; esac
-[ -z "$MODEL" ] || [[ "$MODEL" =~ ^[A-Za-z0-9._:/-]+$ ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
+[ -z "$MODEL" ] || [[ "$MODEL" =~ $MRE ]] || { echo "work: bad model name '$MODEL'" >&2; exit 2; }
 case "$EFFORT" in ""|low|medium|high|xhigh|max) ;; *) echo "work: effort must be low|medium|high|xhigh|max" >&2; exit 2 ;; esac
 # the provider: allowed in hub.conf, permitted for this hub, plain claude, a go for each feature used, no resume, its own models
 [[ "$PROV" =~ ^[a-z0-9-]+$ ]] || { echo "work: bad provider name '$PROV'" >&2; exit 2; }
@@ -213,7 +233,7 @@ else
 fi
 [ -n "$agents" ] && cmd="$cmd --agents $(printf %q "$agents")"
 cmd="$cmd --permission-mode $MODE"
-[ -n "$MODEL" ] && cmd="$cmd --model $MODEL"
+[ -n "$MODEL" ] && cmd="$cmd --model $(printf %q "$MODEL")"
 [ -n "$EFFORT" ] && cmd="$cmd --effort $EFFORT"
 [ "$REMOTE" = 1 ] && cmd="$cmd --remote-control $(printf %q "${RNAME:-${F##*/}}")"
 [ -n "$PROMPT" ] && cmd="$cmd -- $(printf %q "$PROMPT")"
@@ -248,8 +268,8 @@ fi
 # the launcher registers the session in $(state_dir)/sessions/<name>.<launcher pid> while it runs (bin/sessions lists them);
 # parent = the Claude session that ran bin/work ($CLAUDE_PID), so an orchestrator can list its own children
 SD="$(state_dir)/sessions"
-reg=$(printf 'R=%q.$$\nmkdir -p %q && printf '"'"'name=%%s\\nfolder=%%s\\nlauncher=%%s\\nparent=%%s\\nstarted=%%s\\ncwd=%%s\\n'"'"' %q %q "$$" %q "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)" %q > "$R"' \
-  "$SD/${F##*/}" "$SD" "${F##*/}" "$F" "${CLAUDE_PID:--}" "$dir")
+reg=$(printf 'R=%q.$$\nmkdir -p %q && printf '"'"'name=%%s\\nfolder=%%s\\nlauncher=%%s\\nparent=%%s\\nstarted=%%s\\ncwd=%%s\\nrole=%%s\\n'"'"' %q %q "$$" %q "$(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ)" %q %q > "$R"' \
+  "$SD/${F##*/}" "$SD" "${F##*/}" "$F" "${CLAUDE_PID:--}" "$dir" "${ROLE:--}")
 # an Anthropic session's subagent default ($SUBM, checked above) is exported by the launcher, so a value its own shell has
 # still wins; a provider session never sets it (.ade/context/providers.md)
 sub=""; [ "$PROV" = anthropic ] && sub="export CLAUDE_CODE_SUBAGENT_MODEL=\"\${CLAUDE_CODE_SUBAGENT_MODEL:-$SUBM}\""$'\n'
