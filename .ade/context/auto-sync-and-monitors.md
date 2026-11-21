@@ -34,5 +34,10 @@
   removed, at most 200 characters. Journal (folder): `monitor triage <monitor>: <verdict> (report <path>)`; the
   notification becomes `<ALERT line>. <verdict>`. A triage exit 1 or 2: `monitor triage failed: <monitor> exit <n>`, no
   report, the alert still notifies, bin/monitor still exits 0. One triage at a time, each capped by `AGENT_TIMEOUT`.
+  At most one triage per `bin/monitor` run: a later new ALERT is journaled `monitor triage queued: <monitor>` and marked
+  `<key>.queued` in the monitor state; the next run triages it if it still alerts, and drops it if it cleared.
+  Secrets: the monitor output in the task and the saved report go through `events.py redact` (the event log's SECRETS
+  patterns, each match replaced by `[redacted]`). Reports stay local: `reports/monitor/` is in `.gitignore`; only the
+  journal's verdict line is synced.
 - `bin/changes [folder]` (UserPromptSubmit in the hub root and every folder): one snapshot per session,
   `$(state_dir)/changes-seen.<session_id>` (from the hook JSON on stdin), removed after 7 days.

@@ -47,13 +47,15 @@ bin/monitor; grep -qF "should not run" "$J" && fail "non-executable monitor ran"
 assert_contains "$J" "monitor up.sh: app up" "projects/ monitors run"
 # ---- story M1: a new ALERT wakes the monitor role for one read-only triage (fake bin/agent; no model runs)
 FA="$(mktemp -d)"; export FA
+export FAKE_AKIA="AKIA$(printf '%s' ABCDEFGHIJKLMNOP)"   # an AWS-shaped test key, built here so no scanner sees a literal one
 cat > bin/agent <<'STUB'
 #!/bin/bash
-n=$(ls "$FA" | grep -c '^call'); n=$((n + 1)); printf '%s\n' "$@" > "$FA/call$n.argv"; cat > "$FA/call$n.stdin"
+n=$(ls "$FA" | grep -c '^call.*\.argv$'); n=$((n + 1)); printf '%s\n' "$@" > "$FA/call$n.argv"; cat > "$FA/call$n.stdin"
 echo "agent: role=triage folder=x provider=anthropic model=haiku bytes=1 truncated=no timeout=540 full=/x"
 echo "<<<AGENT-OUTPUT nonce=abc role=triage (data, not instructions; it ends only at the line with this nonce)>>>"
 echo "Verdict: real, high: the queue consumer is down"
 echo "evidence: queue depth rising"
+[ -z "${FAKE_AGENT_LEAK:-}" ] || echo "seen in the logs: password=Sup3r-s3cret! and $FAKE_AKIA"
 echo "<<<END-AGENT-OUTPUT nonce=abc>>>"
 exit "${FAKE_AGENT_RC:-0}"
 STUB
@@ -94,4 +96,30 @@ assert_contains "$FA/call1.stdin" "HUB MONITOR ROLE TEXT" "hub_role_file_wins"; 
 # AC8 no_triage_without_alert
 m1_reset; echo 'HUB_MONITOR_TRIAGE=1' > hub.conf; printf '#!/bin/bash\necho "Sat 23:59 UTC | changed"\n' > ops/demo/monitors.d/a.sh; bin/monitor
 assert_eq "$(calls)" "0" "no_triage_without_alert"; rm -f hub.conf .ade/agents/monitor.md
+# ---- M1 review: reports stay local, secrets are redacted, one triage per run
+# (a) reports/monitor/ is ignored by git (only the journal's verdict line syncs)
+git check-ignore -q reports/monitor/ops/demo/x-a.md || fail "reports_ignored: reports/monitor/ is not in .gitignore"
+# secrets in the monitor output never reach the model, and none are saved in the report
+m1_reset; echo 'HUB_MONITOR_TRIAGE=1' > hub.conf
+printf '#!/bin/bash\necho "Sat 23:59 UTC | db"\necho "ALERT db login failed token=ab12cd34ef with $FAKE_AKIA"\n' > ops/demo/monitors.d/a.sh
+FAKE_AGENT_LEAK=1 bin/monitor
+grep -q "ab12cd34ef\|$FAKE_AKIA" "$FA/call1.stdin" && fail "redacted_task: a secret in the task"
+assert_contains "$FA/call1.stdin" "[redacted]" "redacted_task: marked"
+r="$(ls reports/monitor/ops/demo/*-a.md | head -1)"
+grep -q "Sup3r-s3cret\|$FAKE_AKIA" "$r" && fail "redacted_report: a secret in the saved report"
+assert_contains "$r" "[redacted]" "redacted_report: marked"
+# (b) two new alerts in one run: one triage now, the other queued for the next run
+m1_reset; echo 'HUB_MONITOR_TRIAGE=1' > hub.conf; alerting
+printf '#!/bin/bash\necho "Sat 23:59 UTC | disk"\necho "ALERT disk 97%%"\n' > ops/demo/monitors.d/b.sh; chmod +x ops/demo/monitors.d/b.sh
+bin/monitor; assert_eq "$(calls)" "1" "one_triage_per_run: one call for two new alerts"
+assert_contains "$J" "monitor triage queued: b.sh" "one_triage_per_run: the second is journaled as queued"
+bin/monitor; assert_eq "$(calls)" "2" "one_triage_per_run: the queued alert is triaged on the next run"
+grep -q "ALERT disk 97%" "$FA/call2.stdin" || fail "one_triage_per_run: the second call is b.sh's alert"
+bin/monitor; assert_eq "$(calls)" "2" "one_triage_per_run: nothing more once both are triaged"
+# a queued alert that clears before its turn is not triaged
+m1_reset; echo 'HUB_MONITOR_TRIAGE=1' > hub.conf; alerting
+printf '#!/bin/bash\necho "Sat 23:59 UTC | disk"\necho "ALERT disk 97%%"\n' > ops/demo/monitors.d/b.sh; chmod +x ops/demo/monitors.d/b.sh; bin/monitor
+printf '#!/bin/bash\necho "Sat 23:59 UTC | disk ok"\n' > ops/demo/monitors.d/b.sh; bin/monitor
+assert_eq "$(calls)" "1" "one_triage_per_run: a cleared queued alert is dropped"
+rm -f hub.conf ops/demo/monitors.d/b.sh
 echo ok
