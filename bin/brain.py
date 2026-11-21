@@ -2,7 +2,8 @@
 Ollama embedding model, ranked together. Files stay the source of truth; this index is rebuilt from them.
 
 Run through bin/brain, which passes the hub's settings as environment variables:
-  BRAIN_HUB, BRAIN_PATHS (extra dirs/files, space-separated), BRAIN_OLLAMA_URL, BRAIN_MODEL.
+  BRAIN_HUB, BRAIN_PATHS (extra dirs/files, space-separated), BRAIN_OLLAMA_URL, BRAIN_MODEL,
+  BRAIN_CHECKOUTS ("<folder>\t<checkout>" lines: only each checkout's .ade/context and .ade/knowledge Markdown, read-only).
 """
 import array
 import glob
@@ -22,6 +23,7 @@ MODEL = os.environ.get("BRAIN_MODEL", "nomic-embed-text")
 SKIP_DIRS = {".git", ".claude", "_bmad", "_bmad-output", "repos", "node_modules", ".local", "templates", "personas",
              "tests", "test", "launchd", "dist", "build", "runs", "vendor", "target"}
 EXTS = (".md", ".txt")
+PROJECT_DIRS = (".ade/context", ".ade/knowledge")   # the only parts of a code checkout the brain reads (story C4)
 MAX_CHUNK = 2000
 # A chunk that looks like it holds a secret is never indexed (gitleaks guards commits; this guards the index).
 SECRET = re.compile(r"AKIA[0-9A-Z]{16}|(?:secret|password|passwd|token|api[_-]?key)[\w-]*\s*[:=]\s*['\"]?[A-Za-z0-9/+_=-]{16,}"
@@ -69,6 +71,19 @@ def sources():
         for p in sorted(glob.glob(os.path.expanduser(pat))) if any(c in pat for c in "*?[") else [os.path.expanduser(pat)]:
             if os.path.exists(p):
                 walk(os.path.abspath(p), None)
+    for line in os.environ.get("BRAIN_CHECKOUTS", "").splitlines():
+        folder, _, repo = line.partition("\t")
+        if not repo:
+            continue
+        name = os.path.basename(repo.rstrip(os.sep))
+        for sub in PROJECT_DIRS:
+            # a missing or unreadable checkout yields nothing: os.walk skips what it cannot list
+            for d, dirs, files in os.walk(os.path.join(repo, sub)):
+                dirs.sort()
+                for f in sorted(files):
+                    if f.endswith(".md"):
+                        p = os.path.join(d, f)
+                        out[f"{folder}: {name}/{os.path.relpath(p, repo)}"] = p
     return out
 
 
@@ -141,8 +156,12 @@ def normalize(v):
 
 
 def file_hash(p):
-    with open(p, "rb") as f:
-        return hashlib.sha1(f.read()).hexdigest()
+    """sha1 of the file, or None when it cannot be read (it is then skipped, not indexed)."""
+    try:
+        with open(p, "rb") as f:
+            return hashlib.sha1(f.read()).hexdigest()
+    except OSError:
+        return None
 
 
 def cmd_index(args):
@@ -155,7 +174,7 @@ def cmd_index(args):
         drop(db, path)
     for path, real in src.items():
         h = file_hash(real)
-        if known.get(path) == h:
+        if h is None or known.get(path) == h:
             continue
         drop(db, path)
         with open(real, encoding="utf-8", errors="replace") as f:

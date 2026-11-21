@@ -56,3 +56,9 @@ hub-root sessions; `bin/doctor` names a shell account that lacks the link.
 
 `bin/monitor` (every 30 minutes) ends with an incremental `bin/brain index`, quietly, so search stays current between
 focus sessions; a failure never fails the monitor run.
+
+Project context (story C4, ADR 0004): `bin/brain index` also reads the Markdown under `.ade/context/` and
+`.ade/knowledge/` of every code checkout a folder's ACCESS.md lists (`repos_of` in `bin/lib.sh`), and nothing else in
+the checkout. It only opens those files for reading; a missing or unreadable checkout or file is skipped. Results are
+named `<folder>: <checkout dir name>/<path in checkout>`, e.g. `projects/demo: demo-code/.ade/context/decisions/0001-x.md`.
+`bin/brain` passes the checkouts to `bin/brain.py` as `BRAIN_CHECKOUTS`, one `<folder><TAB><checkout>` line each.
